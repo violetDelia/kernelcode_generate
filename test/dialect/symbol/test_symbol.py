@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects.arith import Arith, ConstantOp
-from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, IntegerAttr, IntegerType, StringAttr, bf16, f16, f32, f64, i1, i8, i16, i32, i64
+from xdsl.dialects.builtin import ArrayAttr, Builtin, FloatAttr, IndexType, IntAttr, IntegerAttr, IntegerType, StringAttr, bf16, f16, f32, f64, f80, f128, i1, i8, i16, i32, i64
 from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.folder import Folder
@@ -328,6 +328,28 @@ def test_symbol_const_op_verify_success() -> None:
     assert _print_attr(op.result.type) == '!symbol.int<#symbol.expr<3>>'
 
 
+def test_symbol_const_op_float_verify_success() -> None:
+    """验证 symbol.const 可创建 builtin 浮点常量且不新增 symbol 浮点类型。"""
+
+    f16_op = SymbolConstOp(0.5, f16)
+    direct_op = SymbolConstOp(1.5, f32)
+    attr_op = SymbolConstOp(FloatAttr(-2.25, f64))
+
+    f16_op.verify()
+    direct_op.verify()
+    attr_op.verify()
+
+    assert isinstance(f16_op.value, FloatAttr)
+    assert f16_op.value.value.data == 0.5
+    assert f16_op.result.type == f16
+    assert isinstance(direct_op.value, FloatAttr)
+    assert direct_op.value.value.data == 1.5
+    assert direct_op.result.type == f32
+    assert isinstance(attr_op.value, FloatAttr)
+    assert attr_op.value.value.data == -2.25
+    assert attr_op.result.type == f64
+
+
 # TC-SYM-050
 # 测试目的: 验证 symbol.const 的 parse/print round-trip 稳定。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol/
@@ -340,6 +362,9 @@ def test_symbol_const_op_round_trip() -> None:
 builtin.module {
   %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
   %c1 = symbol.const -4 : !symbol.int<#symbol.expr<-4>>
+  %fh = symbol.const 0.5 : f16
+  %f0 = symbol.const 1.5 : f32
+  %f1 = symbol.const -2.25 : f64
 }
 """,
     ).parse_module()
@@ -348,6 +373,9 @@ builtin.module {
     printed = _print_op(module)
     assert 'symbol.const 0 : !symbol.int<#symbol.expr<0>>' in printed
     assert 'symbol.const -4 : !symbol.int<#symbol.expr<-4>>' in printed
+    assert 'symbol.const 5.000000e-01 : f16' in printed
+    assert 'symbol.const 1.500000e+00 : f32' in printed
+    assert 'symbol.const -2.250000e+00 : f64' in printed
 
 
 # TC-SYM-052 / TC-SYM-053 / TC-SYM-054 / TC-SYM-055 / TC-SYM-056
@@ -593,8 +621,37 @@ def test_symbol_min_fold_full_tile_zero_to_symbol_multiple() -> None:
 def test_symbol_const_op_rejects_mismatched_type() -> None:
     with pytest.raises(KernelCodeError, match="result type must match value"):
         SymbolConstOp(3, SymbolValueType.from_expr("4")).verify()
-    with pytest.raises(VerifyException, match="base attribute symbol.int"):
+    with pytest.raises(VerifyException, match="Unexpected attribute i32"):
         SymbolConstOp(3, i32).verify()
+    with pytest.raises(KernelCodeError, match="float result type must be f16, f32, or f64"):
+        SymbolConstOp(FloatAttr(1.5, f32), SymbolValueType.from_expr("1")).verify()
+    with pytest.raises(KernelCodeError, match="integer result type must be !symbol.int"):
+        SymbolConstOp(1, f32).verify()
+    with pytest.raises(KernelCodeError, match="result type must match value"):
+        SymbolConstOp(FloatAttr(1.5, f32), f64).verify()
+
+
+def test_symbol_const_op_float_requires_explicit_type_for_python_float() -> None:
+    """验证 Python float 构造必须显式给出支持的 builtin 浮点结果类型。"""
+
+    with pytest.raises(TypeError, match="float value requires builtin float result_type"):
+        SymbolConstOp(1.5)
+
+
+@pytest.mark.parametrize(("type_name", "float_type"), [("bf16", bf16), ("f80", f80), ("f128", f128)])
+def test_symbol_const_op_rejects_unsupported_float_types(type_name: str, float_type: Attribute) -> None:
+    """验证 symbol.const 拒绝当前 printer 不支持的浮点类型。"""
+
+    with pytest.raises(TypeError, match="integer result_type must not be bf16, f80, or f128"):
+        SymbolConstOp(1, float_type)
+    with pytest.raises(TypeError, match="float result_type must be f16, f32, or f64"):
+        SymbolConstOp(1.5, float_type)
+    with pytest.raises(TypeError, match="FloatAttr type must be f16, f32, or f64"):
+        SymbolConstOp(FloatAttr(1.5, float_type))
+    with pytest.raises(ParseError, match="symbol.const integer result type must not be bf16, f80, or f128"):
+        Parser(_build_context(), f"builtin.module {{ %0 = symbol.const 1 : {type_name} }}").parse_module()
+    with pytest.raises(ParseError, match="symbol.const float result type must be f16, f32, or f64"):
+        Parser(_build_context(), f"builtin.module {{ %0 = symbol.const 1.5 : {type_name} }}").parse_module()
 
 
 # TC-SYM-051A

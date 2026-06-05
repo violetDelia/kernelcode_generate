@@ -18,7 +18,7 @@
 - `SymbolIterType.from_bounds(start: str, end: str, step: str) -> SymbolIterType`
 - `SymbolIterType.from_attr(attr: SymbolIterAttr) -> SymbolIterType`
 - `class SymbolPtrType(dtype: Attribute, template_name: StringAttr | str | None = None)`
-- `class SymbolConstOp(value: int | IntAttr, result_type: SymbolValueType | None = None)`
+- `class SymbolConstOp(value: int | float | IntAttr | FloatAttr, result_type: SymbolValueType | Float16Type | Float32Type | Float64Type | None = None)`
 - `class SymbolAddOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 - `class SymbolSubOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 - `class SymbolMulOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
@@ -90,7 +90,7 @@
 - 若目标维度或步幅条目为匿名动态值 `?`，结果类型必须为 `!symbol.int<#symbol.expr<?>>`，且 fold 必须保守返回 `None`；该语义只表示 unknown scalar symbol value，不恢复旧 bare `StringAttr("?")` memory shape/stride 入口。
 - `symbol.get_dim` / `symbol.get_stride` 的轴号当前必须是静态整数索引；越界、负数或非整数轴号必须报错。
 - 本方言定义 `?` 作为 unknown symbol value，仅表示当前 `!symbol.int` 的值语义无法稳定命名或静态确定；`?` 不是具名符号，不参与符号化简，也不得扩展为 memory shape/stride 的匿名动态条目。
-- 当前只定义整数语义，不区分 `int/int8/int16/int32/int64` 等具体整型宽度，也不定义 `index`、浮点或其他非整型 symbol 类型。
+- 当前 `!symbol.int<#symbol.expr<...>>` 只定义整数语义，不区分 `int/int8/int16/int32/int64` 等具体整型宽度，也不定义 `index`、浮点或其他非整型 symbol 类型；`symbol.const` 支持的浮点常量直接返回 `f16`、`f32` 或 `f64` builtin 浮点类型，不新增 `!symbol.float`。
 - `SymbolIterType` 只用于表达循环迭代变量语义；`symbol.for` 的 `start/end/step` 仍要求 `!symbol.int<#symbol.expr<expr>>`，`it` 则要求 `!symbol.iter<start = #symbol.expr<...>, end = #symbol.expr<...>, step = #symbol.expr<...>>`。
 - `symbol.for` 支持的循环承载值仅限一个 `!symbol.int<#symbol.expr<...>>` 累计值；该能力服务于成本函数一类“循环内累计、循环外返回”的 IR 表达，不扩展为通用多值控制流。
 - `symbol.ptr` 只定义 `!symbol.ptr<dtype>` 这一类最小 pointer type；它只承载 pointee dtype，不承载名字、地址值、shape、stride、offset 或 memory space。
@@ -102,7 +102,7 @@
 - 当前仅定义 `symbol.to_int` 与 `symbol.to_float` 两类转换：`symbol.to_int` 将 `!symbol.int<#symbol.expr<...>>` 转为普通整型（覆盖各整型变体），`symbol.to_float` 将 `!symbol.int<#symbol.expr<...>>` 转为 `f32`；不定义反向转换或其他跨类型规则。
 - `symbol.ne` / `symbol.lt` / `symbol.le` / `symbol.gt` 属于同一 compare family：统一采用二元 `!symbol.int<#symbol.expr<...>>, !symbol.int<#symbol.expr<...>> -> i1` 签名、统一 verifier 约束与统一 parse/print 规则，不能拆成互不一致的四套合同。
 - 当前不在 `symbol dialect` 中定义 `ptr.load`、`ptr.store`、pointer arithmetic、pointer compare、address cast 或任何基于 `symbol.ptr` 的 body-level 计算 op。
-- `symbol.const` 只用于生成整数常量的 `!symbol.int<#symbol.expr<...>>`，不承载其他类型或宽度。
+- `symbol.const` 可生成整数常量的 `!symbol.int<#symbol.expr<...>>`，也可生成 `f16`、`f32` 或 `f64` builtin 浮点常量；浮点路径不承载新的 symbol 浮点类型。
 
 ### 文本语法
 
@@ -259,31 +259,36 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 
 - 功能说明：
 
-- 定义整数常量进入 `symbol dialect` 的最小 op。
-- 以整数 attribute 记录常量值，并输出对应的 `!symbol.int<#symbol.expr<...>>` 结果类型。
+- 定义常量进入 `symbol dialect` 的最小 op。
+- 整数常量以整数 attribute 记录，并输出对应的 `!symbol.int<#symbol.expr<...>>` 结果类型。
+- 浮点常量以 builtin `FloatAttr` 记录，并输出与 value type 一致的 `f16`、`f32` 或 `f64` 结果类型；本能力不新增 `!symbol.float` 或新的 const op。
 
 - 参数：
 
-- `value(integer)`：整数常量。
-- `result_type(type)`：结果类型，必须为 `!symbol.int<#symbol.expr<...>>`。
+- `value(integer | float)`：整数或浮点常量。
+- `result_type(type)`：结果类型；整数常量必须为 `!symbol.int<#symbol.expr<...>>`，浮点常量必须为 `f16`、`f32` 或 `f64`。
 
 - 使用示例：
 
 ```text
 %one = symbol.const 1 : !symbol.int<#symbol.expr<1>>
 %neg = symbol.const -4 : !symbol.int<#symbol.expr<-4>>
+%half = symbol.const 5.000000e-01 : f16
+%scale = symbol.const 1.500000e+00 : f32
 ```
 
 - 注意事项：
 
-- `value` 必须是整数 attribute；不接受布尔值或浮点值。
-- 结果类型必须为 `!symbol.int<#symbol.expr<...>>`，且表达式内容必须与常量值一致。
-- parse/print 必须稳定遵循 `symbol.const <value> : !symbol.int<#symbol.expr<...>>` 的公开文本形式。
+- 整数 `value` 必须是非 bool 整数 attribute；不接受布尔值。
+- 整数结果类型必须为 `!symbol.int<#symbol.expr<...>>`，且表达式内容必须与常量值一致。
+- 浮点 `value` 必须是 builtin float attribute；结果类型必须是与 value attribute 类型一致的 `f16`、`f32` 或 `f64`。`bf16`、`f80` 与 `f128` 当前不属于 `symbol.const` 的 parse/print 支持范围，无论 value 是整数还是浮点，都必须被 parse 或公开构造拒绝。
+- 浮点常量不生成 `!symbol.int`，也不新增 `!symbol.float`；`symbol.const 1.5 : !symbol.int<#symbol.expr<1>>` 与 `symbol.const 1 : f32` 都必须被 verifier 拒绝。
+- parse/print 必须稳定遵循 `symbol.const <value> : <result-type>` 的公开文本形式。
 
 - 返回值：
 
-- 返回类型：`!symbol.int<#symbol.expr<value>>`
-- 限制：仅用于生成整数常量，不承载其他类型或宽度。
+- 返回类型：整数为 `!symbol.int<#symbol.expr<value>>`；浮点为 `f16`、`f32` 或 `f64`。
+- 限制：仅复用现有 `symbol.const` op 表达整数与 `f16/f32/f64` builtin 浮点常量，不新增其它类型、宽度 wrapper 或 op。
 
 ## API详细说明
 
@@ -491,23 +496,27 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 - 功能说明：构造或表示 `SymbolPtrType` 对应的 symbol dialect type。
 - 注意事项：`dtype` 必须是合法 xDSL type attribute；不得把 `!symbol.int` 用作 pointer pointee。
 
-### `class SymbolConstOp(value: int | IntAttr, result_type: SymbolValueType | None = None)`
+### `class SymbolConstOp(value: int | float | IntAttr | FloatAttr, result_type: SymbolValueType | Float16Type | Float32Type | Float64Type | None = None)`
 
-- api：`class SymbolConstOp(value: int | IntAttr, result_type: SymbolValueType | None = None)`
+- api：`class SymbolConstOp(value: int | float | IntAttr | FloatAttr, result_type: SymbolValueType | Float16Type | Float32Type | Float64Type | None = None)`
 - 参数：
-  - `value`：输入值；类型 `int | IntAttr`；无默认值；不允许 None；用于构造 `symbol.const` 的整数常量。
-  - `result_type`：结果类型；类型 `SymbolValueType | None`；默认值 `None`；为 `None` 时按 `value` 推导 `!symbol.int<#symbol.expr<...>>`。
+  - `value`：输入值；类型 `int | float | IntAttr | FloatAttr`；无默认值；不允许 None；用于构造 `symbol.const` 的整数或浮点常量。
+  - `result_type`：结果类型；类型 `SymbolValueType | Float16Type | Float32Type | Float64Type | None`；默认值 `None`；整数为 `None` 时按 `value` 推导 `!symbol.int<#symbol.expr<...>>`，`FloatAttr` 为 `None` 时复用自身 type，Python `float` 必须显式传入 `f16`、`f32` 或 `f64`。
 - 返回值：`SymbolConstOp` 实例。
 - 使用示例：
 
   ```python
+    from xdsl.dialects.builtin import FloatAttr, f16, f32, f64
     from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
 
     value = SymbolConstOp(3)
     typed = SymbolConstOp(3, SymbolValueType.from_expr("3"))
+    f16_value = SymbolConstOp(0.5, f16)
+    f32_value = SymbolConstOp(1.5, f32)
+    f64_value = SymbolConstOp(FloatAttr(1.5, f64))
     ```
 - 功能说明：构造或表示 `SymbolConstOp` 对应的 symbol dialect operation。
-- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。`bool`、`IntAttr(data=True/False)` 与 `IntegerAttr` 不是 `SymbolConstOp(...)` 的公开输入；需要 `i1` compare fold 时由 `SymbolConstantMaterializationInterface` 物化为 `arith.constant`，不经由 `symbol.const`。调用者不得把 `SymbolValueType.from_expr("?")` 作为 `symbol.const` 的直接结果类型；当 arithmetic fold 的目标 result type 是 `!symbol.int<#symbol.expr<?>>` 时，`materialize_constant(IntAttr(3), SymbolValueType.from_expr("?"))` 必须物化为确定的 `SymbolConstOp(3)` / `!symbol.int<#symbol.expr<3>>`。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。`bool`、`IntAttr(data=True/False)` 与 `IntegerAttr` 不是 `SymbolConstOp(...)` 的公开输入；需要 `i1` compare fold 时由 `SymbolConstantMaterializationInterface` 物化为 `arith.constant`，不经由 `symbol.const`。调用者不得把 `SymbolValueType.from_expr("?")` 作为整数 `symbol.const` 的直接结果类型；当 arithmetic fold 的目标 result type 是 `!symbol.int<#symbol.expr<?>>` 时，`materialize_constant(IntAttr(3), SymbolValueType.from_expr("?"))` 必须物化为确定的 `SymbolConstOp(3)` / `!symbol.int<#symbol.expr<3>>`。浮点常量必须使用 `f16`、`f32` 或 `f64` result type，且 `FloatAttr` 的 type 必须与 result type 一致；`bf16`、`f80` 与 `f128` 作为 result type 时必须被 parse 或公开构造拒绝，包括整数值形态 `SymbolConstOp(1, bf16/f80/f128)` 与 `symbol.const 1 : bf16/f80/f128`。本 API 不新增 `!symbol.float` 或新 op。
 
 ### `class SymbolAddOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 
@@ -940,11 +949,14 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 | TC-SYM-046 | 解析/打印 | `SymbolPtrType` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_ptr_type_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_ptr_type_round_trip` |
 | TC-SYM-047 | 边界/异常 | `SymbolPtrType` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_ptr_type_rejects_symbol_value_dtype`。 | “`SymbolPtrType`”场景按公开错误语义失败或被拒绝。 | `test_symbol_ptr_type_rejects_symbol_value_dtype` |
 | TC-SYM-048 | 边界/异常 | `SymbolPtrType` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_ptr_type_rejects_non_type_dtype`。 | “`SymbolPtrType`”场景按公开错误语义失败或被拒绝。 | `test_symbol_ptr_type_rejects_non_type_dtype` |
-| TC-SYM-049 | 符号语义 | `symbol.const` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_const_op_verify_success`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.const`”场景。 | `test_symbol_const_op_verify_success` |
-| TC-SYM-050 | 解析/打印 | `symbol.const` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_const_op_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_const_op_round_trip` |
-| TC-SYM-051 | 边界/异常 | `symbol.const` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_const_op_rejects_mismatched_type`。 | “`symbol.const`”场景按公开错误语义失败或被拒绝。 | `test_symbol_const_op_rejects_mismatched_type` |
-| TC-SYM-051A | 边界/异常 | `SymbolConstOp` 拒绝 `IntegerAttr` 输入 | 准备 `IntegerAttr(3, i32)`。 | 运行 `test_symbol_const_op_rejects_integer_attr_input`。 | `SymbolConstOp(...)` 公开构造只接受 `int | IntAttr`，`IntegerAttr` 被稳定拒绝。 | `test_symbol_const_op_rejects_integer_attr_input` |
+| TC-SYM-049 | 符号语义 | `symbol.const` 整数常量 | 准备 Python `int` 构造入口。 | 运行 `test_symbol_const_op_verify_success`。 | 整数常量生成匹配值的 `!symbol.int<#symbol.expr<...>>`。 | `test_symbol_const_op_verify_success` |
+| TC-SYM-049A | 符号语义 | `symbol.const` 浮点常量 | 准备 Python `float + f16/f32` 与 `FloatAttr + f64` 构造入口。 | 运行 `test_symbol_const_op_float_verify_success`。 | 浮点常量生成 `f16/f32/f64` result type，不新增 `!symbol.float`。 | `test_symbol_const_op_float_verify_success` |
+| TC-SYM-050 | 解析/打印 | `symbol.const` | 准备整数与浮点 `symbol.const <value> : <result-type>` 文本。 | 运行 `test_symbol_const_op_round_trip`。 | 整数和浮点 parse/print round-trip 稳定。 | `test_symbol_const_op_round_trip` |
+| TC-SYM-051 | 边界/异常 | `symbol.const` | 准备整数值 / 浮点值与错误 result type 的非法组合。 | 运行 `test_symbol_const_op_rejects_mismatched_type`。 | 整数必须匹配 `!symbol.int`，浮点必须匹配 `f16/f32/f64` result type。 | `test_symbol_const_op_rejects_mismatched_type` |
+| TC-SYM-051A | 边界/异常 | `SymbolConstOp` 拒绝 `IntegerAttr` 输入 | 准备 `IntegerAttr(3, i32)`。 | 运行 `test_symbol_const_op_rejects_integer_attr_input`。 | `SymbolConstOp(...)` 公开构造只接受 `int | float | IntAttr | FloatAttr`，`IntegerAttr` 被稳定拒绝。 | `test_symbol_const_op_rejects_integer_attr_input` |
 | TC-SYM-051B | 边界/异常 | `SymbolConstOp` 拒绝 bool 输入 | 准备 `True`、`False`、`IntAttr(data=True)` 与 `IntAttr(data=False)`。 | 运行 `test_symbol_const_op_rejects_boolean_inputs`。 | `SymbolConstOp(...)` 公开构造拒绝 bool 与 bool-backed `IntAttr`，不把布尔值误当作 `!symbol.int<#symbol.expr<1>>` 或 `!symbol.int<#symbol.expr<0>>`。 | `test_symbol_const_op_rejects_boolean_inputs` |
+| TC-SYM-051C | 边界/异常 | Python `float` 构造必须显式给出支持的 builtin float result type | 准备 `SymbolConstOp(1.5)`。 | 运行 `test_symbol_const_op_float_requires_explicit_type_for_python_float`。 | Python `float` 缺少 result type 时稳定拒绝，避免隐式新增默认浮点类型语义。 | `test_symbol_const_op_float_requires_explicit_type_for_python_float` |
+| TC-SYM-051D | 边界/异常 | `symbol.const` 拒绝当前 printer 不支持的浮点类型 | 准备 `int/float + bf16/f80/f128`、`FloatAttr + bf16/f80/f128`、`symbol.const 1 : bf16/f80/f128` 与 `symbol.const 1.5 : bf16/f80/f128`。 | 运行 `test_symbol_const_op_rejects_unsupported_float_types`。 | unsupported float type 在构造或 parse 阶段被拒绝，不进入会触发 printer `NotImplementedError` 的 round-trip 合同；整数值路径不得延后到 verify 才失败。 | `test_symbol_const_op_rejects_unsupported_float_types` |
 | TC-SYM-058 | 符号语义 | `SymbolValueType.get_value()/is_symbol()` 对常量、负数、`floordiv`、`ceildiv` 与 `mod` 的公开值语义 | 准备公开 `!symbol.int<#symbol.expr<...>>` 文本与构造入口。 | 运行 `test_symbol_value_type_public_expression_matrix`。 | 常量表达归一为整数，符号表达返回 canonical 文本，`is_symbol()` 与公开值语义一致。 | `test_symbol_value_type_public_expression_matrix` |
 | TC-SYM-059 | 解析/打印 | `SymbolIterType` 公开构造、字符串化和 legacy iter parser，且 legacy `symbol.dim` 文本不再注册 | 准备 iter bounds、legacy iter 文本与 legacy `!symbol.dim<...>` 文本。 | 运行 `test_symbol_iter_public_constructor_matrix_and_removed_dim_type`。 | iter 文本稳定，malformed iter 文本按公开错误语义失败，legacy `symbol.dim` 文本被 parser 拒绝。 | `test_symbol_iter_public_constructor_matrix_and_removed_dim_type` |
 | TC-SYM-060 | 边界/异常 | `symbol.add/div/floordiv` 公开 folding 拒绝除零、非整除与 result type 不匹配 | 准备公开 `Folder.try_fold(...)` 入口和 `symbol.const` 操作数。 | 运行 `test_symbol_binary_arith_fold_public_rejection_matrix`。 | 除零、非整除和 result type 不匹配均不发生错误折叠。 | `test_symbol_binary_arith_fold_public_rejection_matrix` |

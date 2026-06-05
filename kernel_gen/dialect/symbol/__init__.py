@@ -7,7 +7,7 @@ API 列表:
 - `Symbol`
 - `class SymbolAddOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 - `class SymbolCastOp(source: SSAValue | Operation, result_type: Attribute = i32)`
-- `class SymbolConstOp(value: int | IntAttr, result_type: SymbolValueType | None = None)`
+- `class SymbolConstOp(value: int | float | IntAttr | FloatAttr, result_type: SymbolValueType | Float16Type | Float32Type | Float64Type | None = None)`
 - `class SymbolDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 - `class SymbolEqOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 - `class SymbolExprAttr(expr: StringAttr)`

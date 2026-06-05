@@ -4,7 +4,7 @@
 - 定义 symbol.const 与 constant materialization。
 
 API 列表:
-- `class SymbolConstOp(value: int | IntAttr, result_type: SymbolValueType | None = None)`
+- `class SymbolConstOp(value: int | float | IntAttr | FloatAttr, result_type: SymbolValueType | Float16Type | Float32Type | Float64Type | None = None)`
 
 使用示例:
 - `from kernel_gen.dialect.symbol.operation import ...`
@@ -25,7 +25,21 @@ from typing import ClassVar
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE, KernelCodeError
 from kernel_gen.core.contracts import raise_verify_error
 from xdsl.dialects import arith
-from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerAttr, IntegerType, StringAttr, f32, f64, i1, i32
+from xdsl.dialects.builtin import (
+    BFloat16Type,
+    Float16Type,
+    Float32Type,
+    Float64Type,
+    Float80Type,
+    Float128Type,
+    FloatAttr,
+    IntAttr,
+    IntegerAttr,
+    IntegerType,
+    StringAttr,
+    i1,
+    i32,
+)
 from xdsl.dialect_interfaces.constant_materialization import ConstantMaterializationInterface
 from xdsl.ir import Attribute, Block, Dialect, Operation, ParametrizedAttribute, Region, SSAValue, TypeAttribute
 from xdsl.irdl import (
@@ -927,31 +941,46 @@ _SYMBOL_EXPR = _SymbolExprOps()
 
 _UNKNOWN_SYMBOL_EXPR = "?"
 
+_SYMBOL_CONST_FLOAT_TYPE_CLASSES = (Float16Type, Float32Type, Float64Type)
+
+_SYMBOL_CONST_FLOAT_TYPE_NAMES = "f16, f32, or f64"
+
+_SYMBOL_CONST_UNSUPPORTED_FLOAT_TYPE_CLASSES = (BFloat16Type, Float80Type, Float128Type)
+
+_SYMBOL_CONST_UNSUPPORTED_FLOAT_TYPE_NAMES = "bf16, f80, or f128"
+
+_SYMBOL_CONST_INT_INPUT_ERROR = "SymbolConstOp value must be non-bool int or IntAttr with non-bool data"
+
+_SYMBOL_CONST_VALUE_INPUT_ERROR = "SymbolConstOp value must be non-bool int, float, IntAttr with non-bool data, or FloatAttr"
+
 @irdl_op_definition
 class SymbolConstOp(IRDLOperation):
-    """创建 symbol.int 常量。"""
+    """创建 symbol.const 常量。"""
 
     name = "symbol.const"
     traits = traits_def(Pure())
 
-    value = attr_def(IntAttr)
-    result = result_def(SymbolValueType)
+    value = attr_def(IntAttr | FloatAttr)
+    result = result_def(SymbolValueType | Float16Type | Float32Type | Float64Type)
 
     def __init__(
         self: "SymbolConstOp",
-        value: int | IntAttr,
-        result_type: SymbolValueType | None = None,
+        value: int | float | IntAttr | FloatAttr,
+        result_type: SymbolValueType | Float16Type | Float32Type | Float64Type | None = None,
     ) -> None:
         """初始化 symbol.const。
 
 
         功能说明:
-        - 记录整数常量 attribute，并生成对应的 `!symbol.int<#symbol.expr<...>>` 结果类型。
-        - 公开构造只接受 Python `int` 或 `IntAttr`；`IntegerAttr` 属于 arith/builtin 常量属性，不作为 `symbol.const` 输入。
+        - 记录整数或浮点常量 attribute，并生成对应的 `!symbol.int<#symbol.expr<...>>` 或 builtin float 结果类型。
+        - 公开构造接受 Python `int` / `float`、`IntAttr` 或 `FloatAttr`；`IntegerAttr` 属于 arith/builtin 常量属性，不作为 `symbol.const` 输入。
         - `bool` 与 `IntAttr(data=True/False)` 不是 symbol 整数常量输入；布尔比较 fold 由 `arith.constant i1` 承接。
+        - Python `float` 没有自带 xDSL 类型，调用方必须显式传入 `f16`、`f32` 或 `f64` result type；`FloatAttr` 可直接复用自身类型。
 
         使用示例:
         - SymbolConstOp(3)
+        - SymbolConstOp(1.5, f32)
+        - SymbolConstOp(FloatAttr(1.5, f64))
 
         关联文件:
         - spec: spec/dialect/symbol.md
@@ -961,15 +990,32 @@ class SymbolConstOp(IRDLOperation):
 
         if isinstance(value, IntAttr):
             if isinstance(value.data, bool):
-                raise TypeError("SymbolConstOp value must be non-bool int or IntAttr with non-bool data")
+                raise TypeError(_SYMBOL_CONST_INT_INPUT_ERROR)
             value_attr = value
         elif isinstance(value, int):
             if isinstance(value, bool):
-                raise TypeError("SymbolConstOp value must be non-bool int or IntAttr with non-bool data")
+                raise TypeError(_SYMBOL_CONST_INT_INPUT_ERROR)
             value_attr = IntAttr(value)
+        elif isinstance(value, FloatAttr):
+            if not isinstance(value.type, _SYMBOL_CONST_FLOAT_TYPE_CLASSES):
+                raise TypeError(f"SymbolConstOp FloatAttr type must be {_SYMBOL_CONST_FLOAT_TYPE_NAMES}")
+            value_attr = value
+        elif isinstance(value, float):
+            if result_type is None:
+                raise TypeError("SymbolConstOp float value requires builtin float result_type")
+            if not isinstance(result_type, _SYMBOL_CONST_FLOAT_TYPE_CLASSES):
+                raise TypeError(f"SymbolConstOp float result_type must be {_SYMBOL_CONST_FLOAT_TYPE_NAMES}")
+            value_attr = FloatAttr(value, result_type)
+        elif isinstance(value, IntegerAttr):
+            raise TypeError(_SYMBOL_CONST_INT_INPUT_ERROR)
         else:
-            raise TypeError("SymbolConstOp value must be non-bool int or IntAttr with non-bool data")
-        inferred_type = result_type or SymbolValueType.from_expr(str(value_attr.data))
+            raise TypeError(_SYMBOL_CONST_VALUE_INPUT_ERROR)
+        if isinstance(value_attr, IntAttr) and isinstance(result_type, _SYMBOL_CONST_UNSUPPORTED_FLOAT_TYPE_CLASSES):
+            raise TypeError(f"SymbolConstOp integer result_type must not be {_SYMBOL_CONST_UNSUPPORTED_FLOAT_TYPE_NAMES}")
+        if result_type is None:
+            inferred_type = SymbolValueType.from_expr(str(value_attr.data)) if isinstance(value_attr, IntAttr) else value_attr.type
+        else:
+            inferred_type = result_type
         super().__init__(result_types=[inferred_type], attributes={"value": value_attr})
 
     def verify_(self: "SymbolConstOp") -> None:
@@ -977,11 +1023,13 @@ class SymbolConstOp(IRDLOperation):
 
 
         功能说明:
-        - 校验 value 必须为整型 attribute。
-        - 校验 result 必须是 `!symbol.int<#symbol.expr<...>>`，且表达式与常量值一致。
+        - 校验 value 必须为整型或浮点 attribute。
+        - 整数常量结果必须是 `!symbol.int<#symbol.expr<...>>`，且表达式与常量值一致。
+        - 浮点常量结果必须是与 `FloatAttr` 类型一致的 `f16`、`f32` 或 `f64`。
 
         使用示例:
         - SymbolConstOp(3).verify_()
+        - SymbolConstOp(1.5, f32).verify_()
 
         关联文件:
         - spec: spec/dialect/symbol.md
@@ -989,13 +1037,23 @@ class SymbolConstOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/symbol/
         """
 
-        if not isinstance(self.value, IntAttr):
-            raise_verify_error(_ERROR_SCENE, f"{self.name} value must be integer attribute")
-        if not isinstance(self.result.type, SymbolValueType):
-            raise_verify_error(_ERROR_SCENE, f"{self.name} result type must be !symbol.int<#symbol.expr<expr>>")
-        expected_expr = _SYMBOL_EXPR.normalize(str(self.value.data))
-        actual_expr = _SYMBOL_EXPR.normalize(self.result.type.expr.expr.data)
-        if actual_expr != expected_expr:
+        if isinstance(self.value, IntAttr):
+            if isinstance(self.value.data, bool):
+                raise_verify_error(_ERROR_SCENE, f"{self.name} value must be non-bool integer or float attribute")
+            if not isinstance(self.result.type, SymbolValueType):
+                raise_verify_error(_ERROR_SCENE, f"{self.name} integer result type must be !symbol.int<#symbol.expr<expr>>")
+            expected_expr = _SYMBOL_EXPR.normalize(str(self.value.data))
+            actual_expr = _SYMBOL_EXPR.normalize(self.result.type.expr.expr.data)
+            if actual_expr != expected_expr:
+                raise_verify_error(_ERROR_SCENE, f"{self.name} result type must match value")
+            return
+        if not isinstance(self.value, FloatAttr):
+            raise_verify_error(_ERROR_SCENE, f"{self.name} value must be integer or float attribute")
+        if not isinstance(self.value.type, _SYMBOL_CONST_FLOAT_TYPE_CLASSES):
+            raise_verify_error(_ERROR_SCENE, f"{self.name} float value type must be {_SYMBOL_CONST_FLOAT_TYPE_NAMES}")
+        if not isinstance(self.result.type, _SYMBOL_CONST_FLOAT_TYPE_CLASSES):
+            raise_verify_error(_ERROR_SCENE, f"{self.name} float result type must be {_SYMBOL_CONST_FLOAT_TYPE_NAMES}")
+        if self.result.type != self.value.type:
             raise_verify_error(_ERROR_SCENE, f"{self.name} result type must match value")
 
     def print(self: "SymbolConstOp", printer: Printer) -> None:
@@ -1003,10 +1061,12 @@ class SymbolConstOp(IRDLOperation):
 
 
         功能说明:
-        - 输出 `symbol.const <value> : !symbol.int<#symbol.expr<...>>` 的文本形式。
+        - 输出 `symbol.const <value> : <result-type>` 的文本形式。
+        - 整数结果使用 `!symbol.int<#symbol.expr<...>>`；浮点结果使用 `f16`、`f32` 或 `f64`。
 
         使用示例:
         - SymbolConstOp(3)
+        - SymbolConstOp(1.5, f32)
 
         关联文件:
         - spec: spec/dialect/symbol.md
@@ -1015,7 +1075,10 @@ class SymbolConstOp(IRDLOperation):
         """
 
         printer.print_string(" ")
-        printer.print_string(str(self.value.data))
+        if isinstance(self.value, IntAttr):
+            printer.print_string(str(self.value.data))
+        else:
+            printer.print_float(self.value.value.data, self.value.type)
         printer.print_string(" : ")
         printer.print_attribute(self.result.type)
 
@@ -1025,7 +1088,7 @@ class SymbolConstOp(IRDLOperation):
 
 
         功能说明:
-        - 解析整数常量与 `!symbol.int<#symbol.expr<...>>` 结果类型。
+        - 解析数字常量与 `!symbol.int<#symbol.expr<...>>` 或支持的 builtin float 结果类型。
 
         使用示例:
         - SymbolConstOp.parse(parser)
@@ -1036,9 +1099,13 @@ class SymbolConstOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/symbol/
         """
 
-        value = parser.parse_integer(allow_boolean=False, allow_negative=True, context_msg=f" in {cls.name}")
+        value = parser.parse_number(allow_boolean=False, context_msg=f" in {cls.name}")
         parser.parse_characters(":", f" in {cls.name}")
         result_type = parser.parse_type()
+        if isinstance(value, int) and isinstance(result_type, _SYMBOL_CONST_UNSUPPORTED_FLOAT_TYPE_CLASSES):
+            parser.raise_error(f"{cls.name} integer result type must not be {_SYMBOL_CONST_UNSUPPORTED_FLOAT_TYPE_NAMES}")
+        if isinstance(value, float) and not isinstance(result_type, _SYMBOL_CONST_FLOAT_TYPE_CLASSES):
+            parser.raise_error(f"{cls.name} float result type must be {_SYMBOL_CONST_FLOAT_TYPE_NAMES}")
         return cls(value, result_type)
 
 class SymbolConstantMaterializationInterface(ConstantMaterializationInterface):
