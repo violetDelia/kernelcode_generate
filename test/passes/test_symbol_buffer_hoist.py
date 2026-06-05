@@ -60,6 +60,7 @@ from kernel_gen.dialect.symbol import (
     SymbolValueType,
     SymbolYieldOp,
 )
+from kernel_gen.tools.ircheck import run_ircheck_text
 
 pass_module = importlib.import_module("kernel_gen.passes.hoist.symbol_buffer_hoist")
 package_module = importlib.import_module("kernel_gen.passes")
@@ -2491,3 +2492,48 @@ def test_build_registered_symbol_buffer_hoist_pass() -> None:
     assert pass_obj.name == "symbol-buffer-hoist"
     assert type(pass_obj).__name__ == "SymbolBufferHoistPass"
     assert pass_obj.__class__.__module__ == "kernel_gen.passes.hoist.symbol_buffer_hoist"
+
+
+# TC-MPLAN-002G
+# 功能说明: 验证 memory-plan auto-pad 后接 symbol-buffer-hoist 时 padded backing 外提且 matmul 使用 logical alias。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_after_memory_plan_auto_pad_keeps_logical_matmul
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_after_memory_plan_auto_pad_keeps_logical_matmul() -> None:
+    result = run_ircheck_text(
+        """// COMPILE_ARGS: --pass "memory-plan={auto-pad=true,insert-free=true,fold=false}" --pass "symbol-buffer-hoist={fold=false}"
+// CHECK: func.func @auto_pad_hoist_matmul_out
+// CHECK: %[[BACKING:{reg}]] = "dma.alloc"(%[[TILE_M:{reg}]], %[[N:{reg}]])
+// CHECK: symbol.for
+// CHECK: %[[LOGICAL:{reg}]] = "dma.reinterpret"(%[[BACKING]]
+// CHECK: "kernel.matmul"(%[[LOGICAL]], %[[LHS:{reg}]], %[[RHS:{reg}]])
+// CHECK-NOT: "kernel.matmul"(%[[BACKING]], %[[LHS]], %[[RHS]])
+
+builtin.module {
+  func.func @auto_pad_hoist_matmul_out(
+    %start : !symbol.int<#symbol.expr<START>>,
+    %m : !symbol.int<#symbol.expr<M>>,
+    %tile_m : !symbol.int<#symbol.expr<TILE_M>>,
+    %k : !symbol.int<#symbol.expr<K>>,
+    %n : !symbol.int<#symbol.expr<N>>,
+    %lhs : !nn.memory<[#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>, #symbol.expr<K>], [#symbol.expr<K>, #symbol.expr<1>], i32, #nn.space<tsm>>,
+    %rhs : !nn.memory<[#symbol.expr<K>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], i32, #nn.space<tsm>>
+  ) {
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    symbol.for %i = %start to %m step %tile_m {iter = #symbol.iter<start = #symbol.expr<START>, end = #symbol.expr<M>, step = #symbol.expr<TILE_M>>} {
+      %rem_m = symbol.sub %m, %i : !symbol.int<#symbol.expr<M>>, !symbol.iter<start = #symbol.expr<START>, end = #symbol.expr<M>, step = #symbol.expr<TILE_M>> -> !symbol.int<#symbol.expr<M - iter<START,M,TILE_M>>>
+      %cur_m = symbol.min %tile_m, %rem_m : !symbol.int<#symbol.expr<TILE_M>>, !symbol.int<#symbol.expr<M - iter<START,M,TILE_M>>> -> !symbol.int<#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>>
+      %out = "dma.alloc"(%cur_m, %n) <{operandSegmentSizes = array<i32: 2>}> : (!symbol.int<#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>>, !symbol.int<#symbol.expr<N>>) -> !nn.memory<[#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      "kernel.matmul"(%out, %lhs, %rhs) {space = #nn.space<tsm>} : (!nn.memory<[#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>, #symbol.expr<K>], [#symbol.expr<K>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<K>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], i32, #nn.space<tsm>>) -> ()
+    }
+    func.return
+  }
+}
+""",
+        source_path="symbol_buffer_hoist_after_memory_plan_auto_pad.ircheck",
+    )
+
+    assert result.ok, result.message or result.actual_ir

@@ -35,7 +35,7 @@ API 列表:
 - `class DecompassPass()`
 - `class NnSoftmaxDecompPattern()`
 - `get_decompass_pass_patterns() -> list[RewritePattern]`
-- `class MemoryPlanPass(insert_free: bool = False, fold: bool = True, reuse: bool = False)`
+- `class MemoryPlanPass(insert_free: bool = False, fold: bool = True, reuse: bool = False, auto_pad: bool = False)`
 - `class MultiBufferPass(memory_stage: int = 3, fold: bool = True)`
 - `class OutlineDeviceKernelPass()`
 - `class DmaAllocInSymbolForHoistPattern()`
@@ -71,7 +71,7 @@ API 列表:
 - from kernel_gen.passes import AttachArchInformationPass
 - attach_pass = AttachArchInformationPass(target="npu_demo")
 - from kernel_gen.passes import MemoryPlanPass
-- memory_plan_pass = MemoryPlanPass(insert_free=True, reuse=True)
+- memory_plan_pass = MemoryPlanPass(insert_free=True, reuse=True, auto_pad=True)
 - from kernel_gen.passes import MultiBufferPass
 - multi_buffer_pass = MultiBufferPass(memory_stage=3)
 - from kernel_gen.passes import ArchParallelizePass

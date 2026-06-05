@@ -265,6 +265,209 @@ def test_memory_plan_inserts_free_for_dynamic_alloc() -> None:
     assert body_ops.index(free_ops[0]) == body_ops.index(broadcast) + 1
 
 
+# TC-MPLAN-002A
+# 功能说明: 验证 auto-pad 将 dynamic tail alloc 改写为 padded backing 与 logical alias。
+# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_auto_pad_rewrites_tail_alloc_to_logical_alias
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应测试文件路径: test/passes/test_memory_plan.py
+def test_memory_plan_auto_pad_rewrites_tail_alloc_to_logical_alias() -> None:
+    result = run_ircheck_text(
+        """// COMPILE_ARGS: --pass "memory-plan={auto-pad=true,fold=false}"
+// CHECK: %[[BACKING:{reg}]] = "dma.alloc"(%[[TILE_M:{reg}]], %[[TILE_K:{reg}]])
+// CHECK: %[[LOGICAL:{reg}]] = "dma.reinterpret"(%[[BACKING]]
+// CHECK: "dma.broadcast"(%[[LOGICAL]]
+// CHECK-NOT: "dma.free"
+
+builtin.module {
+  func.func @auto_pad_tail(
+    %tile_m : !symbol.int<#symbol.expr<TILE_M>>,
+    %tile_k : !symbol.int<#symbol.expr<TILE_K>>,
+    %cur_m : !symbol.int<#symbol.expr<min(TILE_M, M - iter<0,M,TILE_M>)>>,
+    %cur_k : !symbol.int<#symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>>
+  ) {
+    %scalar = arith.constant 1 : i32
+    %buf = "dma.alloc"(%cur_m, %cur_k) <{operandSegmentSizes = array<i32: 2>}> : (!symbol.int<#symbol.expr<min(TILE_M, M - iter<0,M,TILE_M>)>>, !symbol.int<#symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>>) -> !nn.memory<[#symbol.expr<min(TILE_M, M - iter<0,M,TILE_M>)>, #symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>], [#symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>, #symbol.expr<1>], i32, #nn.space<global>>
+    "dma.broadcast"(%buf, %scalar) : (!nn.memory<[#symbol.expr<min(TILE_M, M - iter<0,M,TILE_M>)>, #symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>], [#symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>, #symbol.expr<1>], i32, #nn.space<global>>, i32) -> ()
+    func.return
+  }
+}
+""",
+        source_path="memory_plan_auto_pad_tail.ircheck",
+    )
+
+    assert result.ok, result.message or result.actual_ir
+    assert '"dma.reinterpret"' in result.actual_ir
+    assert '"dma.free"' not in result.actual_ir
+
+
+# TC-MPLAN-002B
+# 功能说明: 验证 auto-pad 成功后已有 direct free 被重定向到 padded backing。
+# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_auto_pad_redirects_existing_free_to_backing
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应测试文件路径: test/passes/test_memory_plan.py
+def test_memory_plan_auto_pad_redirects_existing_free_to_backing() -> None:
+    result = run_ircheck_text(
+        """// COMPILE_ARGS: --pass "memory-plan={auto-pad=true,insert-free=true,fold=false}"
+// CHECK: %[[BACKING:{reg}]] = "dma.alloc"(%[[TILE_M:{reg}]], %[[TILE_K:{reg}]])
+// CHECK: %[[LOGICAL:{reg}]] = "dma.reinterpret"(%[[BACKING]]
+// CHECK: "dma.broadcast"(%[[LOGICAL]]
+// CHECK: "dma.free"(%[[BACKING]])
+// CHECK-NOT: "dma.free"(%[[LOGICAL]])
+
+builtin.module {
+  func.func @auto_pad_free_redirect(
+    %tile_m : !symbol.int<#symbol.expr<TILE_M>>,
+    %tile_k : !symbol.int<#symbol.expr<TILE_K>>,
+    %cur_m : !symbol.int<#symbol.expr<min(TILE_M, M - iter<0,M,TILE_M>)>>,
+    %cur_k : !symbol.int<#symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>>
+  ) {
+    %scalar = arith.constant 1 : i32
+    %buf = "dma.alloc"(%cur_m, %cur_k) <{operandSegmentSizes = array<i32: 2>}> : (!symbol.int<#symbol.expr<min(TILE_M, M - iter<0,M,TILE_M>)>>, !symbol.int<#symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>>) -> !nn.memory<[#symbol.expr<min(TILE_M, M - iter<0,M,TILE_M>)>, #symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>], [#symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>, #symbol.expr<1>], i32, #nn.space<global>>
+    "dma.broadcast"(%buf, %scalar) : (!nn.memory<[#symbol.expr<min(TILE_M, M - iter<0,M,TILE_M>)>, #symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>], [#symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>, #symbol.expr<1>], i32, #nn.space<global>>, i32) -> ()
+    "dma.free"(%buf) : (!nn.memory<[#symbol.expr<min(TILE_M, M - iter<0,M,TILE_M>)>, #symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>], [#symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>, #symbol.expr<1>], i32, #nn.space<global>>) -> ()
+    func.return
+  }
+}
+""",
+        source_path="memory_plan_auto_pad_free_redirect.ircheck",
+    )
+
+    assert result.ok, result.message or result.actual_ir
+    assert '"dma.free"' in result.actual_ir
+
+
+# TC-MPLAN-002C
+# 功能说明: 验证 auto-pad 对 unknown shape 无法证明上界时保守 no-op。
+# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_auto_pad_keeps_unknown_shape_noop
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应测试文件路径: test/passes/test_memory_plan.py
+def test_memory_plan_auto_pad_keeps_unknown_shape_noop() -> None:
+    result = run_ircheck_text(
+        """// COMPILE_ARGS: --pass "memory-plan={auto-pad=true,fold=false}"
+// CHECK: %[[BUF:{reg}]] = "dma.alloc"(%[[UNKNOWN:{reg}]], %[[CUR_K:{reg}]])
+// CHECK: "dma.broadcast"(%[[BUF]]
+// CHECK-NOT: "dma.reinterpret"
+
+builtin.module {
+  func.func @auto_pad_unknown(
+    %unknown : !symbol.int<#symbol.expr<?>>,
+    %tile_k : !symbol.int<#symbol.expr<TILE_K>>,
+    %cur_k : !symbol.int<#symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>>
+  ) {
+    %scalar = arith.constant 1 : i32
+    %buf = "dma.alloc"(%unknown, %cur_k) <{operandSegmentSizes = array<i32: 2>}> : (!symbol.int<#symbol.expr<?>>, !symbol.int<#symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>>) -> !nn.memory<[#symbol.expr<?> , #symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>], [#symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>, #symbol.expr<1>], i32, #nn.space<global>>
+    "dma.broadcast"(%buf, %scalar) : (!nn.memory<[#symbol.expr<?> , #symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>], [#symbol.expr<min(TILE_K, K - iter<0,K,TILE_K>)>, #symbol.expr<1>], i32, #nn.space<global>>, i32) -> ()
+    func.return
+  }
+}
+""",
+        source_path="memory_plan_auto_pad_unknown.ircheck",
+    )
+
+    assert result.ok, result.message or result.actual_ir
+    assert '"dma.reinterpret"' not in result.actual_ir
+
+
+# TC-MPLAN-002D
+# 功能说明: 验证 auto-pad 支持 START 非 0 的 tail 上界推导。
+# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_auto_pad_supports_nonzero_start_tail
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应测试文件路径: test/passes/test_memory_plan.py
+def test_memory_plan_auto_pad_supports_nonzero_start_tail() -> None:
+    result = run_ircheck_text(
+        """// COMPILE_ARGS: --pass "memory-plan={auto-pad=true,fold=false}"
+// CHECK: %[[BACKING:{reg}]] = "dma.alloc"(%[[TILE_M:{reg}]], %[[TILE_K:{reg}]])
+// CHECK: %[[LOGICAL:{reg}]] = "dma.reinterpret"(%[[BACKING]]
+// CHECK: "dma.broadcast"(%[[LOGICAL]]
+
+builtin.module {
+  func.func @auto_pad_nonzero_start(
+    %tile_m : !symbol.int<#symbol.expr<TILE_M>>,
+    %tile_k : !symbol.int<#symbol.expr<TILE_K>>,
+    %cur_m : !symbol.int<#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>>,
+    %cur_k : !symbol.int<#symbol.expr<min(TILE_K, K - iter<START,K,TILE_K>)>>
+  ) {
+    %scalar = arith.constant 1 : i32
+    %buf = "dma.alloc"(%cur_m, %cur_k) <{operandSegmentSizes = array<i32: 2>}> : (!symbol.int<#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>>, !symbol.int<#symbol.expr<min(TILE_K, K - iter<START,K,TILE_K>)>>) -> !nn.memory<[#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>, #symbol.expr<min(TILE_K, K - iter<START,K,TILE_K>)>], [#symbol.expr<min(TILE_K, K - iter<START,K,TILE_K>)>, #symbol.expr<1>], i32, #nn.space<global>>
+    "dma.broadcast"(%buf, %scalar) : (!nn.memory<[#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>, #symbol.expr<min(TILE_K, K - iter<START,K,TILE_K>)>], [#symbol.expr<min(TILE_K, K - iter<START,K,TILE_K>)>, #symbol.expr<1>], i32, #nn.space<global>>, i32) -> ()
+    func.return
+  }
+}
+""",
+        source_path="memory_plan_auto_pad_nonzero_start.ircheck",
+    )
+
+    assert result.ok, result.message or result.actual_ir
+
+
+# TC-MPLAN-002E
+# 功能说明: 验证 auto-pad 支持 `K * min(T, tail)` 乘积上界推导。
+# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_auto_pad_supports_product_tail_upper_bound
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应测试文件路径: test/passes/test_memory_plan.py
+def test_memory_plan_auto_pad_supports_product_tail_upper_bound() -> None:
+    result = run_ircheck_text(
+        """// COMPILE_ARGS: --pass "memory-plan={auto-pad=true,fold=false}"
+// CHECK: %[[BACKING:{reg}]] = "dma.alloc"(%[[KT:{reg}]])
+// CHECK: !nn.memory<[#symbol.expr<K*TILE_M>], [#symbol.expr<1>], i32, #nn.space<global>>
+// CHECK: %[[LOGICAL:{reg}]] = "dma.reinterpret"(%[[BACKING]]
+// CHECK: "dma.broadcast"(%[[LOGICAL]]
+
+builtin.module {
+  func.func @auto_pad_product_tail(
+    %kt : !symbol.int<#symbol.expr<K*TILE_M>>,
+    %cur : !symbol.int<#symbol.expr<K*min(TILE_M, M - iter<START,M,TILE_M>)>>
+  ) {
+    %scalar = arith.constant 1 : i32
+    %buf = "dma.alloc"(%cur) <{operandSegmentSizes = array<i32: 1>}> : (!symbol.int<#symbol.expr<K*min(TILE_M, M - iter<START,M,TILE_M>)>>) -> !nn.memory<[#symbol.expr<K*min(TILE_M, M - iter<START,M,TILE_M>)>], [#symbol.expr<1>], i32, #nn.space<global>>
+    "dma.broadcast"(%buf, %scalar) : (!nn.memory<[#symbol.expr<K*min(TILE_M, M - iter<START,M,TILE_M>)>], [#symbol.expr<1>], i32, #nn.space<global>>, i32) -> ()
+    func.return
+  }
+}
+""",
+        source_path="memory_plan_auto_pad_product_tail.ircheck",
+    )
+
+    assert result.ok, result.message or result.actual_ir
+
+
+# TC-MPLAN-002F
+# 功能说明: 验证 auto-pad 支持 `min(A, B)` 通用上界推导。
+# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_auto_pad_supports_min_symbol_upper_bound
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应测试文件路径: test/passes/test_memory_plan.py
+def test_memory_plan_auto_pad_supports_min_symbol_upper_bound() -> None:
+    result = run_ircheck_text(
+        """// COMPILE_ARGS: --pass "memory-plan={auto-pad=true,fold=false}"
+// CHECK: %[[BACKING:{reg}]] = "dma.alloc"(%[[A:{reg}]])
+// CHECK: !nn.memory<[#symbol.expr<A>], [#symbol.expr<1>], i32, #nn.space<global>>
+// CHECK: %[[LOGICAL:{reg}]] = "dma.reinterpret"(%[[BACKING]]
+// CHECK: "dma.broadcast"(%[[LOGICAL]]
+
+builtin.module {
+  func.func @auto_pad_min_symbol(
+    %a : !symbol.int<#symbol.expr<A>>,
+    %cur : !symbol.int<#symbol.expr<min(A, B)>>
+  ) {
+    %scalar = arith.constant 1 : i32
+    %buf = "dma.alloc"(%cur) <{operandSegmentSizes = array<i32: 1>}> : (!symbol.int<#symbol.expr<min(A, B)>>) -> !nn.memory<[#symbol.expr<min(A, B)>], [#symbol.expr<1>], i32, #nn.space<global>>
+    "dma.broadcast"(%buf, %scalar) : (!nn.memory<[#symbol.expr<min(A, B)>], [#symbol.expr<1>], i32, #nn.space<global>>, i32) -> ()
+    func.return
+  }
+}
+""",
+        source_path="memory_plan_auto_pad_min_symbol.ircheck",
+    )
+
+    assert result.ok, result.message or result.actual_ir
+
+
 # TC-MPLAN-003
 # 功能说明: 验证已有合法 free 时 pass 不重复插入。
 # 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_keeps_existing_free_noop

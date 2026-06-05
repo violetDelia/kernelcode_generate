@@ -82,7 +82,7 @@
 - `LowerDmaMemoryHierarchyPass`、`MemoryPoolPass` 与 `MemoryPlanPass` 的调用方不得再把 lowering compat 路径当作主入口；若需要添加这些 pass，应从 canonical public path 导入后再交给 `PassManager`。
 - `MemoryPoolPass` 的 `rewrite` 与 `alignment` 由 `MemoryPoolPass(...)` 或 registry/ircheck 构造入口决定；`PassManager` 只负责按 pass 对象现有配置执行和处理通用 `fold` sweep，不解析 `memory-pool` 专属 option。
 - `MemoryPlanPass` 的 `insert_free/reuse` 由 `MemoryPlanPass(...)` 或 registry/ircheck 构造入口决定；`PassManager` 不解析 `memory-plan` 专属 option。
-- `npu-demo-lowering` 中三次 `MemoryPlanPass(insert_free=True, reuse=True, fold=False)`、三次 `SymbolHoistPipelinePass` 与 `MemoryPoolPass(rewrite=True, alignment=1024)` 的相对顺序由 [`spec/pass/pipeline/npu_demo_lowering.md`](../../spec/pass/pipeline/npu_demo_lowering.md) 固定；`PassManager` 不额外检查或推导这些业务顺序。
+- `npu-demo-lowering` 中三次 `MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=False)`、三次 `SymbolHoistPipelinePass` 与 `MemoryPoolPass(rewrite=True, alignment=1024)` 的相对顺序由 [`spec/pass/pipeline/npu_demo_lowering.md`](../../spec/pass/pipeline/npu_demo_lowering.md) 固定；`PassManager` 不额外检查或推导这些业务顺序。
 - 以下旧兼容入口在当前基线中必须稳定失败：
   - `kernel_gen.passes.pass_manager.build_default_lowering_pass_manager`
   - `kernel_gen.passes.pipeline`

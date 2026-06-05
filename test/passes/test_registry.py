@@ -1094,12 +1094,16 @@ def test_build_registered_memory_plan_insert_free_options() -> None:
     load_builtin_passes()
     memory_plan_module = importlib.import_module("kernel_gen.passes.memory_plan")
 
-    pass_obj = build_registered_pass("memory-plan", {"insert-free": "true", "reuse": "on", "fold": "false"})
+    pass_obj = build_registered_pass(
+        "memory-plan",
+        {"insert-free": "true", "reuse": "on", "auto-pad": "yes", "fold": "false"},
+    )
 
     assert isinstance(pass_obj, memory_plan_module.MemoryPlanPass)
     assert pass_obj.name == "memory-plan"
     assert pass_obj.insert_free is True
     assert pass_obj.reuse is True
+    assert pass_obj.auto_pad is True
     assert pass_obj.fold is False
 
 
@@ -1119,6 +1123,8 @@ def test_build_registered_memory_plan_rejects_invalid_options() -> None:
         memory_plan_module.MemoryPlanPass.from_options({"insert-free": "maybe"})
     with pytest.raises(KernelCodeError, match=r"^MemoryPlanOptionError: reuse expects bool$"):
         memory_plan_module.MemoryPlanPass.from_options({"reuse": "maybe"})
+    with pytest.raises(KernelCodeError, match=r"^MemoryPlanOptionError: auto-pad expects bool$"):
+        memory_plan_module.MemoryPlanPass.from_options({"auto-pad": "maybe"})
     with pytest.raises(
         KernelCodeError,
         match=r"^PassRegistryError: pass 'memory-plan' option error: MemoryPlanOptionError: unknown option 'unknown'$",
@@ -1134,6 +1140,11 @@ def test_build_registered_memory_plan_rejects_invalid_options() -> None:
         match=r"^PassRegistryError: pass 'memory-plan' option error: MemoryPlanOptionError: reuse expects bool$",
     ):
         build_registered_pass("memory-plan", {"reuse": "maybe"})
+    with pytest.raises(
+        KernelCodeError,
+        match=r"^PassRegistryError: pass 'memory-plan' option error: MemoryPlanOptionError: auto-pad expects bool$",
+    ):
+        build_registered_pass("memory-plan", {"auto-pad": "maybe"})
 
 
 # TC-REGISTRY-007H7

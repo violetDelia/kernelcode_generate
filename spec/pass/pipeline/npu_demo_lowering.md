@@ -48,7 +48,7 @@
 - `canonicalize`：xDSL 内置 canonicalization 阶段；只在本 pipeline 内直接实例化 `CanonicalizePass`，不得新增仓库 registry pass 名称；本 pipeline 中共运行六次。
 - `lower-nn`：`NnLoweringPass` 的公开 pass 名称。
 - `symbol-hoist-pipeline`：`SymbolHoistPipelinePass` 的公开 pass 名称；本 pipeline 中运行三次，内部固定先执行 `dma-alias-to-reinterpret`，再按 `symbol-loop-hoist -> symbol-buffer-hoist -> hoist-dma-alias-ops` 顺序收口 alias、loop-invariant symbol 与 buffer 生命周期。
-- `memory-plan`：`MemoryPlanPass` 的公开 pass 名称；本 pipeline 中固定为 `insert_free=True, reuse=True, fold=False`，执行三次，均位于对应 `symbol-hoist-pipeline` 之前，用于补齐 `dma.free` 生命周期并做保守同 owner block 复用。
+- `memory-plan`：`MemoryPlanPass` 的公开 pass 名称；本 pipeline 中固定为 `insert_free=True, reuse=True, fold=False, auto_pad=False`，执行三次，均位于对应 `symbol-hoist-pipeline` 之前，用于补齐 `dma.free` 生命周期并做保守同 owner block 复用。
 - `arch-parallelize`：`ArchParallelizePass` 的公开 pass 名称；本 pipeline 中位于 memory-pool 后的 `canonicalize` 之后、late `attach-arch-information` 之前，固定 `target=<pipeline target>` 与 `parallel_level="block"`；该阶段跳过带 `entry_point` 属性的 host dispatcher，pattern/device 函数继续按 block 级规则分发。
 - `producer-consumer-analysis`：`ProducerConsumerAnalysisPass` 的公开 pass 名称；本 pipeline 中位于第三段 `symbol-hoist-pipeline -> cse -> canonicalize` 之后、`memory-pool` 之前，只写普通或控制流分类分析 attr，不生成同步 op，并保留 typed `dma.alloc` 形态供分析读取。
 - `kernel-aggregate`：`KernelAggregatePass` 的公开 pass 名称；本 pipeline 中位于第二段 `symbol-hoist-pipeline -> cse -> canonicalize` 后，固定 `matmul_acc=True`。
@@ -69,7 +69,7 @@
 - 明确 `symbol-hoist-pipeline` 在无 `symbol.for` 与无 alias op 时可以 no-op，因此可安全加入该最小 pipeline。
 - 明确 `symbol-hoist-pipeline` 紧跟 `lower-nn`，并在同一个 pass 内先完成 lower-nn alias 归一化，再运行 symbol / dma alias hoist pattern。
 - 明确 `CommonSubexpressionElimination` 后必须紧跟 `CanonicalizePass`，且 `CanonicalizePass` 只作为本 pipeline 内部 xDSL pass 直接使用，不进入仓库 pass registry。
-- 明确每段 `memory-plan` 均固定 `MemoryPlanPass(insert_free=True, reuse=True, fold=False)` 并紧跟 `symbol-hoist-pipeline -> cse -> canonicalize`。
+- 明确每段 `memory-plan` 均固定 `MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=False)` 并紧跟 `symbol-hoist-pipeline -> cse -> canonicalize`；本 pipeline 不默认开启 `auto_pad`。
 - 明确 standalone `SymbolBufferHoistPass` 不再作为本 pipeline 顶层阶段出现；buffer 外提只通过 `symbol-hoist-pipeline` 内部 stage 完成。
 - 明确 `tile-analysis` 位于第一段 `memory-plan -> symbol-hoist-pipeline -> cse -> canonicalize` 之后、`kernel-pattern-attach` 之前，只记录 tile 分析结果，不生成 tile 循环。
 - 明确 `kernel-pattern-attach -> transform-apply` 位于 `tile-analysis` 之后，先生成 pattern dispatcher，再按 pattern attr 分别执行 `lower-dma-memory-hierarchy` 和 `canonicalize`。
@@ -103,20 +103,20 @@
   3. `CanonicalizePass`
   4. `DecompassPass`
   5. `NnLoweringPass`
-  6. `MemoryPlanPass(insert_free=True, reuse=True, fold=False)`
+  6. `MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=False)`
   7. `SymbolHoistPipelinePass`
   8. `CommonSubexpressionElimination`
   9. `CanonicalizePass`
   10. `TileAnalysisPass`
   11. `KernelPatternAttachPass`
   12. `TransformApplyPass`
-  13. `MemoryPlanPass(insert_free=True, reuse=True, fold=False)`
+  13. `MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=False)`
   14. `SymbolHoistPipelinePass`
   15. `CommonSubexpressionElimination`
   16. `CanonicalizePass`
   17. `KernelAggregatePass(matmul_acc=True)`
   18. `KernelDecomposePass`
-  19. `MemoryPlanPass(insert_free=True, reuse=True, fold=False)`
+  19. `MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=False)`
   20. `SymbolHoistPipelinePass`
   21. `CommonSubexpressionElimination`
   22. `CanonicalizePass`
@@ -151,10 +151,10 @@
 - 注意事项：
   - pipeline 名称必须固定为 `npu-demo-lowering`。
   - pass 顺序必须固定为本文件“公开顺序”列表，不允许由 options 改写。
-  - `NnLoweringPass` 后必须先运行 `MemoryPlanPass(insert_free=True, reuse=True, fold=False)`，再运行 `SymbolHoistPipelinePass`；该 pass 内必须先纳入 alias 归一 pattern。
+  - `NnLoweringPass` 后必须先运行 `MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=False)`，再运行 `SymbolHoistPipelinePass`；该 pass 内必须先纳入 alias 归一 pattern。
   - memory-pool 前的每个 `cse` 后必须紧跟 xDSL `CanonicalizePass`；memory-pool 后不得再插入 `cse`。
   - 每段 `symbol-hoist-pipeline` 后必须紧跟 `cse -> canonicalize`。
-  - `memory-plan` 固定 `insert_free=True, reuse=True, fold=False`，并在本 pipeline 中执行三次，均位于对应 `symbol-hoist-pipeline` 前。
+  - `memory-plan` 固定 `insert_free=True, reuse=True, fold=False, auto_pad=False`，并在本 pipeline 中执行三次，均位于对应 `symbol-hoist-pipeline` 前。
   - `symbol-buffer-hoist` 不得作为 standalone 顶层阶段出现在本 pipeline；安全 `dma.alloc + dma.free` 成对外提只能通过 `symbol-hoist-pipeline` 内部 stage 完成。
   - `tile-analysis` 只添加 `tile.analysis` / `tile.tile_exprs` 等分析属性，不生成 `symbol.for` 或 `dma.view`。
   - 顶层 pipeline 不直接包含 standalone `lower-dma-memory-hierarchy`；该 pass 只由 `transform-apply` 消费 pattern 函数上的 `kernel.transform_pipeline` 间接执行。

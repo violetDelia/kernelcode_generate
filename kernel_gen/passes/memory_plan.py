@@ -8,11 +8,13 @@
 - 当前阶段分析 `func.func` body、`symbol.for` body 与单块 `scf.if` 分支内的生命周期。
 - `scf.if` 分支内新建 `dma.alloc` 必须在同一分支内释放或由本 pass 插入释放；
   分支间不复用，逃逸到分支外仍按 unsupported escape 拒绝。
+- `auto_pad=True` 时，把可证明 static upper bound 的 dynamic tail alloc 改写为
+  padded backing alloc + 保留原 logical type 的 `dma.reinterpret` alias。
 - 通过当前文件内 helper 计算 alias closure，不依赖 `memory_pool` 或其它 pass 私有实现。
 - `dma.reinterpret` 与 `dma.view` / `dma.reshape` / `dma.subview` 一样只产生 source alias。
 
 API 列表:
-- `class MemoryPlanPass(insert_free: bool = False, fold: bool = True, reuse: bool = False)`
+- `class MemoryPlanPass(insert_free: bool = False, fold: bool = True, reuse: bool = False, auto_pad: bool = False)`
 - `MemoryPlanPass.from_options(options: dict[str, str]) -> MemoryPlanPass`
 - `MemoryPlanPass.apply(ctx: Context, module: ModuleOp) -> None`
 
@@ -32,10 +34,11 @@ API 列表:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from xdsl.context import Context
 from xdsl.dialects import func, scf
-from xdsl.dialects.builtin import ModuleOp
+from xdsl.dialects.builtin import ArrayAttr, ModuleOp
 from xdsl.ir import Block, Operation, SSAValue
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
@@ -48,12 +51,19 @@ from kernel_gen.dialect.dma import (
     DmaSubviewOp,
     DmaViewOp,
 )
-from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.dialect.symbol import SymbolForOp, SymbolYieldOp
+from kernel_gen.dialect.nn import NnMemoryType, copy_memory_type
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolForOp, SymbolValueType, SymbolYieldOp
 from kernel_gen.passes.pass_manager import Pass
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
+_AUTO_PAD_ATOM_EXPR_PATTERN = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*|[1-9][0-9]*)$")
+_AUTO_PAD_TAIL_EXPR_PATTERN = re.compile(
+    r"^(?P<end>[A-Za-z_][A-Za-z0-9_]*|[0-9]+)-iter<"
+    r"(?P<start>[A-Za-z_][A-Za-z0-9_]*|[0-9]+),"
+    r"(?P=end),"
+    r"(?P<step>[A-Za-z_][A-Za-z0-9_]*|[1-9][0-9]*)>$"
+)
 
 
 @dataclass(frozen=True)
@@ -117,10 +127,11 @@ class MemoryPlanPass(Pass):
     功能说明:
     - `insert_free=True` 时补齐 `dma.alloc` 生命周期末尾的 `dma.free`。
     - `reuse=True` 且 `insert_free=True` 时保守复用同 block 内不重叠 alloc。
+    - `auto_pad=True` 时先执行 padded backing + logical alias rewrite。
     - `insert_free=False` 时保持 no-op，不执行生命周期失败检查。
 
     使用示例:
-    - pass_obj = MemoryPlanPass(insert_free=True, reuse=True)
+    - pass_obj = MemoryPlanPass(insert_free=True, reuse=True, auto_pad=True)
     - pass_obj.apply(ctx, module)
     """
 
@@ -131,20 +142,22 @@ class MemoryPlanPass(Pass):
         insert_free: bool = False,
         fold: bool = True,
         reuse: bool = False,
+        auto_pad: bool = False,
     ) -> None:
         """初始化 memory-plan pass。
 
         功能说明:
-        - 记录 `insert_free` 与 `reuse` 业务开关。
+        - 记录 `insert_free`、`reuse` 与 `auto_pad` 业务开关。
         - 透传 `fold` 到通用 Pass 基类。
 
         使用示例:
-        - MemoryPlanPass(insert_free=True, fold=False, reuse=True)
+        - MemoryPlanPass(insert_free=True, fold=False, reuse=True, auto_pad=True)
         """
 
         super().__init__(fold=fold)
         self.insert_free = bool(insert_free)
         self.reuse = bool(reuse)
+        self.auto_pad = bool(auto_pad)
 
     @classmethod
     def from_options(cls: type["MemoryPlanPass"], options: dict[str, str]) -> "MemoryPlanPass":
@@ -153,14 +166,16 @@ class MemoryPlanPass(Pass):
         功能说明:
         - 支持 `insert-free=true|false|1|0|yes|no|on|off`。
         - 支持 `reuse=true|false|1|0|yes|no|on|off`。
+        - 支持 `auto-pad=true|false|1|0|yes|no|on|off`。
         - 未知 option 与非法 bool 使用稳定 `MemoryPlanOptionError` 文本失败。
 
         使用示例:
-        - pass_obj = MemoryPlanPass.from_options({"insert-free": "true", "reuse": "true"})
+        - pass_obj = MemoryPlanPass.from_options({"insert-free": "true", "reuse": "true", "auto-pad": "true"})
         """
 
         insert_free = False
         reuse = False
+        auto_pad = False
         for name, value in options.items():
             if name == "insert-free":
                 insert_free = _parse_bool_option(name, value)
@@ -168,22 +183,28 @@ class MemoryPlanPass(Pass):
             if name == "reuse":
                 reuse = _parse_bool_option(name, value)
                 continue
+            if name == "auto-pad":
+                auto_pad = _parse_bool_option(name, value)
+                continue
             _raise_memory_plan_error(f"MemoryPlanOptionError: unknown option '{name}'")
-        return cls(insert_free=insert_free, reuse=reuse)
+        return cls(insert_free=insert_free, reuse=reuse, auto_pad=auto_pad)
 
     def apply(self: "MemoryPlanPass", ctx: Context, module: ModuleOp) -> None:
         """对 module 执行 memory-plan。
 
         功能说明:
-        - `insert_free=False` 时直接返回。
+        - `auto_pad=True` 时先把可证明 dynamic tail alloc 改写为 padded backing + logical alias。
+        - `insert_free=False` 且 `auto_pad=False` 时直接返回。
         - `insert_free=True` 时先分析所有 `dma.alloc`，再原地插入缺失的 `dma.free`。
         - `reuse=True` 时在线性 owner block 内把已释放的等价 alloc 复用给后续 alloc。
 
         使用示例:
-        - MemoryPlanPass(insert_free=True, reuse=True).apply(ctx, module)
+        - MemoryPlanPass(insert_free=True, reuse=True, auto_pad=True).apply(ctx, module)
         """
 
         _ = ctx
+        if self.auto_pad:
+            _apply_auto_pad(module)
         if not self.insert_free:
             return
         allocs = [op for op in module.walk() if isinstance(op, DmaAllocOp)]
@@ -231,6 +252,229 @@ class MemoryPlanPass(Pass):
             reusable.owner_block.erase_op(reusable.free_record.op)
             current.owner_block.erase_op(current.alloc)
             reusable.free_record = current.free_record
+
+
+def _apply_auto_pad(module: ModuleOp) -> None:
+    """对 module 内候选 `dma.alloc` 执行 auto_pad rewrite。
+
+    功能说明:
+    - 扫描当前 module 内的 `dma.alloc`。
+    - 在当前函数内完成上界推导、SSA 物化、type 构造、verify 与原地替换。
+    - 支持静态 / 具名符号 / `min(A,B)` / tail / 乘积上界；候选无法证明时 no-op。
+    - 单个候选的所有新 op 都在 verify 通过后才插入，避免留下半改写 IR。
+
+    使用示例:
+    - _apply_auto_pad(module)
+    """
+
+    for alloc in [op for op in module.walk() if isinstance(op, DmaAllocOp)]:
+        block = alloc.parent_block()
+        logical_type = alloc.result.type
+        if block is None or not isinstance(logical_type, NnMemoryType):
+            continue
+
+        shape_exprs: list[str] = []
+        stride_exprs: list[str] = []
+        for dim in logical_type.shape.data:
+            if not isinstance(dim, SymbolExprAttr):
+                shape_exprs = []
+                break
+            shape_exprs.append(dim.expr.data)
+        for stride in logical_type.stride.data:
+            if not isinstance(stride, SymbolExprAttr):
+                stride_exprs = []
+                break
+            stride_exprs.append(stride.expr.data)
+        if not shape_exprs or len(shape_exprs) != len(stride_exprs) or any(expr == "?" for expr in shape_exprs):
+            continue
+
+        logical_stride_exprs: list[str] = []
+        running_expr = "1"
+        for dim_expr in reversed(shape_exprs):
+            logical_stride_exprs.insert(0, running_expr)
+            if dim_expr == "1":
+                continue
+            dim_factor = dim_expr if _AUTO_PAD_ATOM_EXPR_PATTERN.fullmatch(dim_expr) is not None else f"({dim_expr})"
+            running_factor = running_expr if _AUTO_PAD_ATOM_EXPR_PATTERN.fullmatch(running_expr) is not None else f"({running_expr})"
+            running_expr = SymbolExprAttr.from_expr(dim_factor if running_expr == "1" else f"{dim_factor}*{running_factor}").expr.data
+        if tuple(logical_stride_exprs) != tuple(stride_exprs):
+            continue
+
+        backing_shape_exprs: list[str] = []
+        has_padding = False
+        shape_is_supported = True
+        for shape_expr in shape_exprs:
+            canonical_shape = SymbolExprAttr.from_expr(shape_expr).expr.data
+            if canonical_shape == "?" or ("-" in canonical_shape and "iter<" not in canonical_shape):
+                shape_is_supported = False
+                break
+            factors: list[str] = []
+            depth = 0
+            angle_depth = 0
+            start_index = 0
+            for index, char in enumerate(canonical_shape):
+                if char == "<":
+                    angle_depth += 1
+                elif char == ">":
+                    angle_depth -= 1
+                elif char == "(":
+                    depth += 1
+                elif char == ")":
+                    depth -= 1
+                elif char == "*" and depth == 0 and angle_depth == 0:
+                    factors.append(canonical_shape[start_index:index])
+                    start_index = index + 1
+            factors.append(canonical_shape[start_index:])
+
+            upper_factors: list[str] = []
+            factor_changed = False
+            for factor in factors:
+                candidate = factor.strip()
+                if _AUTO_PAD_ATOM_EXPR_PATTERN.fullmatch(candidate) is not None:
+                    upper_factors.append(candidate)
+                    continue
+                if not (candidate.startswith("min(") and candidate.endswith(")")):
+                    shape_is_supported = False
+                    break
+                inner = candidate[4:-1]
+                comma_index = -1
+                depth = 0
+                angle_depth = 0
+                for index, char in enumerate(inner):
+                    if char == "<":
+                        angle_depth += 1
+                    elif char == ">":
+                        angle_depth -= 1
+                    elif char == "(":
+                        depth += 1
+                    elif char == ")":
+                        depth -= 1
+                    elif char == "," and depth == 0 and angle_depth == 0:
+                        comma_index = index
+                        break
+                if comma_index < 0:
+                    shape_is_supported = False
+                    break
+                left_expr = SymbolExprAttr.from_expr(inner[:comma_index].strip()).expr.data
+                right_expr = SymbolExprAttr.from_expr(inner[comma_index + 1 :].strip()).expr.data
+                selected_upper = ""
+                other_expr = ""
+                if _AUTO_PAD_ATOM_EXPR_PATTERN.fullmatch(left_expr) is not None:
+                    selected_upper = left_expr
+                    other_expr = right_expr
+                elif _AUTO_PAD_ATOM_EXPR_PATTERN.fullmatch(right_expr) is not None:
+                    selected_upper = right_expr
+                    other_expr = left_expr
+                if not selected_upper:
+                    shape_is_supported = False
+                    break
+                if "iter<" in other_expr:
+                    compact_tail = other_expr.replace(" ", "")
+                    tail_match = _AUTO_PAD_TAIL_EXPR_PATTERN.fullmatch(compact_tail)
+                    if tail_match is None:
+                        shape_is_supported = False
+                        break
+                    start_expr = tail_match.group("start")
+                    step_expr = SymbolExprAttr.from_expr(tail_match.group("step")).expr.data
+                    start_is_supported = start_expr.isdecimal() or _AUTO_PAD_ATOM_EXPR_PATTERN.fullmatch(start_expr) is not None
+                    if not start_is_supported or step_expr != selected_upper:
+                        shape_is_supported = False
+                        break
+                upper_factors.append(selected_upper)
+                factor_changed = True
+            if not shape_is_supported:
+                break
+            upper_expr = SymbolExprAttr.from_expr("*".join(upper_factors)).expr.data
+            backing_shape_exprs.append(upper_expr)
+            has_padding = has_padding or factor_changed or upper_expr != canonical_shape
+        if not shape_is_supported or not has_padding:
+            continue
+
+        backing_stride_exprs: list[str] = []
+        running_expr = "1"
+        for dim_expr in reversed(backing_shape_exprs):
+            backing_stride_exprs.insert(0, running_expr)
+            if dim_expr == "1":
+                continue
+            dim_factor = dim_expr if _AUTO_PAD_ATOM_EXPR_PATTERN.fullmatch(dim_expr) is not None else f"({dim_expr})"
+            running_factor = running_expr if _AUTO_PAD_ATOM_EXPR_PATTERN.fullmatch(running_expr) is not None else f"({running_expr})"
+            running_expr = SymbolExprAttr.from_expr(dim_factor if running_expr == "1" else f"{dim_factor}*{running_factor}").expr.data
+
+        value_map: dict[str, SSAValue] = {}
+        current_op: Operation = alloc
+        current_block = block
+        while current_block is not None:
+            for arg in current_block.args:
+                arg_type = arg.type
+                if isinstance(arg_type, SymbolValueType):
+                    expr = arg_type.expr.expr.data
+                    if expr not in value_map:
+                        value_map[expr] = arg
+            for op in current_block.ops:
+                if op is current_op:
+                    break
+                for result in op.results:
+                    result_type = result.type
+                    if isinstance(result_type, SymbolValueType):
+                        expr = result_type.expr.expr.data
+                        if expr not in value_map:
+                            value_map[expr] = result
+            parent = current_block.parent_op()
+            if parent is None:
+                break
+            current_op = parent
+            current_block = parent.parent_block()
+
+        extra_ops: list[Operation] = []
+        materialized_groups: list[tuple[SSAValue, ...]] = []
+        missing_operand = False
+        for expr_group in (tuple(backing_shape_exprs), tuple(shape_exprs), tuple(stride_exprs), ("0",)):
+            values: list[SSAValue] = []
+            for expr in expr_group:
+                value = value_map.get(expr)
+                if value is None and expr.isdecimal():
+                    const_op = SymbolConstOp(int(expr))
+                    extra_ops.append(const_op)
+                    value_map[expr] = const_op.result
+                    value = const_op.result
+                if value is None:
+                    missing_operand = True
+                    break
+                values.append(value)
+            if missing_operand:
+                break
+            materialized_groups.append(tuple(values))
+        if missing_operand or len(materialized_groups) != 4:
+            continue
+
+        try:
+            backing_type = copy_memory_type(
+                logical_type,
+                shape=ArrayAttr([SymbolExprAttr.from_expr(expr) for expr in backing_shape_exprs]),
+                stride=ArrayAttr([SymbolExprAttr.from_expr(expr) for expr in backing_stride_exprs]),
+            )
+            backing = DmaAllocOp(materialized_groups[0], backing_type)
+            logical_alias = DmaReinterpretOp(
+                backing.result,
+                materialized_groups[3][0],
+                materialized_groups[1],
+                materialized_groups[2],
+                logical_type,
+            )
+            backing.verify_()
+            logical_alias.verify_()
+        except (KernelCodeError, TypeError, ValueError):
+            continue
+
+        direct_free_ops = tuple(use.operation for use in list(alloc.result.uses) if isinstance(use.operation, DmaFreeOp))
+        block.insert_ops_before([*extra_ops, backing, logical_alias], alloc)
+        alloc.result.replace_all_uses_with(logical_alias.result)
+        for free_op in direct_free_ops:
+            free_block = free_op.parent_block()
+            if free_block is not None:
+                free_block.insert_op_before(DmaFreeOp(backing.result), free_op)
+                free_block.erase_op(free_op)
+        block.erase_op(alloc)
 
 
 def _raise_memory_plan_error(message: str) -> None:

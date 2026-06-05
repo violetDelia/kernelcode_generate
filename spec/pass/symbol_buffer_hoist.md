@@ -53,6 +53,7 @@
 - `input staging buffer`：loop 内临时 `dma.alloc`，后续作为 `dma.slice` 的目标 buffer 使用。
 - `output scratch buffer`：loop 内临时 `dma.alloc`，后续作为 `dma.deslice(target, source, ...)` 的 `source` buffer 使用。
 - `alias op`：`dma.view`、`dma.reshape`、`dma.subview` 或 `dma.reinterpret` 这类只生成 memory view/result 的 op；本 pass 只承接这几种 alias op 的单 op fixed-point 外提。
+- `padded backing + logical alias`：`memory-plan{auto-pad=true}` 可生成的 `dma.alloc` + `dma.reinterpret` 形态；本 pass 仍只按既有 `dma.alloc/free` 与 `dma.reinterpret` alias 规则处理，不引入 auto_pad 专属入口。
 - `loop-carried`：来自当前 `symbol.for` 的 `iter_args`、loop iterator 或任何定义在当前 loop body 内的 SSA 值。
 - `buffer escape`：`dma.alloc` 结果经 `symbol.yield`、`func.return` 或未知外部别名链暴露到当前 loop body 之外。
 - `lifecycle free`：同一 owner `symbol.for` 直接 body 内唯一释放当前 alloc result 的 `dma.free`；只有位于所有支持的数据 use 之后时才允许随 alloc 成对外提。
@@ -169,6 +170,7 @@ symbol.for value {
   - `dma.reshape`：source 与 shape 全部支配当前 owner `symbol.for`，且 result use 满足同一白名单时，单 op 外提一层；fixed-point 驱动可在 nested loop 中逐层外提到最近安全位置。
   - `dma.subview`：source、offset、size、stride 全部支配当前 owner `symbol.for`，且 result use 满足同一白名单时，单 op 外提一层；fixed-point 驱动可在 nested loop 中逐层外提到最近安全位置。
   - `dma.reinterpret`：source、offset、shape、stride 全部支配当前 owner `symbol.for`，且 result use 满足同一白名单时，单 op 外提一层；full-cover 判断按 `offset == 0`、result numel 覆盖 root numel、result stride contiguous 证明，并纳入统一 alias 集合。
+  - 对 `memory-plan{auto-pad=true}` 生成的 padded backing + logical alias，`dma.reinterpret` logical alias 必须继续按本条 alias op 规则参与 fixed-point 外提；consumer 仍捕获 logical alias，不把 `kernel.*` use 改写为 padded backing。
   - `dma.fill` 或 `dma.broadcast` target write reset 后的 `kernel.*` read/write use 可作为 alloc/free 生命周期证明的一部分；例如 `dma.broadcast(buf, scalar)` 后 `kernel.*(..., lhs=buf, ...)` 读取 `buf` 时，alloc/free 可以成对外提。
   - nested `symbol.for` 内 alloc/free 若先由 `dma.fill` 等完整 write reset 后再被读取，且唯一 `dma.free` 位于 owner body 内所有 data use 之后，则 fixed-point 可把 alloc/free 逐层外提到最外层 loop 前后。
   - owner block 内的 `dma.fill` 支配 nested `symbol.for` 中后续 `kernel.*` read/write 时，acc buffer 的 alloc/free 可成对外提。

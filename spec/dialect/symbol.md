@@ -97,6 +97,7 @@
 - `!symbol.ptr<dtype>` 中的 `dtype` 必须是合法 `TypeAttribute`，且不得为 `!symbol.int<#symbol.expr<...>>`；当前不定义 `!symbol.ptr<!symbol.int<#symbol.expr<...>>>` 这类“指向 symbol.int”的 pointer carrier。
 - 当前最小算术/比较 op 范围仅包含 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`、`symbol.min`、`symbol.max`、`symbol.eq`、`symbol.ne`、`symbol.lt`、`symbol.le`、`symbol.gt`、`symbol.ge`；不定义取模 op、按位运算、布尔逻辑组合、广播或张量级算术。`SymbolExprAttr` 文本表达允许 `mod`，但该能力不等于新增 `symbol.mod` operation。
 - `symbol.min(lhs, rhs)` 是二元整数符号最小值 op，结果类型必须为 `!symbol.int<#symbol.expr<min(lhs, rhs)>>`、等价常量表达，或 full-tile tail 模式 `min(step, end - iter<start,end,step>)` 可证明 `(end-start)` 是 `step` 正整数倍时的 `step` 表达；AST / MLIR 生成侧不提前 fold 时仍可保留 `min(step, end - iter<...>)`，后续 Folder / pass 再规约为 `step`；它不定义多参数 `min`、张量级最小值或比较谓词结果。
+- `memory-plan{auto-pad=true}` 可把 `min(TILE, EXTENT - iter<0,EXTENT,TILE>)` 识别为 dynamic tail 的 static upper bound `TILE`；这是 pass 侧证明口径，不改变 `SymbolExprAttr`、`SymbolValueType` 或 `symbol.min` 的公开 API。
 - `symbol.max(lhs, rhs)` 是二元整数符号最大值 op，结果类型必须为 `!symbol.int<#symbol.expr<max(lhs, rhs)>>` 或等价常量表达；它不定义多参数 `max`、张量级最大值或比较谓词结果。
 - 当前仅定义 `symbol.to_int` 与 `symbol.to_float` 两类转换：`symbol.to_int` 将 `!symbol.int<#symbol.expr<...>>` 转为普通整型（覆盖各整型变体），`symbol.to_float` 将 `!symbol.int<#symbol.expr<...>>` 转为 `f32`；不定义反向转换或其他跨类型规则。
 - `symbol.ne` / `symbol.lt` / `symbol.le` / `symbol.gt` 属于同一 compare family：统一采用二元 `!symbol.int<#symbol.expr<...>>, !symbol.int<#symbol.expr<...>> -> i1` 签名、统一 verifier 约束与统一 parse/print 规则，不能拆成互不一致的四套合同。
