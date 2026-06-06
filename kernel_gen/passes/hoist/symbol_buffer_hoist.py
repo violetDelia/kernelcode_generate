@@ -17,10 +17,15 @@
 - `dma.alloc/free` 外提通过 `MemoryEffect` 证明生命周期：首次 read 前必须已有同一 region block 内的
   full reset/write；nested `symbol.for` 内 data use 不再一律 no-op，只要每个 read 均被支配它的 full write
   覆盖，alloc/free 就可以通过 fixed-point 逐层外提。`READ+WRITE` 的同值 use 不能自证 reset/write，
-  unknown effect、读先于写、多 free 或 nested free 均保持 no-op。
+  但 `kernel.matmul` 动态 acc 形如 `iter != start` 时可证明首轮覆盖写；unknown effect、读先于写、多 free
+  或 nested free 均保持 no-op。
+- `dma.reinterpret` logical alias 的 partial write 只证明同一 logical scope 后续 read；`offset=0`、同 backing、
+  同元素数且 contiguous 的等价 logical alias 可共享 reset proof，但不会升级为 backing root full reset。
 - 失败边界统一复用 `KernelCodeError(module="pass")`；不新增专题专属错误类型，也不承诺额外 compat path。
 
 API 列表:
+- `class DmaAllocWithMatmulFirstUseHoistPattern()`
+- `DmaAllocWithMatmulFirstUseHoistPattern.match_and_rewrite(op: DmaAllocOp, rewriter: PatternRewriter) -> None`
 - `class DmaAllocInSymbolForHoistPattern()`
 - `DmaAllocInSymbolForHoistPattern.match_and_rewrite(op: DmaAllocOp, rewriter: PatternRewriter) -> None`
 - `class DmaViewInSymbolForHoistPattern()`
@@ -29,6 +34,8 @@ API 列表:
 - `DmaReshapeInSymbolForHoistPattern.match_and_rewrite(op: DmaReshapeOp, rewriter: PatternRewriter) -> None`
 - `class DmaSubviewInSymbolForHoistPattern()`
 - `DmaSubviewInSymbolForHoistPattern.match_and_rewrite(op: DmaSubviewOp, rewriter: PatternRewriter) -> None`
+- `class DmaReinterpretInSymbolForHoistPattern()`
+- `DmaReinterpretInSymbolForHoistPattern.match_and_rewrite(op: DmaReinterpretOp, rewriter: PatternRewriter) -> None`
 - `get_symbol_buffer_hoist_patterns() -> list[RewritePattern]`
 - `class SymbolBufferHoistPass(fold: bool = True)`
 - `SymbolBufferHoistPass.name: str`
@@ -50,12 +57,11 @@ API 列表:
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 
 from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
-from xdsl.ir import Attribute, Block, BlockArgument, Operation, SSAValue, Use
+from xdsl.ir import BlockArgument, Operation, SSAValue, Use
 from xdsl.pattern_rewriter import (
     GreedyRewritePatternApplier,
     PatternRewriter,
@@ -81,6 +87,7 @@ from kernel_gen.dialect.dma import (
     DmaSubviewOp,
     DmaViewOp,
 )
+from kernel_gen.dialect.kernel import KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolForOp, SymbolValueType
 from kernel_gen.passes.common import ensure_builtin_module
@@ -88,39 +95,17 @@ from kernel_gen.passes.pass_manager import Pass
 
 
 @dataclass(frozen=True)
-class _HoistUsePlan:
-    """记录一次 alloc 外提可接受的生命周期事件分类。
-
-
-    功能说明:
-    - `data_events` 保存同一 owner loop body 或 descendant region 内可证明的 data lifecycle event。
-    - `free_op` 表示可随 alloc 成对外提的唯一 `dma.free`。
-
-    使用示例:
-    - plan = _HoistUsePlan(data_events=(event,), free_op=free_op)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-- 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    data_events: tuple["_MemoryEvent", ...]
-    free_op: DmaFreeOp | None
-
-
-@dataclass(frozen=True)
 class _MemoryEvent:
-    """记录某个 memory use 对 alloc root 的生命周期影响。
+    """alloc lifecycle proof 中的单次 memory event。
 
 
     功能说明:
-    - `effects` 只承接公开 `MemoryEffectKind.READ/WRITE`。
-    - `full_write` 表示该 WRITE 覆盖 alloc root 的完整可读内容，可作为后续 READ 的 reset proof。
-    - alias result 上的 partial write 不会被升级为 alloc root 的 full write。
+    - 固定表示一次 READ/WRITE use 及其 logical access scope。
+    - 用结构化字段替代无类型字符串 key dict，避免两个 alloc pattern 维护同一组字段名。
+    - 该模型只在当前文件内部使用，不进入公开 API。
 
     使用示例:
-    - event = _MemoryEvent(use=use, effects=frozenset({MemoryEffectKind.WRITE}), full_write=True)
+    - event = _MemoryEvent(use=use, effects=frozenset(kinds), access_scope=scope, full_write=True, full_write_scope=None, self_reset=False)
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
@@ -130,7 +115,10 @@ class _MemoryEvent:
 
     use: Use
     effects: frozenset[MemoryEffectKind]
+    access_scope: SSAValue | tuple[SSAValue, str]
     full_write: bool
+    full_write_scope: SSAValue | tuple[SSAValue, str] | None
+    self_reset: bool
 
 
 def _value_dominates_symbol_for(value: SSAValue, symbol_for: SymbolForOp) -> bool:
@@ -143,7 +131,7 @@ def _value_dominates_symbol_for(value: SSAValue, symbol_for: SymbolForOp) -> boo
     - 外层 loop body 中位于当前 `symbol.for` 前的值允许作为“当前层” invariant。
 
     使用示例:
-    - _value_dominates_symbol_for(symbol_dim, symbol_for)
+    - if not _value_dominates_symbol_for(shape_value, symbol_for): return
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
@@ -151,35 +139,35 @@ def _value_dominates_symbol_for(value: SSAValue, symbol_for: SymbolForOp) -> boo
     - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
-    loop_block = symbol_for.body.blocks[0]
+    owner_loop_block = symbol_for.body.blocks[0]
     if isinstance(value, BlockArgument):
-        return value.owner is not loop_block and value.owner.is_ancestor(symbol_for)
+        return value.owner is not owner_loop_block and value.owner.is_ancestor(symbol_for)
     owner = value.owner
     if not isinstance(owner, Operation):
         return True
     owner_block = owner.parent_block()
     if owner_block is None:
         return True
-    if owner_block is loop_block or loop_block.is_ancestor(owner):
+    if owner_block is owner_loop_block or owner_loop_block.is_ancestor(owner):
         return False
     if owner_block is symbol_for.parent_block():
         return owner.is_before_in_block(symbol_for)
     ancestor = owner_block.find_ancestor_op_in_block(symbol_for)
-    if ancestor is None or owner is ancestor:
-        return False
-    return owner.is_before_in_block(ancestor)
+    return ancestor is not None and owner is not ancestor and owner.is_before_in_block(ancestor)
 
 
-def _shape_is_loop_invariant(op: DmaAllocOp, symbol_for: SymbolForOp) -> bool:
-    """判断 `dma.alloc` 的 dynamic_shape 是否全部来自 loop 外。
+def _hoist_alias_op_if_safe(op: Operation, rewriter: PatternRewriter) -> None:
+    """在满足公开边界时把单个 alias op 外提一层。
 
 
     功能说明:
-    - 空 `dynamic_shape` 视为满足 invariant。
-    - 只要任一 shape operand 来自当前 loop body 或 loop-carried block argument，就保持 no-op。
+    - 仅处理当前 `symbol.for` 直接 body 内的 `dma.view/reshape/subview/reinterpret` alias op。
+    - source 与布局 operand 必须全部支配当前 `symbol.for`。
+    - result use 必须留在当前 loop body 或 descendant region 内，并落在公开白名单中。
+    - 外提后复用原 op/result，不新增 loop argument。
 
     使用示例:
-    - _shape_is_loop_invariant(alloc_op, symbol_for)
+    - _hoist_alias_op_if_safe(view_op, rewriter)
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
@@ -187,682 +175,252 @@ def _shape_is_loop_invariant(op: DmaAllocOp, symbol_for: SymbolForOp) -> bool:
     - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
-    return all(_value_dominates_symbol_for(SSAValue.get(value), symbol_for) for value in op.dynamic_shape)
-
-
-def _is_supported_data_use(use: Use) -> bool:
-    """判断 `dma.alloc` 的单个 direct data use 是否属于公开白名单。
-
-
-    功能说明:
-    - 输入 staging buffer：仅接受 `dma.slice` 的 `target` operand。
-    - output scratch buffer：仅接受 `dma.deslice` 的 `source` operand。
-    - `dma.free` 属于 lifecycle use，由独立规则处理。
-    - 其他 direct use 一律视为未承接的逃逸形态。
-
-    使用示例:
-    - all(_is_supported_data_use(use) for use in alloc_op.result.uses)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    user = use.operation
-    return (isinstance(user, DmaSliceOp) and use.index == 0) or (
-        isinstance(user, DmaDesliceOp) and use.index == 1
-    )
-
-
-def _is_metadata_query_use(use: Use) -> bool:
-    """判断 use 是否为 Pure memory metadata query。
-
-
-    功能说明:
-    - `symbol.get_dim` / `symbol.get_stride` 只读取 memory type 元信息，不参与 data lifecycle。
-    - 该 helper 仅用于当前文件内 pass 判定，不作为公开 API。
-
-    使用示例:
-    - if _is_metadata_query_use(use): ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    return use.index == 0 and use.operation.name in {"symbol.get_dim", "symbol.get_stride"}
-
-
-def _is_supported_alias_result_use(use: Use) -> bool:
-    """判断 alias result 的 direct use 是否属于可捕获白名单。
-
-
-    功能说明:
-    - 允许 `dma.slice target`、`dma.deslice source`、`dma.fill target`、`dma.copy target/source`。
-    - 允许 `symbol.get_dim` / `symbol.get_stride` 读取 alias memory 的 shape / stride 信息；它们不移动 memory 生命周期。
-    - 允许带公开 MemoryEffect 的 `kernel.*` memory operand 捕获 alias result。
-    - 其它 direct use 保持 no-op，避免把未知副作用或逃逸形态做宽。
-
-    使用示例:
-    - if _is_supported_alias_result_use(use): ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    user = use.operation
-    if _is_supported_data_use(use):
-        return True
-    if isinstance(user, DmaFillOp) and use.index == 0:
-        return True
-    if isinstance(user, DmaCopyOp) and use.index in (0, 1):
-        return True
-    if _is_metadata_query_use(use):
-        return True
-    if _is_kernel_memory_use(use):
-        return True
-    return False
-
-
-def _is_supported_alias_source_use(use: Use) -> bool:
-    """判断 direct use 是否为受支持 alias op 的 source operand。
-
-
-    功能说明:
-    - 只允许 `dma.view`、`dma.reshape`、`dma.subview`、`dma.reinterpret` 的 source use。
-    - 该 helper 仅服务当前文件内 alloc/free 与 alias op 外提判定，不构成公开 API。
-
-    使用示例:
-    - if _is_supported_alias_source_use(use): ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    user = use.operation
-    return use.index == 0 and isinstance(user, (DmaViewOp, DmaReshapeOp, DmaSubviewOp, DmaReinterpretOp))
-
-
-def _collect_direct_uses(result: SSAValue) -> tuple[Use, ...]:
-    """收集 alloc 结果的直接 use 列表。
-
-
-    功能说明:
-    - 把 xdsl use 链转成稳定 tuple，便于重复遍历与空 use 判定。
-
-    使用示例:
-    - uses = _collect_direct_uses(alloc_op.result)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    return tuple(cast_use for cast_use in result.uses)
-
-
-def _operation_parent_block(op: Operation) -> Block | None:
-    """返回 operation 的 parent block。
-
-
-    功能说明:
-    - 收口 xDSL parent block 读取，供 direct use 分类复用。
-
-    使用示例:
-    - block = _operation_parent_block(use.operation)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    return op.parent_block()
-
-
-def _operation_is_in_block_or_descendant(op: Operation, owner_block: Block) -> bool:
-    """判断 operation 是否位于指定 block 或其 descendant region。
-
-
-    功能说明:
-    - alias fixed-point 外提允许 result use 留在 owner loop 的 nested loop 内。
-    - sibling block 或 owner loop 外 use 仍视为逃逸。
-
-    使用示例:
-    - _operation_is_in_block_or_descendant(use.operation, loop_block)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    op_block = _operation_parent_block(op)
-    if op_block is None:
-        return False
-    return op_block is owner_block or owner_block.is_ancestor(op)
-
-
-def _direct_operation_in_block(op: Operation, owner_block: Block) -> Operation | None:
-    """返回代表该 op 在 owner block 顺序中的直接 operation。
-
-
-    功能说明:
-    - 若 op 直接位于 owner block，返回 op。
-    - 若 op 位于 owner block 的 descendant region，返回 owner block 中包住它的直接 child op。
-    - 用于比较 nested data use 与 direct `dma.free` 的相对顺序。
-
-    使用示例:
-    - direct = _direct_operation_in_block(use.operation, loop_block)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    current = op
-    current_block = _operation_parent_block(current)
-    while current_block is not None:
-        if current_block is owner_block:
-            return current
-        parent_op = current_block.parent_op()
-        if parent_op is None:
-            return None
-        current = parent_op
-        current_block = _operation_parent_block(current)
-    return None
-
-
-def _block_index_map(block: Block) -> dict[Operation, int]:
-    """构造 block 内 operation 到顺序索引的映射。
-
-
-    功能说明:
-    - 用于判断 `dma.free` 是否晚于所有 data use。
-
-    使用示例:
-    - indexes = _block_index_map(loop_block)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    return {item: index for index, item in enumerate(block.ops)}
-
-
-def _op_dominates_op(producer: Operation, consumer: Operation) -> bool:
-    """判断 producer 是否在当前单 block / parent-chain 模型下支配 consumer。
-
-
-    功能说明:
-    - 同 block 时要求 producer 文本顺序早于 consumer。
-    - producer 位于 ancestor block 时，要求 producer 早于该 block 中包住 consumer 的直接 child op。
-    - sibling region、descendant 反向 use 与不可定位 parent chain 均保守返回 False。
-
-    使用示例:
-    - if _op_dominates_op(fill_op, matmul_op): ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    producer_block = _operation_parent_block(producer)
-    consumer_block = _operation_parent_block(consumer)
-    if producer_block is None or consumer_block is None:
-        return False
-    if producer_block is consumer_block:
-        return producer.is_before_in_block(consumer)
-    consumer_direct = _direct_operation_in_block(consumer, producer_block)
-    if consumer_direct is None or consumer_direct is producer:
-        return False
-    return producer.is_before_in_block(consumer_direct)
-
-
-def _free_follows_data_events(free_op: DmaFreeOp, data_events: tuple[_MemoryEvent, ...], loop_block: Block) -> bool:
-    """判断唯一 free 是否位于所有 data event 之后。
-
-
-    功能说明:
-    - free 必须位于 owner loop 直接 body 内。
-    - data event 可位于 owner loop body 或 descendant region 内，顺序比较映射到 owner block 中的直接 child op。
-    - 任一 operation 不在 block 顺序表内时保守 no-op。
-
-    使用示例:
-    - if _free_follows_data_events(free_op, events, loop_block): ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    if not data_events:
-        return False
-    indexes = _block_index_map(loop_block)
-    if free_op not in indexes:
-        return False
-    data_indexes: list[int] = []
-    for event in data_events:
-        direct_use_op = _direct_operation_in_block(event.use.operation, loop_block)
-        if direct_use_op not in indexes:
-            return False
-        data_indexes.append(indexes[direct_use_op])
-    return indexes[free_op] > max(data_indexes)
-
-
-def _effect_kinds_for_use(use: Use) -> set[MemoryEffectKind] | None:
-    """读取某个 use 所在 operation 对该 SSA value 的 MemoryEffect。
-
-
-    功能说明:
-    - `None` 表示 operation 没有公开 MemoryEffect 或 effect 不可判定。
-    - 空集合表示 operation 有公开 effect，但不作用于当前 use 的 SSA value。
-
-    使用示例:
-    - kinds = _effect_kinds_for_use(use)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    effects = get_effects(use.operation)
-    if effects is None:
-        return None
-    value = SSAValue.get(use.operation.operands[use.index])
-    return {effect.kind for effect in effects if effect.value is value}
-
-
-def _is_kernel_memory_use(use: Use) -> bool:
-    """判断 use 是否是带公开 MemoryEffect 的 kernel memory operand。
-
-
-    功能说明:
-    - 仅当 `kernel.*` op 对该 operand 暴露 READ/WRITE effect 时返回 true。
-    - 未挂 MemoryEffect 的 kernel op 保守视为未知逃逸。
-
-    使用示例:
-    - if _is_kernel_memory_use(use): ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    if not use.operation.name.startswith("kernel."):
-        return False
-    kinds = _effect_kinds_for_use(use)
-    return kinds is not None and bool(kinds) and kinds <= {MemoryEffectKind.READ, MemoryEffectKind.WRITE}
-
-
-def _is_supported_lifecycle_data_use(use: Use) -> bool:
-    """判断 alloc result direct use 是否可纳入生命周期证明。
-
-
-    功能说明:
-    - 以公开 `MemoryEffect` 的 `READ/WRITE` 语义为主轴，不再依赖 op 名称白名单作为主判定。
-    - `dma.slice target` 与 `dma.deslice source` 仍作为旧兼容边界存在，但也通过公开 effect 参与证明。
-    - 接受公开 `MemoryEffect` 可判定的 `dma.fill/copy/load/store/slice/deslice/broadcast` 与 `kernel.*`
-      read/write use。
-    - 不接受 unknown effect、alloc/free effect、Pure metadata query 或未列入当前计划的 DMA op。
-
-    使用示例:
-    - if _is_supported_lifecycle_data_use(use): ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    kinds = _effect_kinds_for_use(use)
-    return kinds is not None and bool(kinds) and kinds <= {MemoryEffectKind.READ, MemoryEffectKind.WRITE}
-
-
-def _symbol_value_text(value: SSAValue) -> str | None:
-    """返回公开 symbol.int 值文本。
-
-
-    功能说明:
-    - 只读取 `SymbolValueType` 的公开 `get_value()`。
-    - 非 symbol.int operand 返回 None，由调用方保守处理。
-
-    使用示例:
-    - if _symbol_value_text(size) == "16": ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    value_type = SSAValue.get(value).type
-    if not isinstance(value_type, SymbolValueType):
-        return None
-    return str(value_type.get_value())
-
-
-def _symbol_expr_text(value: Attribute) -> str:
-    """返回 symbol expr attr 的稳定文本。
-
-
-    功能说明:
-    - 仅在当前文件内比较 `NnMemoryType.shape/stride` 与 symbol operand 类型。
-    - 非预期 attribute 走 `str(...)`，避免扩大公开 API 依赖。
-
-    使用示例:
-    - text = _symbol_expr_text(memory_type.shape.data[0])
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    if isinstance(value, SymbolExprAttr):
-        return value.expr.data
-    return str(value)
-
-
-def _memory_type_of(value: SSAValue) -> NnMemoryType | None:
-    """返回 SSA value 的 nn.memory type。
-
-
-    功能说明:
-    - 只在当前文件内判断 full-write 覆盖关系。
-    - 非 memory value 返回 None，调用方保守拒绝 full reset。
-
-    使用示例:
-    - memory_type = _memory_type_of(use.operation.operands[0])
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    value_type = SSAValue.get(value).type
-    return value_type if isinstance(value_type, NnMemoryType) else None
-
-
-def _memory_types_match(lhs: SSAValue, rhs: SSAValue, *, require_same_space: bool = True) -> bool:
-    """判断两个 memory value 是否拥有相同布局。
-
-
-    功能说明:
-    - 默认要求 shape、stride、element_type 与 memory space 全部一致，服务 alias full-cover 判定。
-    - `dma.copy` 的公开 verifier 只要求 shape、stride、element_type 一致；该场景可关闭 same-space 要求。
-    - 非 memory value 或布局不一致时保守视为非完整 root write。
-
-    使用示例:
-    - if _memory_types_match(target, source): ...
-    - if _memory_types_match(target, source, require_same_space=False): ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    lhs_type = SSAValue.get(lhs).type
-    rhs_type = SSAValue.get(rhs).type
-    if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
-        return False
-    if require_same_space and lhs_type.space != rhs_type.space:
-        return False
-    return (
-        lhs_type.shape == rhs_type.shape
-        and lhs_type.stride == rhs_type.stride
-        and lhs_type.element_type == rhs_type.element_type
-    )
-
-
-def _sizes_cover_memory_shape(sizes: Iterable[SSAValue], memory_type: NnMemoryType) -> bool:
-    """判断 size operands 是否覆盖 memory type 的完整 shape。
-
-
-    功能说明:
-    - 只比较公开 symbol.int 类型值与 `NnMemoryType.shape` 条目文本。
-    - 任一维无法机械匹配时返回 False。
-
-    使用示例:
-    - if _sizes_cover_memory_shape(op.sizes, target_type): ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    size_texts = tuple(_symbol_value_text(SSAValue.get(size)) for size in sizes)
-    shape_texts = tuple(_symbol_expr_text(item) for item in memory_type.shape.data)
-    return len(size_texts) == len(shape_texts) and all(size == shape for size, shape in zip(size_texts, shape_texts))
-
-
-def _values_are_symbol_constants(values: Iterable[SSAValue], expected: str) -> bool:
-    """判断一组 symbol.int operand 是否都等于指定常量文本。
-
-
-    功能说明:
-    - 用于 full-region `dma.deslice/view/subview` 的 offset/stride 判定。
-    - 动态、iter 或非 symbol.int operand 均保守返回 False。
-
-    使用示例:
-    - if _values_are_symbol_constants(op.strides, "1"): ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    return all(_symbol_value_text(SSAValue.get(value)) == expected for value in values)
-
-
-def _shape_product_text(memory_type: NnMemoryType) -> str | None:
-    """返回 memory shape 的简单乘积文本。
-
-    功能说明:
-    - 仅用于当前文件内 full-cover 判断。
-    - 跳过常量 1，保留维度顺序；任一维为 `?` 时保守返回 None。
-
-    使用示例:
-    - text = _shape_product_text(memory_type)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    factors: list[str] = []
-    for dim in memory_type.shape.data:
-        text = _symbol_expr_text(dim)
-        if text == "?":
-            return None
-        if text != "1":
-            factors.append(text)
-    return "*".join(factors) if factors else "1"
-
-
-def _expected_contiguous_stride_texts(memory_type: NnMemoryType) -> tuple[str, ...] | None:
-    """返回 memory type 的默认连续 stride 文本。
-
-    功能说明:
-    - 动态匿名维度 `?` 无法证明连续 stride 时返回 None。
-    - 只按当前文件内公开文本比较，不调用 dma package 内部 helper。
-
-    使用示例:
-    - strides = _expected_contiguous_stride_texts(memory_type)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    result: list[str] = []
-    running = "1"
-    for dim in reversed(memory_type.shape.data):
-        result.append(running)
-        dim_text = _symbol_expr_text(dim)
-        if dim_text == "?":
-            return None
-        if dim_text != "1":
-            running = dim_text if running == "1" else f"{dim_text}*{running}"
-    result.reverse()
-    return tuple(result)
-
-
-def _memory_type_is_contiguous(memory_type: NnMemoryType) -> bool:
-    """判断 memory type 是否为默认连续布局。
-
-    功能说明:
-    - 用于 `dma.reinterpret` full-cover 判断，避免 partial alias write 被升级为 root full write。
-
-    使用示例:
-    - if _memory_type_is_contiguous(result_type): ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    expected = _expected_contiguous_stride_texts(memory_type)
-    if expected is None or len(expected) != len(memory_type.stride.data):
-        return False
-    actual = tuple(_symbol_expr_text(stride) for stride in memory_type.stride.data)
-    return actual == expected
-
-
-def _reinterpret_covers_source(op: DmaReinterpretOp) -> bool:
-    """判断 `dma.reinterpret` result 是否完整覆盖 source root。
-
-    功能说明:
-    - offset 必须为 0。
-    - source/result element type 与 space 必须一致。
-    - source/result numel 文本必须一致，且 result stride 必须是默认连续布局。
-
-    使用示例:
-    - if _reinterpret_covers_source(op): ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    source_type = _memory_type_of(SSAValue.get(op.source))
-    result_type = _memory_type_of(op.result)
-    if source_type is None or result_type is None:
-        return False
-    if source_type.element_type != result_type.element_type:
-        return False
-    if source_type.space.space.data != result_type.space.space.data:
-        return False
-    return (
-        _symbol_value_text(SSAValue.get(op.offset)) == "0"
-        and _shape_product_text(source_type) == _shape_product_text(result_type)
-        and _memory_type_is_contiguous(result_type)
-    )
-
-
-def _deslice_writes_full_target(op: DmaDesliceOp) -> bool:
-    """判断 `dma.deslice` 是否完整覆盖 target root。
-
-
-    功能说明:
-    - offsets 必须全 0，strides 必须全 1，sizes 必须等于 target shape。
-    - 无法机械证明时不把 `dma.deslice` 作为 full reset。
-
-    使用示例:
-    - if _deslice_writes_full_target(deslice_op): ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    target_type = _memory_type_of(SSAValue.get(op.target))
-    if target_type is None:
-        return False
-    return (
-        _values_are_symbol_constants(tuple(SSAValue.get(value) for value in op.offsets), "0")
-        and _values_are_symbol_constants(tuple(SSAValue.get(value) for value in op.strides), "1")
-        and _sizes_cover_memory_shape(tuple(SSAValue.get(value) for value in op.sizes), target_type)
-    )
-
-
-def _alias_op_covers_source(op: Operation) -> bool:
-    """判断 alias result 是否覆盖 source root 的完整可读内容。
-
-
-    功能说明:
-    - `dma.reshape` 视为整块重解释，写入 result 可覆盖 source root。
-    - `dma.view` 只有在 result/source 类型一致、offset 全 0 且 stride 全 1 时视为整块覆盖。
-    - `dma.subview` 默认是 byte pool 的局部 typed view；只有 source/result 类型一致且范围完整时才视为整块覆盖。
-    - `dma.reinterpret` 只有 offset 为 0、source/result numel 相等且 result 连续时视为整块覆盖。
-
-    使用示例:
-    - covers_root = _alias_op_covers_source(view_op)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    if isinstance(op, DmaReshapeOp):
-        return _memory_types_match(SSAValue.get(op.source), op.result)
+    loop_block = op.parent_block()
+    if loop_block is None:
+        return
+    symbol_for = loop_block.parent_op()
+    if not isinstance(symbol_for, SymbolForOp):
+        return
     if isinstance(op, DmaViewOp):
-        return (
-            _memory_types_match(SSAValue.get(op.source), op.result)
-            and _values_are_symbol_constants(tuple(SSAValue.get(value) for value in op.offsets), "0")
-            and _values_are_symbol_constants(tuple(SSAValue.get(value) for value in op.stride), "1")
+        operands = (SSAValue.get(op.source), *tuple(op.offsets), *tuple(op.shape), *tuple(op.stride))
+    elif isinstance(op, DmaReshapeOp):
+        operands = (SSAValue.get(op.source), *tuple(op.shape))
+    elif isinstance(op, DmaSubviewOp):
+        operands = (*tuple(op.source), *tuple(op.offset), *tuple(op.size), *tuple(op.stride))
+    elif isinstance(op, DmaReinterpretOp):
+        operands = (SSAValue.get(op.source), SSAValue.get(op.offset), *tuple(op.shape), *tuple(op.stride))
+    else:
+        return
+    owner_loop_block = symbol_for.body.blocks[0]
+    for operand in operands:
+        operand_value = SSAValue.get(operand)
+        if isinstance(operand_value, BlockArgument):
+            if operand_value.owner is owner_loop_block or not operand_value.owner.is_ancestor(symbol_for):
+                return
+            continue
+        owner = operand_value.owner
+        if not isinstance(owner, Operation):
+            continue
+        owner_block = owner.parent_block()
+        if owner_block is None:
+            continue
+        if owner_block is owner_loop_block or owner_loop_block.is_ancestor(owner):
+            return
+        if owner_block is symbol_for.parent_block():
+            if not owner.is_before_in_block(symbol_for):
+                return
+            continue
+        ancestor = owner_block.find_ancestor_op_in_block(symbol_for)
+        if ancestor is None or owner is ancestor or not owner.is_before_in_block(ancestor):
+            return
+    if len(op.results) != 1:
+        return
+    result_uses = tuple(op.results[0].uses)
+    if not result_uses:
+        return
+    for use in result_uses:
+        user = use.operation
+        user_block = user.parent_block()
+        if user_block is None or not (user_block is loop_block or loop_block.is_ancestor(user)):
+            return
+        if use.index == 0 and user.name in {"symbol.get_dim", "symbol.get_stride"}:
+            continue
+        supported_use = (
+            isinstance(user, DmaSliceOp)
+            and use.index == 0
+            or isinstance(user, DmaDesliceOp)
+            and use.index in (0, 1)
+            or isinstance(user, DmaFillOp)
+            and use.index == 0
+            or isinstance(user, DmaCopyOp)
+            and use.index in (0, 1)
+            or isinstance(user, DmaBroadcastOp)
+            and use.index in (0, 1)
         )
-    if isinstance(op, DmaSubviewOp):
-        source_value = SSAValue.get(op.source[0])
-        source_type = _memory_type_of(source_value)
+        if not supported_use and user.name.startswith("kernel."):
+            effects = get_effects(user)
+            if effects is not None:
+                used_value = SSAValue.get(user.operands[use.index])
+                kinds = {effect.kind for effect in effects if effect.value is used_value}
+                supported_use = bool(kinds) and kinds <= {MemoryEffectKind.READ, MemoryEffectKind.WRITE}
+        if supported_use:
+            continue
+        if use.index == 0 and isinstance(user, (DmaViewOp, DmaReshapeOp, DmaSubviewOp, DmaReinterpretOp)):
+            continue
+        return
+    op.detach()
+    rewriter.insert_op(op, InsertPoint.before(symbol_for))
+    rewriter.notify_op_modified(symbol_for)
+
+
+def _alias_op_covers_source(alias_op: Operation) -> bool:
+    """判断 alias op 是否逻辑覆盖其 source。
+
+
+    功能说明:
+    - 统一 `dma.reshape/view/subview/reinterpret` 的 full-cover 证明，供 alloc lifecycle proof 复用。
+    - 返回 `False` 表示 alias 结果只能作为局部 logical scope，不能升级成 backing root full write。
+    - 不修改 IR，也不访问当前文件外的非公开 API。
+
+    使用示例:
+    - if _alias_op_covers_source(alias_op): ...
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
+    """
+
+    if isinstance(alias_op, DmaReshapeOp):
+        lhs_type = SSAValue.get(alias_op.source).type
+        rhs_type = alias_op.result.type
         return (
-            source_type is not None
-            and _memory_types_match(source_value, op.result)
-            and _values_are_symbol_constants(tuple(SSAValue.get(value) for value in op.offset), "0")
-            and _values_are_symbol_constants(tuple(SSAValue.get(value) for value in op.stride), "1")
-            and _sizes_cover_memory_shape(tuple(SSAValue.get(value) for value in op.size), source_type)
+            isinstance(lhs_type, NnMemoryType)
+            and isinstance(rhs_type, NnMemoryType)
+            and lhs_type.space == rhs_type.space
+            and lhs_type.shape == rhs_type.shape
+            and lhs_type.stride == rhs_type.stride
+            and lhs_type.element_type == rhs_type.element_type
         )
-    if isinstance(op, DmaReinterpretOp):
-        return _reinterpret_covers_source(op)
+    if isinstance(alias_op, DmaViewOp):
+        lhs_type = SSAValue.get(alias_op.source).type
+        rhs_type = alias_op.result.type
+        offsets_are_zero = True
+        for offset_value in alias_op.offsets:
+            offset_type = SSAValue.get(offset_value).type
+            if not isinstance(offset_type, SymbolValueType) or str(offset_type.get_value()) != "0":
+                offsets_are_zero = False
+                break
+        strides_are_one = True
+        for stride_value in alias_op.stride:
+            stride_type = SSAValue.get(stride_value).type
+            if not isinstance(stride_type, SymbolValueType) or str(stride_type.get_value()) != "1":
+                strides_are_one = False
+                break
+        return (
+            isinstance(lhs_type, NnMemoryType)
+            and isinstance(rhs_type, NnMemoryType)
+            and lhs_type.space == rhs_type.space
+            and lhs_type.shape == rhs_type.shape
+            and lhs_type.stride == rhs_type.stride
+            and lhs_type.element_type == rhs_type.element_type
+            and offsets_are_zero
+            and strides_are_one
+        )
+    if isinstance(alias_op, DmaSubviewOp):
+        source_value = SSAValue.get(alias_op.source[0])
+        source_type = source_value.type
+        result_type = alias_op.result.type
+        offsets_are_zero = True
+        for offset_value in alias_op.offset:
+            offset_type = SSAValue.get(offset_value).type
+            if not isinstance(offset_type, SymbolValueType) or str(offset_type.get_value()) != "0":
+                offsets_are_zero = False
+                break
+        strides_are_one = True
+        for stride_value in alias_op.stride:
+            stride_type = SSAValue.get(stride_value).type
+            if not isinstance(stride_type, SymbolValueType) or str(stride_type.get_value()) != "1":
+                strides_are_one = False
+                break
+        size_texts = []
+        for size_value in alias_op.size:
+            size_type = SSAValue.get(size_value).type
+            size_texts.append(str(size_type.get_value()) if isinstance(size_type, SymbolValueType) else None)
+        shape_texts = []
+        if isinstance(source_type, NnMemoryType):
+            for shape_item in source_type.shape.data:
+                shape_texts.append(shape_item.expr.data if isinstance(shape_item, SymbolExprAttr) else str(shape_item))
+        return (
+            isinstance(source_type, NnMemoryType)
+            and isinstance(result_type, NnMemoryType)
+            and source_type.space == result_type.space
+            and source_type.shape == result_type.shape
+            and source_type.stride == result_type.stride
+            and source_type.element_type == result_type.element_type
+            and offsets_are_zero
+            and strides_are_one
+            and len(size_texts) == len(shape_texts)
+            and all(size == shape for size, shape in zip(size_texts, shape_texts))
+        )
+    if isinstance(alias_op, DmaReinterpretOp):
+        source_type = SSAValue.get(alias_op.source).type
+        result_type = alias_op.result.type
+        source_numel = None
+        result_numel = None
+        if isinstance(source_type, NnMemoryType):
+            factors = []
+            unknown_dim = False
+            for dim in source_type.shape.data:
+                dim_text = dim.expr.data if isinstance(dim, SymbolExprAttr) else str(dim)
+                if dim_text == "?":
+                    unknown_dim = True
+                    break
+                if dim_text != "1":
+                    factors.append(dim_text)
+            if not unknown_dim:
+                source_numel = "*".join(factors) if factors else "1"
+        if isinstance(result_type, NnMemoryType):
+            factors = []
+            unknown_dim = False
+            for dim in result_type.shape.data:
+                dim_text = dim.expr.data if isinstance(dim, SymbolExprAttr) else str(dim)
+                if dim_text == "?":
+                    unknown_dim = True
+                    break
+                if dim_text != "1":
+                    factors.append(dim_text)
+            if not unknown_dim:
+                result_numel = "*".join(factors) if factors else "1"
+        expected_strides = None
+        if isinstance(result_type, NnMemoryType):
+            expected = []
+            running = "1"
+            unknown_dim = False
+            for dim in reversed(result_type.shape.data):
+                expected.append(running)
+                dim_text = dim.expr.data if isinstance(dim, SymbolExprAttr) else str(dim)
+                if dim_text == "?":
+                    unknown_dim = True
+                    break
+                if dim_text != "1":
+                    running = dim_text if running == "1" else f"{dim_text}*{running}"
+            if not unknown_dim:
+                expected.reverse()
+                expected_strides = tuple(expected)
+        actual_strides = None
+        if isinstance(result_type, NnMemoryType):
+            actual_strides = tuple(
+                stride.expr.data if isinstance(stride, SymbolExprAttr) else str(stride)
+                for stride in result_type.stride.data
+            )
+        offset_type = SSAValue.get(alias_op.offset).type
+        return (
+            isinstance(source_type, NnMemoryType)
+            and isinstance(result_type, NnMemoryType)
+            and source_type.element_type == result_type.element_type
+            and source_type.space.space.data == result_type.space.space.data
+            and isinstance(offset_type, SymbolValueType)
+            and str(offset_type.get_value()) == "0"
+            and source_numel is not None
+            and source_numel == result_numel
+            and expected_strides is not None
+            and actual_strides == expected_strides
+        )
     return False
 
 
-def _write_use_covers_root(use: Use, *, alias_covers_root: bool) -> bool:
-    """判断 WRITE use 是否可作为 alloc root 的 full reset。
+def _reinterpret_logical_access_scope(access_value: SSAValue) -> SSAValue | tuple[SSAValue, str]:
+    """返回 READ/WRITE event 使用的 logical access scope。
 
 
     功能说明:
-    - alias result 只有覆盖 source root 时，写入 alias 才能证明 root 被完整 reset。
-    - `dma.fill`、`dma.broadcast` target、`dma.slice` target 与 `kernel.*` out 视为完整写入当前 memory value。
-    - `dma.copy` 按公开 verifier 的 shape/stride/element_type 合同证明 target 整块覆盖，可跨 memory space。
-    - `dma.deslice` 需要额外证明整块覆盖；partial write 不能证明后续 root read。
+    - 对普通 value 返回自身，维持 root-scope 证明。
+    - 对 contiguous zero-offset `dma.reinterpret` 返回 `(source, result_numel)`，允许同一 logical scope 内证明 reset。
+    - 该 helper 只产生 proof key，不改变 alias op 的 IR 位置或结果。
 
     使用示例:
-    - full_write = _write_use_covers_root(use, alias_covers_root=True)
+    - access_scope = _reinterpret_logical_access_scope(access_value)
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
@@ -870,28 +428,153 @@ def _write_use_covers_root(use: Use, *, alias_covers_root: bool) -> bool:
     - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
-    if not alias_covers_root:
-        return False
-    user = use.operation
-    if isinstance(user, (DmaFillOp, DmaBroadcastOp, DmaSliceOp)) and use.index == 0:
+    access_owner = access_value.owner
+    if not isinstance(access_owner, DmaReinterpretOp):
+        return access_value
+    source_type = SSAValue.get(access_owner.source).type
+    result_type = access_owner.result.type
+    result_numel = None
+    if isinstance(result_type, NnMemoryType):
+        factors = []
+        unknown_dim = False
+        for dim in result_type.shape.data:
+            dim_text = dim.expr.data if isinstance(dim, SymbolExprAttr) else str(dim)
+            if dim_text == "?":
+                unknown_dim = True
+                break
+            if dim_text != "1":
+                factors.append(dim_text)
+        if not unknown_dim:
+            result_numel = "*".join(factors) if factors else "1"
+    expected_strides = None
+    if isinstance(result_type, NnMemoryType):
+        expected = []
+        running = "1"
+        unknown_dim = False
+        for dim in reversed(result_type.shape.data):
+            expected.append(running)
+            dim_text = dim.expr.data if isinstance(dim, SymbolExprAttr) else str(dim)
+            if dim_text == "?":
+                unknown_dim = True
+                break
+            if dim_text != "1":
+                running = dim_text if running == "1" else f"{dim_text}*{running}"
+        if not unknown_dim:
+            expected.reverse()
+            expected_strides = tuple(expected)
+    actual_strides = None
+    if isinstance(result_type, NnMemoryType):
+        actual_strides = tuple(
+            stride.expr.data if isinstance(stride, SymbolExprAttr) else str(stride)
+            for stride in result_type.stride.data
+        )
+    offset_type = SSAValue.get(access_owner.offset).type
+    if (
+        isinstance(source_type, NnMemoryType)
+        and isinstance(result_type, NnMemoryType)
+        and result_numel is not None
+        and source_type.element_type == result_type.element_type
+        and source_type.space.space.data == result_type.space.space.data
+        and isinstance(offset_type, SymbolValueType)
+        and str(offset_type.get_value()) == "0"
+        and expected_strides is not None
+        and actual_strides == expected_strides
+    ):
+        return (SSAValue.get(access_owner.source), result_numel)
+    return access_value
+
+
+def _write_covers_access_value(event_user: Operation, event_use_index: int) -> bool:
+    """判断一次 WRITE 是否覆盖该 use 代表的完整访问值。
+
+
+    功能说明:
+    - 把 fill/broadcast/slice/copy/deslice/kernel 的 full-write 规则收口成单一 predicate。
+    - 返回值只说明当前 access value 是否被完整写入，是否覆盖 root 由 caller 的 alias proof 决定。
+    - 不允许在该 helper 内放宽 READ 初始化证明。
+
+    使用示例:
+    - write_covers_value = _write_covers_access_value(event_user, event_use.index)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
+    """
+
+    if isinstance(event_user, (DmaFillOp, DmaBroadcastOp, DmaSliceOp)) and event_use_index == 0:
         return True
-    if isinstance(user, DmaCopyOp) and use.index == 0:
-        return _memory_types_match(SSAValue.get(user.target), SSAValue.get(user.source), require_same_space=False)
-    if isinstance(user, DmaDesliceOp) and use.index == 0:
-        return _deslice_writes_full_target(user)
-    return user.name.startswith("kernel.") and MemoryEffectKind.WRITE in (_effect_kinds_for_use(use) or set())
+    if isinstance(event_user, DmaCopyOp) and event_use_index == 0:
+        target_type = SSAValue.get(event_user.target).type
+        source_type = SSAValue.get(event_user.source).type
+        return (
+            isinstance(target_type, NnMemoryType)
+            and isinstance(source_type, NnMemoryType)
+            and target_type.shape == source_type.shape
+            and target_type.stride == source_type.stride
+            and target_type.element_type == source_type.element_type
+        )
+    if isinstance(event_user, DmaDesliceOp) and event_use_index == 0:
+        target_type = SSAValue.get(event_user.target).type
+        offsets_are_zero = True
+        for offset_value in event_user.offsets:
+            offset_type = SSAValue.get(offset_value).type
+            if not isinstance(offset_type, SymbolValueType) or str(offset_type.get_value()) != "0":
+                offsets_are_zero = False
+                break
+        strides_are_one = True
+        for stride_value in event_user.strides:
+            stride_type = SSAValue.get(stride_value).type
+            if not isinstance(stride_type, SymbolValueType) or str(stride_type.get_value()) != "1":
+                strides_are_one = False
+                break
+        size_texts = []
+        for size_value in event_user.sizes:
+            size_type = SSAValue.get(size_value).type
+            size_texts.append(str(size_type.get_value()) if isinstance(size_type, SymbolValueType) else None)
+        shape_texts = []
+        if isinstance(target_type, NnMemoryType):
+            for shape_item in target_type.shape.data:
+                shape_texts.append(shape_item.expr.data if isinstance(shape_item, SymbolExprAttr) else str(shape_item))
+        return (
+            isinstance(target_type, NnMemoryType)
+            and offsets_are_zero
+            and strides_are_one
+            and len(size_texts) == len(shape_texts)
+            and all(size == shape for size, shape in zip(size_texts, shape_texts))
+        )
+    return event_user.name.startswith("kernel.")
 
 
-def _is_direct_legacy_output_scratch_use(use: Use, loop_block: Block) -> bool:
-    """判断 use 是否为同 owner body 内 legacy output scratch 搬出。
+class DmaAllocWithMatmulFirstUseHoistPattern(RewritePattern):
+    """`kernel.matmul` 首次使用自 reset 的 `dma.alloc` 外提 pattern。
 
 
     功能说明:
-    - 仅允许 `dma.deslice(..., source=buf, ...)` 直接位于当前 owner `symbol.for` body。
-    - descendant region 内的 `dma.deslice source` 必须按公开 MemoryEffect READ 进入 lifecycle proof。
+    - 只匹配需要 dynamic acc matmul READ+WRITE 自初始化证明的 loop-local `dma.alloc/free`。
+    - 普通 fill/copy/deslice 等已 reset 的 alloc 仍由 `DmaAllocInSymbolForHoistPattern` 处理。
+    - 该 pattern 放在普通 alloc pattern 前，避免 self-reset 例外散落在 generic rewrite 责任中。
+    - IR before:
+      ```mlir
+      symbol.for %k = %start to %end step %tile {
+        %out = "dma.alloc"(%tm, %tn) : (...) -> !nn.memory<...>
+        %acc = symbol.ne %k, %start : !symbol.iter<...>, !symbol.int<...> -> i1
+        "kernel.matmul"(%out, %lhs, %rhs, %acc) : (...) -> ()
+        "dma.free"(%out) : (!nn.memory<...>) -> ()
+      }
+      ```
+    - IR after:
+      ```mlir
+      %out = "dma.alloc"(%tm, %tn) : (...) -> !nn.memory<...>
+      symbol.for %k = %start to %end step %tile {
+        %acc = symbol.ne %k, %start : !symbol.iter<...>, !symbol.int<...> -> i1
+        "kernel.matmul"(%out, %lhs, %rhs, %acc) : (...) -> ()
+      }
+      "dma.free"(%out) : (!nn.memory<...>) -> ()
+      ```
 
     使用示例:
-    - if _is_direct_legacy_output_scratch_use(use, loop_block): ...
+    - pattern = DmaAllocWithMatmulFirstUseHoistPattern()
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
@@ -899,212 +582,275 @@ def _is_direct_legacy_output_scratch_use(use: Use, loop_block: Block) -> bool:
     - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
-    return isinstance(use.operation, DmaDesliceOp) and use.index == 1 and _operation_parent_block(use.operation) is loop_block
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: DmaAllocOp, rewriter: PatternRewriter, /) -> None:
+        """对 dynamic acc matmul 首次覆盖写的 alloc 执行外提。
 
 
-def _memory_event_from_use(use: Use, *, alias_covers_root: bool, loop_block: Block) -> _MemoryEvent | None:
-    """把公开 MemoryEffect use 转成生命周期事件。
+        功能说明:
+        - 仅当 alloc 位于 `symbol.for` 直接 body block 内、shape loop-invariant 且存在唯一 matching free 时继续。
+        - 生命周期证明允许 dynamic acc `kernel.matmul` out operand 自证首轮覆盖写。
+        - 若 use plan 不包含 self-reset read，则保持 no-op，交由普通 alloc pattern 处理。
 
+        使用示例:
+        - DmaAllocWithMatmulFirstUseHoistPattern().match_and_rewrite(op, rewriter)
 
-    功能说明:
-    - 只接受 READ/WRITE effect；unknown、ALLOC/FREE 或空 effect 均返回 None。
-    - `full_write` 单独记录，供 nested loop read proof 使用。
-    - 同 owner body 直接 `dma.deslice source` 保留旧 output scratch 例外，不参与 nested reset proof。
-    - descendant region 内 `dma.deslice source` 仍按公开 READ effect 强制要求此前 full reset/write。
+        关联文件:
+        - spec: spec/pass/symbol_buffer_hoist.md
+        - test: test/passes/test_symbol_buffer_hoist.py
+        - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
+        """
 
-    使用示例:
-    - event = _memory_event_from_use(use, alias_covers_root=True, loop_block=loop_block)
+        loop_block = op.parent_block()
+        if loop_block is None:
+            return
+        symbol_for = loop_block.parent_op()
+        if not isinstance(symbol_for, SymbolForOp):
+            return
 
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
+        for shape_value in op.dynamic_shape:
+            if not _value_dominates_symbol_for(SSAValue.get(shape_value), symbol_for):
+                return
 
-    if _is_direct_legacy_output_scratch_use(use, loop_block):
-        return _MemoryEvent(use=use, effects=frozenset({MemoryEffectKind.WRITE}), full_write=False)
-    kinds = _effect_kinds_for_use(use)
-    if kinds is None or not kinds or not kinds <= {MemoryEffectKind.READ, MemoryEffectKind.WRITE}:
-        return None
-    full_write = (
-        MemoryEffectKind.WRITE in kinds
-        and MemoryEffectKind.READ not in kinds
-        and _write_use_covers_root(use, alias_covers_root=alias_covers_root)
-    )
-    return _MemoryEvent(use=use, effects=frozenset(kinds), full_write=full_write)
+        pending_event_uses = []
+        free_ops: list[DmaFreeOp] = []
+        failed = False
+        for use in tuple(op.result.uses):
+            user = use.operation
+            user_block = user.parent_block()
+            if user_block is None or not (user_block is loop_block or loop_block.is_ancestor(user)):
+                return
+            if use.index == 0 and user.name in {"symbol.get_dim", "symbol.get_stride"}:
+                continue
 
+            effects = get_effects(user)
+            if effects is not None:
+                used_value = SSAValue.get(user.operands[use.index])
+                kinds = {effect.kind for effect in effects if effect.value is used_value}
+                if kinds and kinds <= {MemoryEffectKind.READ, MemoryEffectKind.WRITE}:
+                    pending_event_uses.append((use, True))
+                    continue
 
-def _data_events_are_reset_before_read(data_events: tuple[_MemoryEvent, ...], loop_block: Block) -> bool:
-    """校验生命周期 data event 中每个 read 前已有支配它的 full reset/write。
+            if use.index == 0 and isinstance(user, (DmaViewOp, DmaReshapeOp, DmaSubviewOp, DmaReinterpretOp)):
+                alias_stack = [(user, True)]
+                visited_alias_ops: set[Operation] = set()
+                while alias_stack and not failed:
+                    alias_op, alias_covers_root = alias_stack.pop()
+                    if alias_op in visited_alias_ops:
+                        failed = True
+                        break
+                    visited_alias_ops.add(alias_op)
+                    alias_block = alias_op.parent_block()
+                    if alias_block is None or not (alias_block is loop_block or loop_block.is_ancestor(alias_op)):
+                        failed = True
+                        break
+                    if len(alias_op.results) != 1:
+                        failed = True
+                        break
+                    result_uses = tuple(alias_op.results[0].uses)
+                    if not result_uses:
+                        failed = True
+                        break
 
+                    alias_op_covers_source = _alias_op_covers_source(alias_op)
 
-    功能说明:
-    - 只对公开 `MemoryEffect` 可判定的 use 强制顺序证明。
-    - full write 可位于同 block read 前，也可位于包住 read 的 nested op 前。
-    - nested loop 内 write 不证明 loop 后 read；sibling region write 不证明 merge read。
-    - `READ+WRITE` 的同值 use 不得自证 reset/write；只有同一 block 中此前已有独立 `WRITE` 时才允许继续。
-    - 任一 read 出现在对应 block 的 reset/write 前时拒绝外提。
+                    next_alias_covers_root = alias_covers_root and alias_op_covers_source
+                    for result_use in result_uses:
+                        result_user = result_use.operation
+                        result_user_block = result_user.parent_block()
+                        if result_user_block is None or not (
+                            result_user_block is loop_block or loop_block.is_ancestor(result_user)
+                        ):
+                            failed = True
+                            break
+                        if result_use.index == 0 and result_user.name in {"symbol.get_dim", "symbol.get_stride"}:
+                            continue
+                        supported_result_use = (
+                            isinstance(result_user, DmaSliceOp)
+                            and result_use.index == 0
+                            or isinstance(result_user, DmaDesliceOp)
+                            and result_use.index in (0, 1)
+                            or isinstance(result_user, DmaFillOp)
+                            and result_use.index == 0
+                            or isinstance(result_user, DmaCopyOp)
+                            and result_use.index in (0, 1)
+                            or isinstance(result_user, DmaBroadcastOp)
+                            and result_use.index in (0, 1)
+                        )
+                        if not supported_result_use and result_user.name.startswith("kernel."):
+                            result_effects = get_effects(result_user)
+                            if result_effects is not None:
+                                result_value = SSAValue.get(result_user.operands[result_use.index])
+                                result_kinds = {effect.kind for effect in result_effects if effect.value is result_value}
+                                supported_result_use = (
+                                    bool(result_kinds)
+                                    and result_kinds <= {MemoryEffectKind.READ, MemoryEffectKind.WRITE}
+                                )
+                        if supported_result_use:
+                            pending_event_uses.append((result_use, next_alias_covers_root))
+                            continue
+                        if result_use.index == 0 and isinstance(
+                            result_user, (DmaViewOp, DmaReshapeOp, DmaSubviewOp, DmaReinterpretOp)
+                        ):
+                            alias_stack.append((result_user, next_alias_covers_root))
+                            continue
+                        failed = True
+                        break
+                if failed:
+                    return
+                continue
 
-    使用示例:
-    - _data_events_are_reset_before_read(events, loop_block)
+            if isinstance(user, DmaFreeOp) and use.index == 0 and user.parent_block() is loop_block:
+                free_ops.append(user)
+                continue
+            return
 
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
+        if failed or not pending_event_uses or len(free_ops) != 1:
+            return
 
-    for event in data_events:
-        user = event.use.operation
-        if not _operation_is_in_block_or_descendant(user, loop_block):
-            return False
+        data_events = []
+        for event_use, alias_covers_root in pending_event_uses:
+            event_user = event_use.operation
+            access_value = SSAValue.get(event_user.operands[event_use.index])
+            access_scope = _reinterpret_logical_access_scope(access_value)
 
-    full_writes = tuple(event for event in data_events if event.full_write)
-    for event in data_events:
-        if MemoryEffectKind.READ not in event.effects:
-            continue
-        if not any(_op_dominates_op(write_event.use.operation, event.use.operation) for write_event in full_writes):
-                return False
-    return True
+            if isinstance(event_user, DmaDesliceOp) and event_use.index == 1 and event_user.parent_block() is loop_block:
+                data_events.append(
+                    _MemoryEvent(
+                        use=event_use,
+                        effects=frozenset({MemoryEffectKind.WRITE}),
+                        access_scope=access_scope,
+                        full_write=False,
+                        full_write_scope=None,
+                        self_reset=False,
+                    )
+                )
+                continue
 
+            effects = get_effects(event_user)
+            if effects is None:
+                return
+            effect_value = SSAValue.get(event_user.operands[event_use.index])
+            kinds = {effect.kind for effect in effects if effect.value is effect_value}
+            if not kinds or not kinds <= {MemoryEffectKind.READ, MemoryEffectKind.WRITE}:
+                return
 
-def _collect_alias_data_events(
-    alias_op: Operation,
-    loop_block: Block,
-    visited: frozenset[Operation],
-    *,
-    alias_covers_root: bool,
-) -> tuple[_MemoryEvent, ...] | None:
-    """收集 alias result 最终承接的可捕获 lifecycle event。
+            self_resets = False
+            if isinstance(event_user, KernelMatmulOp) and event_use.index == 0 and event_user.dynamic_acc is not None:
+                matmul_block = event_user.parent_block()
+                acc_value = SSAValue.get(event_user.dynamic_acc)
+                acc_op = acc_value.owner
+                if matmul_block is not None and isinstance(acc_op, Operation):
+                    if acc_op.name == "symbol.ne" and acc_op.parent_block() is matmul_block and acc_op.is_before_in_block(event_user):
+                        innermost_for = matmul_block.parent_op()
+                        if isinstance(innermost_for, SymbolForOp):
+                            iter_arg = innermost_for.body.blocks[0].args[0]
+                            start_value = SSAValue.get(innermost_for.start)
+                            operands = tuple(SSAValue.get(operand) for operand in acc_op.operands)
+                            self_resets = operands in ((iter_arg, start_value), (start_value, iter_arg))
 
+            write_covers_value = False
+            if MemoryEffectKind.WRITE in kinds:
+                write_covers_value = _write_covers_access_value(event_user, event_use.index)
 
-    功能说明:
-    - `dma.view`、`dma.reshape`、`dma.subview`、`dma.reinterpret` result 只能被同一 owner loop body 或其 descendant
-      region 内的可捕获 memory use 或下一层受支持 alias op 使用。
-    - owner loop 外、sibling region、`symbol.yield`、`func.return` 或未知 direct use 一律让外提 no-op。
-    - 返回的 event 用于证明 matching free 晚于 alias 链真实消费，且 partial alias write 不被当作 root reset。
-
-    使用示例:
-    - events = _collect_alias_data_events(view_op, loop_block, frozenset(), alias_covers_root=True)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    if alias_op in visited:
-        return None
-    if not _operation_is_in_block_or_descendant(alias_op, loop_block):
-        return None
-    if len(alias_op.results) != 1:
-        return None
-    result_uses = _collect_direct_uses(alias_op.results[0])
-    if not result_uses:
-        return None
-
-    next_visited = visited | frozenset((alias_op,))
-    data_events: list[_MemoryEvent] = []
-    next_alias_covers_root = alias_covers_root and _alias_op_covers_source(alias_op)
-    for use in result_uses:
-        if not _operation_is_in_block_or_descendant(use.operation, loop_block):
-            return None
-        if _is_metadata_query_use(use):
-            continue
-        if _is_supported_alias_result_use(use):
-            event = _memory_event_from_use(use, alias_covers_root=next_alias_covers_root, loop_block=loop_block)
-            if event is None:
-                return None
-            data_events.append(event)
-            continue
-        if _is_supported_alias_source_use(use):
-            nested_data_events = _collect_alias_data_events(
-                use.operation,
-                loop_block,
-                next_visited,
-                alias_covers_root=next_alias_covers_root,
+            root_full_write = alias_covers_root and write_covers_value
+            scoped_full_write = (
+                write_covers_value
+                and not root_full_write
+                and (MemoryEffectKind.READ not in kinds or self_resets)
             )
-            if nested_data_events is None:
-                return None
-            data_events.extend(nested_data_events)
-            continue
-        return None
-    return tuple(data_events)
-
-
-def _build_hoist_use_plan(uses: Iterable[Use], loop_block: Block) -> _HoistUsePlan | None:
-    """判断 alloc 结果的 direct use 集合是否满足当前公开外提条件。
-
-
-    功能说明:
-    - 当前公开语义要求 alloc 至少存在一个 data use。
-    - data use 必须位于同一 loop body 或其非 `symbol.for` descendant region 内，且属于公开 MemoryEffect
-      可判定的 read/write use，或受支持 alias 链最终导向的可捕获 use。
-    - lifecycle use 必须存在同一 loop body 内唯一 `dma.free`，且必须晚于所有 data use。
-    - 多个 free、nested free、跨 loop free 或未知 direct use 均保持 no-op。
-
-    使用示例:
-    - plan = _build_hoist_use_plan(_collect_direct_uses(alloc_op.result), loop_block)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    collected_uses = tuple(uses)
-    if not collected_uses:
-        return None
-
-    data_events: list[_MemoryEvent] = []
-    free_ops: list[DmaFreeOp] = []
-    for use in collected_uses:
-        user = use.operation
-        if not _operation_is_in_block_or_descendant(user, loop_block):
-            return None
-        if _is_metadata_query_use(use):
-            continue
-        if _is_supported_lifecycle_data_use(use):
-            event = _memory_event_from_use(use, alias_covers_root=True, loop_block=loop_block)
-            if event is None:
-                return None
-            data_events.append(event)
-            continue
-        if _is_supported_alias_source_use(use):
-            alias_data_events = _collect_alias_data_events(
-                user,
-                loop_block,
-                frozenset(),
-                alias_covers_root=True,
+            data_events.append(
+                _MemoryEvent(
+                    use=event_use,
+                    effects=frozenset(kinds),
+                    access_scope=access_scope,
+                    full_write=root_full_write or scoped_full_write,
+                    full_write_scope=None if root_full_write else access_scope,
+                    self_reset=MemoryEffectKind.READ in kinds and scoped_full_write and self_resets,
+                )
             )
-            if alias_data_events is None:
-                return None
-            data_events.extend(alias_data_events)
-            continue
-        if isinstance(user, DmaFreeOp) and use.index == 0 and _operation_parent_block(user) is loop_block:
-            free_ops.append(user)
-            continue
-        return None
 
-    if not data_events or len(free_ops) != 1:
-        return None
-    free_op = free_ops[0]
-    data_event_tuple = tuple(data_events)
-    if not _data_events_are_reset_before_read(data_event_tuple, loop_block):
-        return None
-    if not _free_follows_data_events(free_op, data_event_tuple, loop_block):
-        return None
-    return _HoistUsePlan(data_events=data_event_tuple, free_op=free_op)
+        if not data_events:
+            return
+        events_by_op: dict[Operation, list[_MemoryEvent]] = {}
+        for event in data_events:
+            event_op = event.use.operation
+            event_block = event_op.parent_block()
+            if event_block is None or not (event_block is loop_block or loop_block.is_ancestor(event_op)):
+                return
+            events_by_op.setdefault(event_op, []).append(event)
+
+        proof_failed = False
+        proof_stack = [(loop_block, ())]
+        while proof_stack and not proof_failed:
+            scan_block, entering_scopes = proof_stack.pop()
+            initialized_scopes = list(entering_scopes)
+            for scan_op in scan_block.ops:
+                op_events = events_by_op.get(scan_op, ())
+                for event in op_events:
+                    if MemoryEffectKind.READ not in event.effects:
+                        continue
+                    if (
+                        event.self_reset
+                        and (event.full_write_scope is None or event.full_write_scope == event.access_scope)
+                    ):
+                        continue
+                    if not any(scope is None or scope == event.access_scope for scope in initialized_scopes):
+                        proof_failed = True
+                        break
+                if proof_failed:
+                    break
+                for event in op_events:
+                    if event.full_write:
+                        initialized_scopes.append(event.full_write_scope)
+                for region in scan_op.regions:
+                    for child_block in region.blocks:
+                        proof_stack.append((child_block, tuple(initialized_scopes)))
+        if proof_failed:
+            return
+
+        free_op = free_ops[0]
+        indexes = {item: index for index, item in enumerate(loop_block.ops)}
+        if free_op not in indexes:
+            return
+        data_indexes: list[int] = []
+        for event in data_events:
+            current_op = event.use.operation
+            current_block = current_op.parent_block()
+            direct_use_op = None
+            while current_block is not None:
+                if current_block is loop_block:
+                    direct_use_op = current_op
+                    break
+                parent_op = current_block.parent_op()
+                if parent_op is None:
+                    break
+                current_op = parent_op
+                current_block = current_op.parent_block()
+            if direct_use_op not in indexes:
+                return
+            data_indexes.append(indexes[direct_use_op])
+        if not data_indexes or indexes[free_op] <= max(data_indexes):
+            return
+        if not any(event.self_reset and MemoryEffectKind.READ in event.effects for event in data_events):
+            return
+
+        op.detach()
+        rewriter.insert_op(op, InsertPoint.before(symbol_for))
+        free_op.detach()
+        rewriter.insert_op(free_op, InsertPoint.after(symbol_for))
+        rewriter.notify_op_modified(symbol_for)
 
 
 class DmaAllocInSymbolForHoistPattern(RewritePattern):
-    """`symbol.for` 内 `dma.alloc` 外提 pattern。
+    """`symbol.for` 内普通 `dma.alloc` 外提 pattern。
 
 
     功能说明:
     - 只匹配当前 `symbol.for` body block 顶层的 `dma.alloc`。
     - 满足 shape invariant、direct use 白名单与唯一匹配 free 时，把 alloc 外提到所属 `symbol.for` 之前。
     - 若存在合法匹配 free，同步把 free 移到所属 `symbol.for` 之后，保持生命周期成对外提。
+    - 不启用 READ+WRITE 自初始化例外；dynamic acc matmul 首次覆盖写由专用 pattern 处理。
     - IR before:
       ```mlir
       symbol.for %i = %c0 to %n step %c1 {
@@ -1134,13 +880,14 @@ class DmaAllocInSymbolForHoistPattern(RewritePattern):
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: DmaAllocOp, rewriter: PatternRewriter, /) -> None:
-        """对满足公开条件的 loop 内 `dma.alloc` 执行外提。
+        """对满足普通 reset 条件的 loop 内 `dma.alloc` 执行外提。
 
 
         功能说明:
         - 仅当 alloc 位于 `symbol.for` 直接 body block 内时继续。
         - shape 或 direct use 任一条件不满足时保持 no-op。
         - 外提后复用原 op/result，不新建等价 alloc；合法 free 也复用原 op。
+        - 不允许 dynamic acc matmul 自证 reset，避免与专用 pattern 重叠。
 
         使用示例:
         - DmaAllocInSymbolForHoistPattern().match_and_rewrite(op, rewriter)
@@ -1157,115 +904,228 @@ class DmaAllocInSymbolForHoistPattern(RewritePattern):
         symbol_for = loop_block.parent_op()
         if not isinstance(symbol_for, SymbolForOp):
             return
-        if not _shape_is_loop_invariant(op, symbol_for):
+
+        for shape_value in op.dynamic_shape:
+            if not _value_dominates_symbol_for(SSAValue.get(shape_value), symbol_for):
+                return
+
+        pending_event_uses = []
+        free_ops: list[DmaFreeOp] = []
+        failed = False
+        for use in tuple(op.result.uses):
+            user = use.operation
+            user_block = user.parent_block()
+            if user_block is None or not (user_block is loop_block or loop_block.is_ancestor(user)):
+                return
+            if use.index == 0 and user.name in {"symbol.get_dim", "symbol.get_stride"}:
+                continue
+
+            effects = get_effects(user)
+            if effects is not None:
+                used_value = SSAValue.get(user.operands[use.index])
+                kinds = {effect.kind for effect in effects if effect.value is used_value}
+                if kinds and kinds <= {MemoryEffectKind.READ, MemoryEffectKind.WRITE}:
+                    pending_event_uses.append((use, True))
+                    continue
+
+            if use.index == 0 and isinstance(user, (DmaViewOp, DmaReshapeOp, DmaSubviewOp, DmaReinterpretOp)):
+                alias_stack = [(user, True)]
+                visited_alias_ops: set[Operation] = set()
+                while alias_stack and not failed:
+                    alias_op, alias_covers_root = alias_stack.pop()
+                    if alias_op in visited_alias_ops:
+                        failed = True
+                        break
+                    visited_alias_ops.add(alias_op)
+                    alias_block = alias_op.parent_block()
+                    if alias_block is None or not (alias_block is loop_block or loop_block.is_ancestor(alias_op)):
+                        failed = True
+                        break
+                    if len(alias_op.results) != 1:
+                        failed = True
+                        break
+                    result_uses = tuple(alias_op.results[0].uses)
+                    if not result_uses:
+                        failed = True
+                        break
+
+                    alias_op_covers_source = _alias_op_covers_source(alias_op)
+
+                    next_alias_covers_root = alias_covers_root and alias_op_covers_source
+                    for result_use in result_uses:
+                        result_user = result_use.operation
+                        result_user_block = result_user.parent_block()
+                        if result_user_block is None or not (
+                            result_user_block is loop_block or loop_block.is_ancestor(result_user)
+                        ):
+                            failed = True
+                            break
+                        if result_use.index == 0 and result_user.name in {"symbol.get_dim", "symbol.get_stride"}:
+                            continue
+                        supported_result_use = (
+                            isinstance(result_user, DmaSliceOp)
+                            and result_use.index == 0
+                            or isinstance(result_user, DmaDesliceOp)
+                            and result_use.index in (0, 1)
+                            or isinstance(result_user, DmaFillOp)
+                            and result_use.index == 0
+                            or isinstance(result_user, DmaCopyOp)
+                            and result_use.index in (0, 1)
+                            or isinstance(result_user, DmaBroadcastOp)
+                            and result_use.index in (0, 1)
+                        )
+                        if not supported_result_use and result_user.name.startswith("kernel."):
+                            result_effects = get_effects(result_user)
+                            if result_effects is not None:
+                                result_value = SSAValue.get(result_user.operands[result_use.index])
+                                result_kinds = {effect.kind for effect in result_effects if effect.value is result_value}
+                                supported_result_use = (
+                                    bool(result_kinds)
+                                    and result_kinds <= {MemoryEffectKind.READ, MemoryEffectKind.WRITE}
+                                )
+                        if supported_result_use:
+                            pending_event_uses.append((result_use, next_alias_covers_root))
+                            continue
+                        if result_use.index == 0 and isinstance(
+                            result_user, (DmaViewOp, DmaReshapeOp, DmaSubviewOp, DmaReinterpretOp)
+                        ):
+                            alias_stack.append((result_user, next_alias_covers_root))
+                            continue
+                        failed = True
+                        break
+                if failed:
+                    return
+                continue
+
+            if isinstance(user, DmaFreeOp) and use.index == 0 and user.parent_block() is loop_block:
+                free_ops.append(user)
+                continue
             return
-        use_plan = _build_hoist_use_plan(_collect_direct_uses(op.result), loop_block)
-        if use_plan is None:
+
+        if failed or not pending_event_uses or len(free_ops) != 1:
             return
+
+        data_events = []
+        for event_use, alias_covers_root in pending_event_uses:
+            event_user = event_use.operation
+            access_value = SSAValue.get(event_user.operands[event_use.index])
+            access_scope = _reinterpret_logical_access_scope(access_value)
+
+            if isinstance(event_user, DmaDesliceOp) and event_use.index == 1 and event_user.parent_block() is loop_block:
+                data_events.append(
+                    _MemoryEvent(
+                        use=event_use,
+                        effects=frozenset({MemoryEffectKind.WRITE}),
+                        access_scope=access_scope,
+                        full_write=False,
+                        full_write_scope=None,
+                        self_reset=False,
+                    )
+                )
+                continue
+
+            effects = get_effects(event_user)
+            if effects is None:
+                return
+            effect_value = SSAValue.get(event_user.operands[event_use.index])
+            kinds = {effect.kind for effect in effects if effect.value is effect_value}
+            if not kinds or not kinds <= {MemoryEffectKind.READ, MemoryEffectKind.WRITE}:
+                return
+
+            self_resets = False
+            if isinstance(event_user, KernelMatmulOp) and event_use.index == 0 and event_user.dynamic_acc is not None:
+                matmul_block = event_user.parent_block()
+                acc_value = SSAValue.get(event_user.dynamic_acc)
+                acc_op = acc_value.owner
+                if matmul_block is not None and isinstance(acc_op, Operation):
+                    if acc_op.name == "symbol.ne" and acc_op.parent_block() is matmul_block and acc_op.is_before_in_block(event_user):
+                        innermost_for = matmul_block.parent_op()
+                        if isinstance(innermost_for, SymbolForOp):
+                            iter_arg = innermost_for.body.blocks[0].args[0]
+                            start_value = SSAValue.get(innermost_for.start)
+                            operands = tuple(SSAValue.get(operand) for operand in acc_op.operands)
+                            self_resets = operands in ((iter_arg, start_value), (start_value, iter_arg))
+
+            write_covers_value = False
+            if MemoryEffectKind.WRITE in kinds:
+                write_covers_value = _write_covers_access_value(event_user, event_use.index)
+
+            root_full_write = alias_covers_root and write_covers_value
+            scoped_full_write = write_covers_value and not root_full_write and MemoryEffectKind.READ not in kinds
+            data_events.append(
+                _MemoryEvent(
+                    use=event_use,
+                    effects=frozenset(kinds),
+                    access_scope=access_scope,
+                    full_write=root_full_write or scoped_full_write,
+                    full_write_scope=None if root_full_write else access_scope,
+                    self_reset=False,
+                )
+            )
+
+        if not data_events:
+            return
+        events_by_op: dict[Operation, list[_MemoryEvent]] = {}
+        for event in data_events:
+            event_op = event.use.operation
+            event_block = event_op.parent_block()
+            if event_block is None or not (event_block is loop_block or loop_block.is_ancestor(event_op)):
+                return
+            events_by_op.setdefault(event_op, []).append(event)
+
+        proof_failed = False
+        proof_stack = [(loop_block, ())]
+        while proof_stack and not proof_failed:
+            scan_block, entering_scopes = proof_stack.pop()
+            initialized_scopes = list(entering_scopes)
+            for scan_op in scan_block.ops:
+                op_events = events_by_op.get(scan_op, ())
+                for event in op_events:
+                    if MemoryEffectKind.READ not in event.effects:
+                        continue
+                    if not any(scope is None or scope == event.access_scope for scope in initialized_scopes):
+                        proof_failed = True
+                        break
+                if proof_failed:
+                    break
+                for event in op_events:
+                    if event.full_write:
+                        initialized_scopes.append(event.full_write_scope)
+                for region in scan_op.regions:
+                    for child_block in region.blocks:
+                        proof_stack.append((child_block, tuple(initialized_scopes)))
+        if proof_failed:
+            return
+
+        free_op = free_ops[0]
+        indexes = {item: index for index, item in enumerate(loop_block.ops)}
+        if free_op not in indexes:
+            return
+        data_indexes: list[int] = []
+        for event in data_events:
+            current_op = event.use.operation
+            current_block = current_op.parent_block()
+            direct_use_op = None
+            while current_block is not None:
+                if current_block is loop_block:
+                    direct_use_op = current_op
+                    break
+                parent_op = current_block.parent_op()
+                if parent_op is None:
+                    break
+                current_op = parent_op
+                current_block = current_op.parent_block()
+            if direct_use_op not in indexes:
+                return
+            data_indexes.append(indexes[direct_use_op])
+        if not data_indexes or indexes[free_op] <= max(data_indexes):
+            return
+
         op.detach()
         rewriter.insert_op(op, InsertPoint.before(symbol_for))
-        if use_plan.free_op is not None:
-            use_plan.free_op.detach()
-            rewriter.insert_op(use_plan.free_op, InsertPoint.after(symbol_for))
+        free_op.detach()
+        rewriter.insert_op(free_op, InsertPoint.after(symbol_for))
         rewriter.notify_op_modified(symbol_for)
-
-
-def _alias_operands(op: Operation) -> tuple[SSAValue, ...]:
-    """返回 alias op 外提所需检查的全部 operand。
-
-
-    功能说明:
-    - `dma.view` 检查 source、offsets、shape、stride。
-    - `dma.reshape` 检查 source 与 shape。
-    - `dma.subview` 检查 source、offset、size、stride。
-
-    使用示例:
-    - operands = _alias_operands(view_op)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    if isinstance(op, DmaViewOp):
-        return (SSAValue.get(op.source), *tuple(op.offsets), *tuple(op.shape), *tuple(op.stride))
-    if isinstance(op, DmaReshapeOp):
-        return (SSAValue.get(op.source), *tuple(op.shape))
-    if isinstance(op, DmaSubviewOp):
-        return (*tuple(op.source), *tuple(op.offset), *tuple(op.size), *tuple(op.stride))
-    if isinstance(op, DmaReinterpretOp):
-        return (SSAValue.get(op.source), SSAValue.get(op.offset), *tuple(op.shape), *tuple(op.stride))
-    return ()
-
-
-def _alias_result_uses_are_supported(op: Operation, loop_block: Block) -> bool:
-    """判断 alias op result 是否只流向当前 loop 直接 body 内的白名单 use。
-
-
-    功能说明:
-    - 至少需要一个 direct use，避免外提无用或逃逸 alias。
-    - 支持 alias result 继续喂给 `dma.view`、`dma.reshape`、`dma.subview`，后续 pattern 会继续单 op 外提。
-    - 支持 alias result 被同一 loop body 或 descendant region 内的公开 MemoryEffect consumer 捕获。
-    - `kernel.*` consumer 只有在公开 MemoryEffect 能判定 alias result 作为读/写 operand 时才允许。
-    - 未知 use、逃逸 use 或无 MemoryEffect 的 consumer 保守 no-op，避免把副作用规则做宽。
-
-    使用示例:
-    - if _alias_result_uses_are_supported(view_op, loop_block): ...
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    if len(op.results) != 1:
-        return False
-    result_uses = _collect_direct_uses(op.results[0])
-    if not result_uses:
-        return False
-    for use in result_uses:
-        if not _operation_is_in_block_or_descendant(use.operation, loop_block):
-            return False
-        if _is_supported_alias_result_use(use):
-            continue
-        if _is_supported_alias_source_use(use):
-            continue
-        return False
-    return True
-
-
-def _hoist_alias_op_if_safe(op: Operation, rewriter: PatternRewriter) -> None:
-    """在满足公开边界时把单个 alias op 外提一层。
-
-
-    功能说明:
-    - 仅处理当前 `symbol.for` 直接 body 内的 alias op。
-    - source 与布局 operand 必须全部支配当前 `symbol.for`。
-    - result use 必须留在当前 loop 直接 body 的公开白名单内。
-
-    使用示例:
-    - _hoist_alias_op_if_safe(view_op, rewriter)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    loop_block = op.parent_block()
-    if loop_block is None:
-        return
-    symbol_for = loop_block.parent_op()
-    if not isinstance(symbol_for, SymbolForOp):
-        return
-    if not all(_value_dominates_symbol_for(operand, symbol_for) for operand in _alias_operands(op)):
-        return
-    if not _alias_result_uses_are_supported(op, loop_block):
-        return
-    op.detach()
-    rewriter.insert_op(op, InsertPoint.before(symbol_for))
-    rewriter.notify_op_modified(symbol_for)
 
 
 class DmaViewInSymbolForHoistPattern(RewritePattern):
@@ -1430,17 +1290,31 @@ class DmaSubviewInSymbolForHoistPattern(RewritePattern):
         _hoist_alias_op_if_safe(op, rewriter)
 
 
-class _DmaReinterpretInSymbolForHoistPattern(RewritePattern):
-    """`symbol.for` 内 `dma.reinterpret` 单 op 外提私有 pattern。
+class DmaReinterpretInSymbolForHoistPattern(RewritePattern):
+    """`symbol.for` 内 `dma.reinterpret` 单 op 外提 pattern。
 
 
     功能说明:
     - 只在 source、offset、shape、stride 均对当前 loop invariant 时外提一层。
     - IR 变换：`symbol.for { %r = dma.reinterpret(...); use(%r) }` 变为 `%r = dma.reinterpret(...); symbol.for { use(%r) }`。
     - no-op：offset/shape/stride 来自当前 loop body 时保持原 IR。
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %r = "dma.reinterpret"(%src, %off, %m, %n, %stride_m, %stride_n) : (...) -> !nn.memory<value>
+        "kernel.use"(%r) : (value) -> ()
+      }
+      ```
+    - IR after:
+      ```mlir
+      %r = "dma.reinterpret"(%src, %off, %m, %n, %stride_m, %stride_n) : (...) -> !nn.memory<value>
+      symbol.for %i = %c0 to %n step %c1 {
+        "kernel.use"(%r) : (value) -> ()
+      }
+      ```
 
     使用示例:
-    - pattern = _DmaReinterpretInSymbolForHoistPattern()
+    - pattern = DmaReinterpretInSymbolForHoistPattern()
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
@@ -1458,7 +1332,7 @@ class _DmaReinterpretInSymbolForHoistPattern(RewritePattern):
         - 任一 operand 不支配当前 loop 或 result use 不在白名单时保持 no-op。
 
         使用示例:
-        - _DmaReinterpretInSymbolForHoistPattern().match_and_rewrite(op, rewriter)
+        - DmaReinterpretInSymbolForHoistPattern().match_and_rewrite(op, rewriter)
 
         关联文件:
         - spec: spec/pass/symbol_buffer_hoist.md
@@ -1474,8 +1348,9 @@ def get_symbol_buffer_hoist_patterns() -> list[RewritePattern]:
 
 
     功能说明:
-    - 公开返回 `dma.alloc/free` pattern 与 alias op pattern 实例。
-    - 返回值顺序固定为 alloc/free、view、reshape、subview、reinterpret，便于 greedy walker 逐层收敛。
+    - 公开返回 matmul-first alloc、普通 `dma.alloc/free` pattern 与 alias op pattern 实例。
+    - 返回值顺序固定为 matmul-first alloc、普通 alloc/free、view、reshape、subview、reinterpret，
+      便于 greedy walker 逐层收敛。
 
     使用示例:
     - patterns = get_symbol_buffer_hoist_patterns()
@@ -1487,64 +1362,13 @@ def get_symbol_buffer_hoist_patterns() -> list[RewritePattern]:
     """
 
     return [
+        DmaAllocWithMatmulFirstUseHoistPattern(),
         DmaAllocInSymbolForHoistPattern(),
         DmaViewInSymbolForHoistPattern(),
         DmaReshapeInSymbolForHoistPattern(),
         DmaSubviewInSymbolForHoistPattern(),
-        _DmaReinterpretInSymbolForHoistPattern(),
+        DmaReinterpretInSymbolForHoistPattern(),
     ]
-
-
-def _rewrite_module_once(ctx: Context, module: ModuleOp, *, fold: bool) -> None:
-    """对 module 执行一轮 `symbol-buffer-hoist` pattern walker。
-
-
-    功能说明:
-    - 当前文件内部 helper；保持公开 pass API 不变。
-    - 单轮 walker 仍遵守每个 pattern 只移动一个 op、一层 loop 的边界。
-
-    使用示例:
-    - _rewrite_module_once(ctx, module, fold=True)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    PatternRewriteWalker(
-        GreedyRewritePatternApplier(
-            get_symbol_buffer_hoist_patterns(),
-            ctx=ctx,
-            folding_enabled=fold,
-            dce_enabled=False,
-        )
-    ).rewrite_module(module)
-
-
-def _rewrite_module_to_fixed_point(ctx: Context, module: ModuleOp, *, fold: bool) -> None:
-    """重复执行 walker，直到 alias op 外提达到稳定态。
-
-
-    功能说明:
-    - `dma.view` 外提后，依赖该 view 的 `dma.reshape` 可能才满足支配条件。
-    - 通过模块文本稳定性检测追加有限轮收敛，避免单轮遍历漏掉后继 alias op。
-    - 每轮仍复用公开 pattern 列表，不引入跨文件私有 API 或新公开入口。
-
-    使用示例:
-    - _rewrite_module_to_fixed_point(ctx, module, fold=True)
-
-    关联文件:
-    - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-    """
-
-    for _iteration in range(8):
-        before = str(module)
-        _rewrite_module_once(ctx, module, fold=fold)
-        if str(module) == before:
-            return
 
 
 class SymbolBufferHoistPass(Pass):
@@ -1552,7 +1376,7 @@ class SymbolBufferHoistPass(Pass):
 
 
     功能说明:
-    - 通过 pattern walker fixed point 处理 module 中满足公开条件的 `dma.alloc/free` 与 alias op 外提。
+    - 通过直接 pattern walker 处理 module 中满足公开条件的 `dma.alloc/free` 与 alias op 外提。
     - 非 `builtin.module` 输入直接复用共享 `KernelCodeError("module must be builtin.module")`。
     - 最终 verifier 失败统一转成 `KernelCodeError("SymbolBufferHoistVerifierError: ...")`。
 
@@ -1577,7 +1401,7 @@ class SymbolBufferHoistPass(Pass):
 
         功能说明:
         - 只处理 `builtin.module`。
-        - 用 greedy pattern walker 把 `symbol.for` 内可安全外提的 alloc/alias op 推进到稳定态。
+        - 用 greedy pattern walker 把 `symbol.for` 内可安全外提的 alloc/alias op 外提一层。
         - 最终统一做一次 `module.verify()`，保持公开失败前缀稳定。
 
         使用示例:
@@ -1593,7 +1417,16 @@ class SymbolBufferHoistPass(Pass):
         module = ensure_builtin_module(module)
         if ctx.get_optional_dialect(Symbol.name) is None:
             ctx.load_dialect(Symbol)
-        _rewrite_module_to_fixed_point(ctx, module, fold=self.fold)
+        PatternRewriteWalker(
+            GreedyRewritePatternApplier(
+                [
+                    *get_symbol_buffer_hoist_patterns(),
+                ],
+                ctx=ctx,
+                folding_enabled=self.fold,
+                dce_enabled=False,
+            )
+        ).rewrite_module(module)
         try:
             module.verify()
         except VerifyException as exc:
@@ -1601,11 +1434,14 @@ class SymbolBufferHoistPass(Pass):
         except KernelCodeError as exc:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"SymbolBufferHoistVerifierError: {exc}") from exc
 
+
 __all__ = [
+    "DmaAllocWithMatmulFirstUseHoistPattern",
     "DmaAllocInSymbolForHoistPattern",
     "DmaViewInSymbolForHoistPattern",
     "DmaReshapeInSymbolForHoistPattern",
     "DmaSubviewInSymbolForHoistPattern",
+    "DmaReinterpretInSymbolForHoistPattern",
     "get_symbol_buffer_hoist_patterns",
     "SymbolBufferHoistPass",
 ]

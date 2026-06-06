@@ -5,7 +5,7 @@
 - 覆盖 `kernel/matmul` 三条目标 demo 的公开 kernel 函数与脚本入口。
 - 锁定 dynamic demo 使用 `H/K/W` 符号 memory、`TILE_H/TILE_W/TILE_K` 符号 tile。
 - 锁定 static demo 将 per-run random 选值具体化到 static IR，同时 K/reduce 维按 `TILE_K` 切分并累加 partial。
-- 锁定尾块通过有效区域 alias 写入零填充 full tile，避免 `?` shape 参与 memory 默认 stride。
+- 锁定尾块通过 effective tile scratch 参与计算，避免 `?` shape 参与 memory 默认 stride。
 - 锁定 static-static demo 同样具备 K/reduce accumulator，不允许 partial 直接覆盖 output。
 
 API 列表:
@@ -105,39 +105,15 @@ def _read_first_ir(case_name: str) -> str:
     return (_REPO_ROOT / "kernel" / "dump" / Path(case_name) / "01-first-ir.mlir").read_text(encoding="utf-8")
 
 
-def _assert_matmul_first_ir_uses_fixed_upper_bound_scratch(case_name: str) -> None:
-    """校验 matmul 生成侧 first-ir 中可改写 scratch 已用上界形态。
-
-    功能说明:
-    - 锁定 accumulator、bias tile、lhs/rhs staging scratch 使用 tile 上界分配。
-    - 锁定当前 tail 只通过 `dma.view/deslice` 表达，不能回退成 current tile scratch alloc。
-
-    使用示例:
-    - `_assert_matmul_first_ir_uses_fixed_upper_bound_scratch("test/matmul/dynamic_symbolic_tile_reduce")`
-    """
-
-    first_ir = (_REPO_ROOT / "kernel" / "dump" / Path(case_name) / "01-first-ir.mlir").read_text(encoding="utf-8")
-    static_h, static_w, static_k = _MATMUL_SS_TILE
-    assert re.search(rf'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_H|#C{static_h}), (#S_TILE_W|#C{static_w})\]', first_ir)
-    assert re.search(rf'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_H|#C{static_h}), (#S_TILE_K|#C{static_k})\]', first_ir)
-    assert re.search(rf'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_K|#C{static_k}), (#S_TILE_W|#C{static_w})\]', first_ir)
-    assert re.search(rf'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_W|#C{static_w})\], \[#C1\]', first_ir)
-    assert re.search(r'"dma\.view".*-> !nn\.memory<\[#S2, #S4\]', first_ir)
-    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S2, #S4\]', first_ir) is None
-    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S2, #S6\]', first_ir) is None
-    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S6, #S4\]', first_ir) is None
-    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S4\], \[#C1\]', first_ir) is None
-
-
 def _assert_matmul_first_ir_uses_effective_tile_scratch(case_name: str) -> None:
-    """校验 matmul static/static first-ir 使用当前有效 tile scratch 并保留显式 fill。
+    """校验 matmul first-ir 使用当前 effective tile scratch 并保留显式 fill。
 
     功能说明:
-    - 锁定 accumulator、bias tile、lhs/rhs staging 与 partial 都按 `min(tile, remaining)` 有效区域分配。
+    - 锁定 accumulator、bias tile、lhs/rhs staging 与 partial 都按 `min(tile, remaining)` effective 区域分配。
     - 锁定 kernel 实现侧仍生成 acc、bias、lhs、rhs 四个显式 fill，由后续 pass 证明删除冗余 fill。
 
     使用示例:
-    - `_assert_matmul_first_ir_uses_effective_tile_scratch("test/matmul/static_static_tile_reduce")`
+    - `_assert_matmul_first_ir_uses_effective_tile_scratch("test/matmul/dynamic_symbolic_tile_reduce")`
     """
 
     first_ir = _read_first_ir(case_name)
@@ -396,7 +372,7 @@ def test_dynamic_matmul_demo_uses_symbolic_memory_and_tile_reduce_accumulator() 
     module_text = str(module)
 
     _assert_python_source_uses_kernel_out_first(matmul_inputs_dynamic_tile_dynamic_kernel)
-    _assert_matmul_first_ir_uses_fixed_upper_bound_scratch("test/matmul/dynamic_symbolic_tile_reduce")
+    _assert_matmul_first_ir_uses_effective_tile_scratch("test/matmul/dynamic_symbolic_tile_reduce")
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" in module_text
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<K>]" in module_text
     assert "!nn.memory<[#symbol.expr<K>, #symbol.expr<W>]" in module_text
@@ -434,7 +410,7 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
     module_text = str(module)
 
     _assert_python_source_uses_kernel_out_first(matmul_inputs_static_tile_dynamic_kernel)
-    _assert_matmul_first_ir_uses_fixed_upper_bound_scratch("test/matmul/static_symbolic_tile_reduce")
+    _assert_matmul_first_ir_uses_effective_tile_scratch("test/matmul/static_symbolic_tile_reduce")
     assert f"!nn.memory<[#symbol.expr<{_MATMUL_SD_M}>, #symbol.expr<{_MATMUL_SD_N}>]" in module_text
     assert f"!nn.memory<[#symbol.expr<{_MATMUL_SD_M}>, #symbol.expr<{_MATMUL_SD_K}>]" in module_text
     assert f"!nn.memory<[#symbol.expr<{_MATMUL_SD_K}>, #symbol.expr<{_MATMUL_SD_N}>]" in module_text

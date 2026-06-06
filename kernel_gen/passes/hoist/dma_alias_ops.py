@@ -1001,23 +1001,6 @@ def get_hoist_dma_alias_ops_pass_patterns(module: ModuleOp) -> list[RewritePatte
     return [DmaAliasThroughWriteNoReadPattern(module), DmaAliasHoistPattern(module)]
 
 
-def _rewrite_module(module: ModuleOp) -> None:
-    """对 ModuleOp 运行 hoist-dma-alias-ops rewrite walker。
-
-    功能说明:
-    - 只使用 xDSL `PatternRewriteWalker` 与 `GreedyRewritePatternApplier`。
-    - 不在 pass 中实现手写整段 block 遍历。
-
-    使用示例:
-    - _rewrite_module(module)
-    """
-
-    PatternRewriteWalker(
-        GreedyRewritePatternApplier(get_hoist_dma_alias_ops_pass_patterns(module)),
-        apply_recursively=True,
-    ).rewrite_module(module)
-
-
 class HoistDmaAliasOpsPass(Pass):
     """`hoist-dma-alias-ops` pass 公开入口。
 
@@ -1043,7 +1026,17 @@ class HoistDmaAliasOpsPass(Pass):
         """
 
         target = ensure_builtin_module(module)
-        _rewrite_module(target)
+        PatternRewriteWalker(
+            GreedyRewritePatternApplier(
+                [
+                    *get_hoist_dma_alias_ops_pass_patterns(target),
+                ],
+                ctx=ctx,
+                folding_enabled=self.fold,
+                dce_enabled=False,
+            ),
+            apply_recursively=True,
+        ).rewrite_module(target)
 
 
 __all__ = [

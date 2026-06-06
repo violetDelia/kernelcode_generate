@@ -67,6 +67,8 @@ package_module = importlib.import_module("kernel_gen.passes")
 registry_module = importlib.import_module("kernel_gen.passes.registry")
 
 DmaAllocInSymbolForHoistPattern = pass_module.DmaAllocInSymbolForHoistPattern
+DmaAllocWithMatmulFirstUseHoistPattern = pass_module.DmaAllocWithMatmulFirstUseHoistPattern
+DmaReinterpretInSymbolForHoistPattern = pass_module.DmaReinterpretInSymbolForHoistPattern
 SymbolBufferHoistPass = pass_module.SymbolBufferHoistPass
 get_symbol_buffer_hoist_patterns = pass_module.get_symbol_buffer_hoist_patterns
 build_registered_pass = registry_module.build_registered_pass
@@ -1549,8 +1551,10 @@ def test_symbol_buffer_hoist_public_patterns_are_reachable() -> None:
     patterns = get_symbol_buffer_hoist_patterns()
 
     assert package_module.SymbolBufferHoistPass is SymbolBufferHoistPass
-    assert len(patterns) == 5
-    assert isinstance(patterns[0], DmaAllocInSymbolForHoistPattern)
+    assert len(patterns) == 6
+    assert isinstance(patterns[0], DmaAllocWithMatmulFirstUseHoistPattern)
+    assert isinstance(patterns[1], DmaAllocInSymbolForHoistPattern)
+    assert isinstance(patterns[5], DmaReinterpretInSymbolForHoistPattern)
     assert all(isinstance(pattern, RewritePattern) for pattern in patterns)
 
 
@@ -2534,6 +2538,101 @@ builtin.module {
 }
 """,
         source_path="symbol_buffer_hoist_after_memory_plan_auto_pad.ircheck",
+    )
+
+    assert result.ok, result.message or result.actual_ir
+
+
+# TC-MPLAN-002G2
+# 功能说明: 验证 auto-pad 后动态 acc matmul 的 padded backing 可外提且 matmul 继续消费 logical alias。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_after_memory_plan_auto_pad_hoists_dynamic_acc_matmul
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_after_memory_plan_auto_pad_hoists_dynamic_acc_matmul() -> None:
+    result = run_ircheck_text(
+        """// COMPILE_ARGS: --pass "memory-plan={auto-pad=true,insert-free=true,fold=false}" --pass "symbol-buffer-hoist={fold=false}"
+// CHECK: func.func @auto_pad_hoist_dynamic_acc_matmul
+// CHECK: %[[BACKING:{reg}]] = "dma.alloc"(%[[TILE_M:{reg}]], %[[N:{reg}]])
+// CHECK: symbol.for
+// CHECK: %[[LOGICAL:{reg}]] = "dma.reinterpret"(%[[BACKING]]
+// CHECK: "kernel.matmul"(%[[LOGICAL]], %[[LHS:{reg}]], %[[RHS:{reg}]], %[[ACC:{reg}]])
+// CHECK-NOT: "kernel.matmul"(%[[BACKING]], %[[LHS]], %[[RHS]], %[[ACC]])
+// CHECK: "dma.free"(%[[BACKING]])
+
+builtin.module {
+  func.func @auto_pad_hoist_dynamic_acc_matmul(
+    %start : !symbol.int<#symbol.expr<START>>,
+    %m : !symbol.int<#symbol.expr<M>>,
+    %tile_m : !symbol.int<#symbol.expr<TILE_M>>,
+    %k : !symbol.int<#symbol.expr<K>>,
+    %n : !symbol.int<#symbol.expr<N>>,
+    %lhs : !nn.memory<[#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>, #symbol.expr<K>], [#symbol.expr<K>, #symbol.expr<1>], i32, #nn.space<tsm>>,
+    %rhs : !nn.memory<[#symbol.expr<K>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], i32, #nn.space<tsm>>
+  ) {
+    symbol.for %i = %start to %m step %tile_m {iter = #symbol.iter<start = #symbol.expr<START>, end = #symbol.expr<M>, step = #symbol.expr<TILE_M>>} {
+      %rem_m = symbol.sub %m, %i : !symbol.int<#symbol.expr<M>>, !symbol.iter<start = #symbol.expr<START>, end = #symbol.expr<M>, step = #symbol.expr<TILE_M>> -> !symbol.int<#symbol.expr<M - iter<START,M,TILE_M>>>
+      %cur_m = symbol.min %tile_m, %rem_m : !symbol.int<#symbol.expr<TILE_M>>, !symbol.int<#symbol.expr<M - iter<START,M,TILE_M>>> -> !symbol.int<#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>>
+      %out = "dma.alloc"(%cur_m, %n) <{operandSegmentSizes = array<i32: 2>}> : (!symbol.int<#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>>, !symbol.int<#symbol.expr<N>>) -> !nn.memory<[#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      %acc = symbol.ne %i, %start : !symbol.iter<start = #symbol.expr<START>, end = #symbol.expr<M>, step = #symbol.expr<TILE_M>>, !symbol.int<#symbol.expr<START>> -> i1
+      "kernel.matmul"(%out, %lhs, %rhs, %acc) {space = #nn.space<tsm>} : (!nn.memory<[#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<min(TILE_M, M - iter<START,M,TILE_M>)>, #symbol.expr<K>], [#symbol.expr<K>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<K>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], i32, #nn.space<tsm>>, i1) -> ()
+    }
+    func.return
+  }
+}
+""",
+        source_path="symbol_buffer_hoist_after_memory_plan_auto_pad_dynamic_acc.ircheck",
+    )
+
+    assert result.ok, result.message or result.actual_ir
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H10
+# 功能说明: 验证等价 `dma.reinterpret` logical scope 的写入可证明同一 backing 前缀的 broadcast 读取。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_equivalent_reinterpret_alias_scope_for_broadcast
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_equivalent_reinterpret_alias_scope_for_broadcast() -> None:
+    result = run_ircheck_text(
+        """// COMPILE_ARGS: --pass "symbol-buffer-hoist={fold=false}"
+// CHECK: func.func @equivalent_reinterpret_alias_scope_for_broadcast
+// CHECK: %[[BUF:{reg}]] = "dma.alloc"(%[[TN:{reg}]])
+// CHECK: symbol.for
+// CHECK: %[[VEC:{reg}]] = "dma.reinterpret"(%[[BUF]]
+// CHECK: %[[ROW:{reg}]] = "dma.reinterpret"(%[[BUF]]
+// CHECK: "dma.deslice"(%[[VEC]]
+// CHECK: "dma.broadcast"(%{{.*}}, %[[ROW]])
+// CHECK: "dma.free"(%[[BUF]])
+
+builtin.module {
+  func.func @equivalent_reinterpret_alias_scope_for_broadcast(
+    %src : !nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], i32, #nn.space<global>>,
+    %dst : !nn.memory<[#symbol.expr<1>, #symbol.expr<TN>], [#symbol.expr<TN>, #symbol.expr<1>], i32, #nn.space<tsm>>,
+    %n : !symbol.int<#symbol.expr<N>>,
+    %tn : !symbol.int<#symbol.expr<TN>>
+  ) {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    symbol.for %i = %c0 to %n step %tn {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<TN>>} {
+      %rem = symbol.sub %n, %i : !symbol.int<#symbol.expr<N>>, !symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<TN>> -> !symbol.int<#symbol.expr<N - iter<0,N,TN>>>
+      %cur = symbol.min %tn, %rem : !symbol.int<#symbol.expr<TN>>, !symbol.int<#symbol.expr<N - iter<0,N,TN>>> -> !symbol.int<#symbol.expr<min(TN, N - iter<0,N,TN>)>>
+      %buf = "dma.alloc"(%tn) <{operandSegmentSizes = array<i32: 1>}> : (!symbol.int<#symbol.expr<TN>>) -> !nn.memory<[#symbol.expr<TN>], [#symbol.expr<1>], i32, #nn.space<tsm>>
+      %vec = "dma.reinterpret"(%buf, %c0, %cur, %c1) <{operandSegmentSizes = array<i32: 1, 1, 1, 1>}> : (!nn.memory<[#symbol.expr<TN>], [#symbol.expr<1>], i32, #nn.space<tsm>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<min(TN, N - iter<0,N,TN>)>>, !symbol.int<#symbol.expr<1>>) -> !nn.memory<[#symbol.expr<min(TN, N - iter<0,N,TN>)>], [#symbol.expr<1>], i32, #nn.space<tsm>>
+      %row = "dma.reinterpret"(%buf, %c0, %c1, %cur, %cur, %c1) <{operandSegmentSizes = array<i32: 1, 1, 2, 2>}> : (!nn.memory<[#symbol.expr<TN>], [#symbol.expr<1>], i32, #nn.space<tsm>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<min(TN, N - iter<0,N,TN>)>>, !symbol.int<#symbol.expr<min(TN, N - iter<0,N,TN>)>>, !symbol.int<#symbol.expr<1>>) -> !nn.memory<[#symbol.expr<1>, #symbol.expr<min(TN, N - iter<0,N,TN>)>], [#symbol.expr<min(TN, N - iter<0,N,TN>)>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      %src_vec = "dma.reinterpret"(%src, %i, %cur, %c1) <{operandSegmentSizes = array<i32: 1, 1, 1, 1>}> : (!nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], i32, #nn.space<global>>, !symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<TN>>, !symbol.int<#symbol.expr<min(TN, N - iter<0,N,TN>)>>, !symbol.int<#symbol.expr<1>>) -> !nn.memory<[#symbol.expr<min(TN, N - iter<0,N,TN>)>], [#symbol.expr<1>], i32, #nn.space<global>>
+      %dst_row = "dma.reinterpret"(%dst, %c0, %c1, %cur, %cur, %c1) <{operandSegmentSizes = array<i32: 1, 1, 2, 2>}> : (!nn.memory<[#symbol.expr<1>, #symbol.expr<TN>], [#symbol.expr<TN>, #symbol.expr<1>], i32, #nn.space<tsm>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<min(TN, N - iter<0,N,TN>)>>, !symbol.int<#symbol.expr<min(TN, N - iter<0,N,TN>)>>, !symbol.int<#symbol.expr<1>>) -> !nn.memory<[#symbol.expr<1>, #symbol.expr<min(TN, N - iter<0,N,TN>)>], [#symbol.expr<min(TN, N - iter<0,N,TN>)>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      "dma.deslice"(%vec, %src_vec, %c0, %cur, %c1) <{operandSegmentSizes = array<i32: 1, 1, 1, 1, 1>}> : (!nn.memory<[#symbol.expr<min(TN, N - iter<0,N,TN>)>], [#symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<min(TN, N - iter<0,N,TN>)>], [#symbol.expr<1>], i32, #nn.space<global>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<min(TN, N - iter<0,N,TN>)>>, !symbol.int<#symbol.expr<1>>) -> ()
+      "dma.broadcast"(%dst_row, %row) : (!nn.memory<[#symbol.expr<1>, #symbol.expr<min(TN, N - iter<0,N,TN>)>], [#symbol.expr<min(TN, N - iter<0,N,TN>)>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<1>, #symbol.expr<min(TN, N - iter<0,N,TN>)>], [#symbol.expr<min(TN, N - iter<0,N,TN>)>, #symbol.expr<1>], i32, #nn.space<tsm>>) -> ()
+      "dma.free"(%buf) : (!nn.memory<[#symbol.expr<TN>], [#symbol.expr<1>], i32, #nn.space<tsm>>) -> ()
+    }
+    func.return
+  }
+}
+""",
+        source_path="symbol_buffer_hoist_equivalent_reinterpret_alias_scope.ircheck",
     )
 
     assert result.ok, result.message or result.actual_ir

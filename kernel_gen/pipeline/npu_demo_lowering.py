@@ -5,7 +5,7 @@
 - 提供 `npu-demo-lowering` pipeline 的 builder。
 - 固定 `dsl_run` 的 npu_demo 正向链路为
   `InlinePass -> CommonSubexpressionElimination -> CanonicalizePass -> DecompassPass -> NnLoweringPass -> MemoryPlanPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> TileAnalysisPass -> KernelPatternAttachPass -> TransformApplyPass -> MemoryPlanPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> KernelAggregatePass -> KernelDecomposePass -> MemoryPlanPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> ProducerConsumerAnalysisPass -> MemoryPoolPass -> CanonicalizePass -> ArchParallelizePass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
-- 默认 `MemoryPlanPass` 补齐 insert-free 生命周期，`MemoryPoolPass` 执行 dynamic backing 改写，template-name infer 在 outline 后写回 wrapper/body memory type 的 template name。
+- 默认三段 `MemoryPlanPass(auto_pad=True)` 补齐 insert-free 生命周期并启用 padded backing / logical alias 改写，`MemoryPoolPass` 执行 dynamic backing 改写，template-name infer 在 outline 后写回 wrapper/body memory type 的 template name。
 - 通过 registry 装饰器完成 pipeline 注册。
 
 API 列表:
@@ -59,8 +59,8 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
       `InlinePass -> CommonSubexpressionElimination -> CanonicalizePass -> DecompassPass -> NnLoweringPass -> MemoryPlanPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> TileAnalysisPass -> KernelPatternAttachPass -> TransformApplyPass -> MemoryPlanPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> KernelAggregatePass -> KernelDecomposePass -> MemoryPlanPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> ProducerConsumerAnalysisPass -> MemoryPoolPass -> CanonicalizePass -> ArchParallelizePass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
     - `CommonSubexpressionElimination` 后均紧跟 xDSL `CanonicalizePass`，仅在本 pipeline 内清理 IR，
       不把 canonicalize 注册为仓库公开 pass。
-    - `MemoryPlanPass` 固定以 `insert_free=True, reuse=True, fold=False` 运行三次；
-      生命周期与可证明复用先补齐，再由 `SymbolHoistPipelinePass` 统一清理 symbol 与 alias。
+    - `MemoryPlanPass` 固定以 `insert_free=True, reuse=True, fold=False, auto_pad=True` 运行三次；
+      padded backing / logical alias、生命周期与可证明复用先补齐，再由 `SymbolHoistPipelinePass` 统一清理 symbol 与 alias。
     - `TileAnalysisPass` 紧跟第一段 post-buffer cleanup 后，只补充 tile 分析属性，不生成 tile 循环。
     - 三处 `SymbolHoistPipelinePass` 均以 alias 归一优先、再固定点运行
       `symbol-loop-hoist -> symbol-buffer-hoist -> hoist-dma-alias-ops` 的 combined pattern 清理 symbol 与 alias；
@@ -116,20 +116,20 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     pm.add_pass(CanonicalizePass())
     pm.add_pass(DecompassPass())
     pm.add_pass(NnLoweringPass())
-    pm.add_pass(MemoryPlanPass(insert_free=True, reuse=True, fold=False))
+    pm.add_pass(MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=True))
     pm.add_pass(SymbolHoistPipelinePass())
     pm.add_pass(CommonSubexpressionElimination())
     pm.add_pass(CanonicalizePass())
     pm.add_pass(TileAnalysisPass())
     pm.add_pass(KernelPatternAttachPass())
     pm.add_pass(TransformApplyPass())
-    pm.add_pass(MemoryPlanPass(insert_free=True, reuse=True, fold=False))
+    pm.add_pass(MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=True))
     pm.add_pass(SymbolHoistPipelinePass())
     pm.add_pass(CommonSubexpressionElimination())
     pm.add_pass(CanonicalizePass())
     pm.add_pass(KernelAggregatePass(matmul_acc=True))
     pm.add_pass(KernelDecomposePass())
-    pm.add_pass(MemoryPlanPass(insert_free=True, reuse=True, fold=False))
+    pm.add_pass(MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=True))
     pm.add_pass(SymbolHoistPipelinePass())
     pm.add_pass(CommonSubexpressionElimination())
     pm.add_pass(CanonicalizePass())

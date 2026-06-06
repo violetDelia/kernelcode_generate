@@ -4,7 +4,7 @@
 
 - 定义 `symbol-buffer-hoist` pass 的公开合同。
 - 该 pass 只在 `symbol.for` 的单 block 循环体内识别 `dma.alloc`、`dma.view`、`dma.reshape`、`dma.subview` 与 `dma.reinterpret`，并在能够机械证明 operand 支配关系、使用方式和生命周期安全时，把单个 op 外提到所属 `symbol.for` 前一层。
-- 当前公开语义覆盖输入 staging buffer 与 output scratch buffer 两类 `dma.alloc/free` 成对外提、`get_effects(op)` / `MemoryEffect` 可判定的 `dma.*` / `kernel.*` 读写生命周期证明、`dma.broadcast` target write reset、`symbol.get_dim` / `symbol.get_stride` Pure metadata query，以及 loop-invariant alias op 的 fixed-point 单 op 外提；没有唯一匹配 `dma.free` 时 `dma.alloc` 必须保持 loop 内 no-op。
+- 当前公开语义覆盖输入 staging buffer 与 output scratch buffer 两类 `dma.alloc/free` 成对外提、`get_effects(op)` / `MemoryEffect` 可判定的 `dma.*` / `kernel.*` 读写生命周期证明、`dma.deslice` target write、`dma.broadcast` target/source alias use、`symbol.get_dim` / `symbol.get_stride` Pure metadata query，以及 loop-invariant alias op 的 fixed-point 单 op 外提；没有唯一匹配 `dma.free` 时 `dma.alloc` 必须保持 loop 内 no-op。
 - 本 pass 不做通用 LICM；在 `npu-demo-lowering` 中由 pipeline builder 固定接入，其它默认 pipeline 不隐式接入。
 
 ## API 列表
@@ -12,6 +12,8 @@
 - `class SymbolBufferHoistPass(fold: bool = True)`
 - `SymbolBufferHoistPass.name: str`
 - `SymbolBufferHoistPass.apply(ctx: Context, module: ModuleOp) -> None`
+- `class DmaAllocWithMatmulFirstUseHoistPattern()`
+- `DmaAllocWithMatmulFirstUseHoistPattern.match_and_rewrite(op: DmaAllocOp, rewriter: PatternRewriter) -> None`
 - `class DmaAllocInSymbolForHoistPattern()`
 - `DmaAllocInSymbolForHoistPattern.match_and_rewrite(op: DmaAllocOp, rewriter: PatternRewriter) -> None`
 - `class DmaViewInSymbolForHoistPattern()`
@@ -20,6 +22,8 @@
 - `DmaReshapeInSymbolForHoistPattern.match_and_rewrite(op: DmaReshapeOp, rewriter: PatternRewriter) -> None`
 - `class DmaSubviewInSymbolForHoistPattern()`
 - `DmaSubviewInSymbolForHoistPattern.match_and_rewrite(op: DmaSubviewOp, rewriter: PatternRewriter) -> None`
+- `class DmaReinterpretInSymbolForHoistPattern()`
+- `DmaReinterpretInSymbolForHoistPattern.match_and_rewrite(op: DmaReinterpretOp, rewriter: PatternRewriter) -> None`
 - `get_symbol_buffer_hoist_patterns() -> list[RewritePattern]`
 
 ## 文档信息
@@ -65,7 +69,8 @@
 - 固定公开 pass 名称为 `symbol-buffer-hoist`。
 - 固定 canonical module path 为 `kernel_gen.passes.hoist.symbol_buffer_hoist`，并要求 `kernel_gen.passes.SymbolBufferHoistPass` 作为包根 re-export 继续可用。
 - 固定 `build_registered_pass("symbol-buffer-hoist")` 可构造出当前 pass 的 `ModulePass` 实例。
-- 当前专题只公开一个 pass、一个 pattern 类和一个 pattern getter；不新增专题专属错误类型。
+- 当前专题只公开一个 pass、API 列表内 pattern 类和一个 pattern getter；不新增专题专属错误类型。
+- 用户确认来源：2026-06-06 用户明确要求“还是加一个pattern 把。 alloc with matmul first xxx pattern”，允许新增 `DmaAllocWithMatmulFirstUseHoistPattern` 公开 pattern 类；随后明确要求“DmaReinterpretInSymbolForHoistPattern 当作公开接口”，允许公开 `DmaReinterpretInSymbolForHoistPattern`。
 - 下游 `pytest` 只验证本文件 `API 列表` 中的公开接口，不跨文件直连任何非公开 helper。
 
 ## 额外补充
@@ -90,7 +95,7 @@ same_pass.apply(Context(), module)
 patterns = get_symbol_buffer_hoist_patterns()
 ```
 
-- `test/passes/test_symbol_buffer_hoist.py` 只能通过 `SymbolBufferHoistPass`、`DmaAllocInSymbolForHoistPattern`、`get_symbol_buffer_hoist_patterns()` 和 `build_registered_pass("symbol-buffer-hoist")` 观察行为。
+- `test/passes/test_symbol_buffer_hoist.py` 只能通过 `SymbolBufferHoistPass`、`DmaAllocWithMatmulFirstUseHoistPattern`、`DmaAllocInSymbolForHoistPattern`、`DmaReinterpretInSymbolForHoistPattern`、`get_symbol_buffer_hoist_patterns()` 和 `build_registered_pass("symbol-buffer-hoist")` 观察行为。
 - `test/passes/test_registry.py` 只能通过 `kernel_gen.passes.hoist.symbol_buffer_hoist`、`kernel_gen.passes.SymbolBufferHoistPass` 与 pass registry 观察公开导入面。
 
 ### 最小改写合同
@@ -156,10 +161,12 @@ symbol.for value {
   - shape 不依赖当前 `symbol.for` 的 loop iterator、`iter_args` 或任何 loop 内中间 SSA 值。
   - 数据 use 可以是 legacy staging/scratch use（`dma.slice` target、同 owner body 直接 `dma.deslice` source），也可以是公开 `MemoryEffect` 可判定且只包含 `READ/WRITE` 的 `dma.fill/copy/load/store/slice/deslice/broadcast` 或 `kernel.*` memory use。
   - `dma.alloc/free` 生命周期证明允许 `scf.if` 与 nested `symbol.for` descendant region 内的 effect-first data use；只要每个 `READ` 都被同一 block 或 ancestor block 内的完整 reset/write 支配，fixed-point 可把 alloc/free 每次外提一层并逐层穿过 nested `symbol.for`，直到最近安全位置。
+  - 对 logical alias 的完整写入只证明同一 logical scope 的后续读取；`offset=0`、同 backing、同元素数且 contiguous 的等价 `dma.reinterpret` alias 共享 logical scope，但不得把该 partial alias write 升级为 backing root full reset。
+  - `kernel.matmul` 使用动态 acc operand 时，若 acc 来源为同一 innermost `symbol.for` body 内位于 matmul 前的 `symbol.ne(iter, start)` 或 `symbol.ne(start, iter)`，可证明该 matmul 对当前 out/logical alias 在首轮 `acc=false` 时覆盖写；该证明只作用于当前 logical scope。
   - nested region 内的 `dma.deslice` source 必须按公开 `MemoryEffect` 的 `READ` 参与 lifecycle proof；没有此前 full reset/write 时不得借用 legacy output scratch 例外外提。
   - 公开 `MemoryEffect` 可判定的 use 中，若当前 buffer 的首次 effect 包含 `READ` 且之前没有 reset/write，则必须保持 no-op；unknown effect、`ALLOC/FREE` data use 或未列入本文件的 effect 组合不得外提。
   - `symbol.get_dim` / `symbol.get_stride` 对当前 buffer 或 alias result 的读取只作为 Pure metadata query 处理；它们允许存在但不会加入数据 use 列表，也不能单独让 alloc/free 外提。
-  - `dma.alloc` result 可以作为同一 owner `symbol.for` 直接 body 内 `dma.view`、`dma.reshape`、`dma.subview` 或 `dma.reinterpret` 的 source；alias result 的最终 direct use 必须落在同一 owner body 或其 descendant region 内，并且属于 `dma.slice` target、`dma.deslice` source、`dma.fill` target、`dma.copy` target/source、公开 `MemoryEffect` 可判定的 `kernel.*` memory operand、`symbol.get_dim` / `symbol.get_stride` metadata query 或可继续处理的 alias op。
+  - `dma.alloc` result 可以作为同一 owner `symbol.for` 直接 body 内 `dma.view`、`dma.reshape`、`dma.subview` 或 `dma.reinterpret` 的 source；alias result 的最终 direct use 必须落在同一 owner body 或其 descendant region 内，并且属于 `dma.slice` target、`dma.deslice` target/source、`dma.fill` target、`dma.copy` target/source、`dma.broadcast` target/source、公开 `MemoryEffect` 可判定的 `kernel.*` memory operand、`symbol.get_dim` / `symbol.get_stride` metadata query 或可继续处理的 alias op。
   - 若存在 `dma.free`，必须是同一 owner `symbol.for` 直接 body 内唯一释放当前 alloc result 的 op，并且顺序位于所有数据 use 之后。
   - output scratch 不经 `symbol.yield`、`func.return` 或未知外部别名链逃逸。
 - 当前公开正例固定为：
@@ -170,8 +177,9 @@ symbol.for value {
   - `dma.reshape`：source 与 shape 全部支配当前 owner `symbol.for`，且 result use 满足同一白名单时，单 op 外提一层；fixed-point 驱动可在 nested loop 中逐层外提到最近安全位置。
   - `dma.subview`：source、offset、size、stride 全部支配当前 owner `symbol.for`，且 result use 满足同一白名单时，单 op 外提一层；fixed-point 驱动可在 nested loop 中逐层外提到最近安全位置。
   - `dma.reinterpret`：source、offset、shape、stride 全部支配当前 owner `symbol.for`，且 result use 满足同一白名单时，单 op 外提一层；full-cover 判断按 `offset == 0`、result numel 覆盖 root numel、result stride contiguous 证明，并纳入统一 alias 集合。
-  - 对 `memory-plan{auto-pad=true}` 生成的 padded backing + logical alias，`dma.reinterpret` logical alias 必须继续按本条 alias op 规则参与 fixed-point 外提；consumer 仍捕获 logical alias，不把 `kernel.*` use 改写为 padded backing。
-  - `dma.fill` 或 `dma.broadcast` target write reset 后的 `kernel.*` read/write use 可作为 alloc/free 生命周期证明的一部分；例如 `dma.broadcast(buf, scalar)` 后 `kernel.*(..., lhs=buf, ...)` 读取 `buf` 时，alloc/free 可以成对外提。
+  - 对 `memory-plan{auto-pad=true}` 生成的 padded backing + logical alias，`dma.reinterpret` logical alias 必须继续按本条 alias op 规则参与 fixed-point 外提；consumer 仍捕获 logical alias，不把 `kernel.*` use 改写为 padded backing；等价 logical scope 的 partial alias write 只可证明同一 scope 后续 read，不证明 padded backing root 已完整 reset。
+  - `dma.fill`、`dma.deslice` target 或 `dma.broadcast` target write reset 后的 `kernel.*` / `dma.broadcast` read/write use 可作为 alloc/free 生命周期证明的一部分；例如 `dma.broadcast(buf, scalar)` 后 `kernel.*(..., lhs=buf, ...)` 读取 `buf` 时，alloc/free 可以成对外提。
+  - `kernel.matmul` 动态 acc 为当前 innermost loop 的 `iter != start` 时，matmul out 的 READ+WRITE 可自证当前 logical out 在首轮覆盖写，允许 static tail padded backing 在后续 read 前完成安全外提。
   - nested `symbol.for` 内 alloc/free 若先由 `dma.fill` 等完整 write reset 后再被读取，且唯一 `dma.free` 位于 owner body 内所有 data use 之后，则 fixed-point 可把 alloc/free 逐层外提到最外层 loop 前后。
   - owner block 内的 `dma.fill` 支配 nested `symbol.for` 中后续 `kernel.*` read/write 时，acc buffer 的 alloc/free 可成对外提。
   - owner block 内的 `dma.fill` 或其它完整 reset/write 支配 nested `symbol.for` 中后续 `dma.deslice source` READ 时，alloc/free 可成对外提。
@@ -247,6 +255,35 @@ symbol.for value {
 - 功能说明：对模块执行 `SymbolBufferHoistPass` pass。
 - 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
 
+### `class DmaAllocWithMatmulFirstUseHoistPattern()`
+
+- api：`class DmaAllocWithMatmulFirstUseHoistPattern()`
+- 参数：无。
+- 返回值：`DmaAllocWithMatmulFirstUseHoistPattern` 实例。
+- 使用示例：
+
+  ```python
+  dma_alloc_with_matmul_first_use_hoist_pattern = DmaAllocWithMatmulFirstUseHoistPattern()
+  ```
+- 功能说明：定义专门处理 dynamic acc `kernel.matmul` 首次 READ+WRITE 覆盖写证明的 `dma.alloc/free` rewrite pattern 对象。
+- 注意事项：该 pattern 只承接需要 self-reset proof 的 alloc；普通 fill/copy/deslice reset 场景由 `DmaAllocInSymbolForHoistPattern` 处理。
+
+### `DmaAllocWithMatmulFirstUseHoistPattern.match_and_rewrite(op: DmaAllocOp, rewriter: PatternRewriter) -> None`
+
+- api：`DmaAllocWithMatmulFirstUseHoistPattern.match_and_rewrite(op: DmaAllocOp, rewriter: PatternRewriter) -> None`
+- 参数：
+  - `op`：IR operation，作为 emit、rewrite、lowering 或校验的当前处理对象；类型 `DmaAllocOp`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `rewriter`：公开 rewrite 对象，用于替换、插入或删除 IR operation；类型 `PatternRewriter`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：无返回值；调用成功表示操作完成。
+- 使用示例：
+
+  ```python
+  dma_alloc_with_matmul_first_use_hoist_pattern = DmaAllocWithMatmulFirstUseHoistPattern()
+  dma_alloc_with_matmul_first_use_hoist_pattern.match_and_rewrite(op=op, rewriter=rewriter)
+  ```
+- 功能说明：使用 `DmaAllocWithMatmulFirstUseHoistPattern` 匹配目标 `DmaAllocOp`，仅在 use plan 需要 dynamic acc matmul self-reset proof 时执行 rewrite。
+- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
+
 ### `class DmaAllocInSymbolForHoistPattern()`
 
 - api：`class DmaAllocInSymbolForHoistPattern()`
@@ -287,7 +324,7 @@ symbol.for value {
   result = get_symbol_buffer_hoist_patterns()
   ```
 - 功能说明：读取 `symbol-buffer-hoist` 的 rewrite pattern 列表。
-- 注意事项：该接口返回用于 `dma.view` / `dma.reshape` / `dma.subview` / `dma.reinterpret` 的 pattern 实例；`DmaAllocInSymbolForHoistPattern`、`DmaViewInSymbolForHoistPattern`、`DmaReshapeInSymbolForHoistPattern` 与 `DmaSubviewInSymbolForHoistPattern` 是公开类名，`dma.reinterpret` 处理不新增单独公开 pattern 类。
+- 注意事项：该接口返回用于 matmul-first alloc、普通 alloc、`dma.view` / `dma.reshape` / `dma.subview` / `dma.reinterpret` 的 pattern 实例；`DmaAllocWithMatmulFirstUseHoistPattern`、`DmaAllocInSymbolForHoistPattern`、`DmaViewInSymbolForHoistPattern`、`DmaReshapeInSymbolForHoistPattern`、`DmaSubviewInSymbolForHoistPattern` 与 `DmaReinterpretInSymbolForHoistPattern` 均是公开类名。
 
 ## 测试
 
@@ -300,7 +337,7 @@ symbol.for value {
 
 ### 测试目标
 
-- 锁定 `SymbolBufferHoistPass`、`DmaAllocInSymbolForHoistPattern`、`get_symbol_buffer_hoist_patterns()` 与 `build_registered_pass("symbol-buffer-hoist")` 的公开行为。
+- 锁定 `SymbolBufferHoistPass`、`DmaAllocWithMatmulFirstUseHoistPattern`、`DmaAllocInSymbolForHoistPattern`、`get_symbol_buffer_hoist_patterns()` 与 `build_registered_pass("symbol-buffer-hoist")` 的公开行为。
 - 锁定 `symbol-buffer-hoist` 的 registry 名称、canonical import path 与包根 re-export。
 
 ### 功能与用例清单
@@ -336,8 +373,36 @@ symbol.for value {
 | TC-PASS-SYMBOL-BUFFER-HOIST-027 | no-op 边界 | partial alias write 后 root read | 准备 byte pool alloc、typed `dma.subview` 局部 fill、随后完整 root `dma.copy` read。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_keeps_alloc_when_partial_write_precedes_full_read`。 | partial write 不能证明 root reset，alloc/free 保持原位。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_keeps_alloc_when_partial_write_precedes_full_read |
 | TC-PASS-SYMBOL-BUFFER-HOIST-028 | pass 改写 | `dma.copy` 跨 memory space 但布局/dtype 相同 | 准备 loop 内 alloc target 与 loop 外 source 的 shape、stride、element_type 相同但 space 不同，copy 后再由 `kernel.*` 读取 alloc。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_alloc_when_copy_cross_space_full_write_resets_kernel_read`。 | copy target WRITE 证明 alloc root 完整 reset，alloc/free 成对外提，copy 与后续 kernel read 留在 loop 内并捕获外提 buffer。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_alloc_when_copy_cross_space_full_write_resets_kernel_read |
 | TC-PASS-SYMBOL-BUFFER-HOIST-029 | pass 改写 | 动态 matmul acc/tmp/lhs/rhs scratch alloc/free 成对外提 | 准备 M/N/K 三层 loop，acc/tmp shape 来自 `TM/TN`，lhs/rhs shape 来自 `TM/TK`、`TK/TN`，fill/matmul/binary 作为循环内 data use。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_dynamic_matmul_loop_local_scratch_allocs`。 | 四个 alloc 位于最外层 loop 前，四个 free 位于最外层 loop 后，M/N/K loop body 中不残留 alloc/free；fill、matmul 与 binary 累加仍留在原循环语义位置并捕获外提 buffer。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_dynamic_matmul_loop_local_scratch_allocs |
+| TC-PASS-SYMBOL-BUFFER-HOIST-030 | pass 改写 | auto-pad dynamic acc matmul logical alias | 准备 `memory-plan{auto-pad=true}` 后接 `symbol-buffer-hoist` 的 loop-local matmul out alloc，`kernel.matmul` 使用动态 acc `iter != start`。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_after_memory_plan_auto_pad_hoists_dynamic_acc_matmul`。 | padded backing alloc/free 外提到 loop 外，`kernel.matmul` 继续消费 logical `dma.reinterpret` alias，不直接消费 padded backing。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_after_memory_plan_auto_pad_hoists_dynamic_acc_matmul |
+| TC-PASS-SYMBOL-BUFFER-HOIST-031 | pass 改写 | 等价 reinterpret logical scope | 准备同一 backing 上 `offset=0`、同元素数且 contiguous 的 rank-1 与 rank-2 logical alias，先通过 rank-1 alias 写入，再通过 rank-2 alias 被 `dma.broadcast` 读取。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_equivalent_reinterpret_alias_scope_for_broadcast`。 | alias-scoped reset proof 生效，backing alloc/free 成对外提；该 proof 不升级为 root full reset。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_equivalent_reinterpret_alias_scope_for_broadcast |
 
 ## Pattern MLIR before / after 合同
+
+### `DmaAllocWithMatmulFirstUseHoistPattern`
+
+- 功能说明：匹配 loop body 内由 dynamic acc `kernel.matmul` 首次 READ+WRITE 覆盖写证明安全的 `dma.alloc + dma.free`，成对外提到 owner `symbol.for` 两侧。
+- no-op：`kernel.matmul` 不使用 dynamic acc、dynamic acc 不是当前 innermost loop 的 `iter != start`、没有唯一 matching free 或存在未知 effect escape 时保持原 IR。
+- before:
+
+```mlir
+symbol.for %k = %start to %end step %tile {
+  %out = "dma.alloc"(%tm, %tn) : (...) -> !nn.memory<...>
+  %acc = symbol.ne %k, %start : !symbol.iter<...>, !symbol.int<...> -> i1
+  "kernel.matmul"(%out, %lhs, %rhs, %acc) : (...) -> ()
+  "dma.free"(%out) : (!nn.memory<...>) -> ()
+}
+```
+
+- after:
+
+```mlir
+%out = "dma.alloc"(%tm, %tn) : (...) -> !nn.memory<...>
+symbol.for %k = %start to %end step %tile {
+  %acc = symbol.ne %k, %start : !symbol.iter<...>, !symbol.int<...> -> i1
+  "kernel.matmul"(%out, %lhs, %rhs, %acc) : (...) -> ()
+}
+"dma.free"(%out) : (!nn.memory<...>) -> ()
+```
 
 ### `DmaAllocInSymbolForHoistPattern`
 
@@ -429,9 +494,9 @@ symbol.for %i = %c0 to %n step %c1 {
 }
 ```
 
-### `dma.reinterpret` 内部 handler
+### `DmaReinterpretInSymbolForHoistPattern`
 
-- 功能说明：匹配 loop-invariant `dma.reinterpret`，把单个 alias op 外提一层；该 handler 不新增公开 pattern 类名。
+- 功能说明：匹配 loop-invariant `dma.reinterpret`，把单个 alias op 外提一层。
 - no-op：source、offset、shape 或 stride 依赖当前 loop时保持原 IR。
 - before:
 

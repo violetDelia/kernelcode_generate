@@ -6,7 +6,7 @@
 - 编译期 memory 使用 `H/K/W` 语义符号，tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数。
 - 脚本入口每次运行先随机生成 `shape_seed/tile_seed`，运行期 shape 与 tile 都由本次随机 profile 选出，只通过真实 NumPy ndarray 与 int runtime scalar 绑定，不静态化进入口 memory/tile 类型。
 - K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 初始化局部 accumulator，K loop 内用 `kernel.matmul/kernel.add` out-first helper 累加 partial，K loop 后按 optional rank-1 bias 分支累加并最终写回 output。
-- H/W/K 尾块都通过 `min(tile, dim - iv)` 覆盖，避免只覆盖可整除 case。
+- 局部 staging / accumulator 按 `min(tile, dim - iv)` effective tile 分配，覆盖 H/W/K 尾块并触发 lowering 中的 padded backing / logical alias 验收。
 
 API 列表:
 - `matmul_inputs_dynamic_tile_dynamic_kernel(out: Tensor[f32, H, W], lhs: Tensor[f32, H, K], rhs: Tensor[f32, K, W], bias: Tensor[f32, W], tile_h: SymbolDim, tile_w: SymbolDim, tile_k: SymbolDim) -> None`
@@ -69,7 +69,8 @@ def matmul_inputs_dynamic_tile_dynamic_kernel(
     功能说明:
     - 输入和输出 shape 全部来自 `Tensor[...]` 的 `H/K/W` 符号维度。
     - `tile_h/tile_w/tile_k` 作为 `SymbolDim` 参数进入编译 IR，不在 Python 函数体内常量化。
-    - K 维通过内层 loop 切分，每个 partial 通过 `kernel.matmul/kernel.add` out-first helper 累加到同一个局部 accumulator。
+    - K 维通过内层 loop 切分，局部 buffer 均按当前 effective tile shape 分配，
+      每个 partial 通过 `kernel.matmul/kernel.add` out-first helper 累加到同一个局部 accumulator。
     - runtime bias 非空时，在 K reduce 后、写回 output 前广播 rank-1 bias 并累加。
 
     使用示例:
@@ -84,23 +85,23 @@ def matmul_inputs_dynamic_tile_dynamic_kernel(
         for w0 in loop(0, w_size, tile_w):
             cur_h = min(tile_h, h_size - h0)
             cur_w = min(tile_w, w_size - w0)
-            acc = alloc([tile_h, tile_w], NumericType.Float32, MemorySpace.TSM)
+            acc = alloc([cur_h, cur_w], NumericType.Float32, MemorySpace.TSM)
             fill(acc, 0)
-            bias_tile = alloc([tile_w], NumericType.Float32, MemorySpace.TSM)
+            bias_tile = alloc([cur_w], NumericType.Float32, MemorySpace.TSM)
             fill(bias_tile, 0)
-            bias_row = reshape(bias_tile, [1, tile_w])
-            bias_full = alloc([tile_h, tile_w], NumericType.Float32, MemorySpace.TSM)
+            bias_row = reshape(bias_tile, [1, cur_w])
+            bias_full = alloc([cur_h, cur_w], NumericType.Float32, MemorySpace.TSM)
             for k0 in loop(0, k_size, tile_k):
                 cur_k = min(tile_k, k_size - k0)
-                lhs_tile = alloc([tile_h, tile_k], NumericType.Float32, MemorySpace.TSM)
-                rhs_tile = alloc([tile_k, tile_w], NumericType.Float32, MemorySpace.TSM)
+                lhs_tile = alloc([cur_h, cur_k], NumericType.Float32, MemorySpace.TSM)
+                rhs_tile = alloc([cur_k, cur_w], NumericType.Float32, MemorySpace.TSM)
                 fill(lhs_tile, 0)
                 fill(rhs_tile, 0)
                 lhs_region = view(lhs, [h0, k0], [cur_h, cur_k], [1, 1])
                 rhs_region = view(rhs, [k0, w0], [cur_k, cur_w], [1, 1])
                 deslice(lhs_tile, lhs_region, [0, 0], [cur_h, cur_k], [1, 1])
                 deslice(rhs_tile, rhs_region, [0, 0], [cur_k, cur_w], [1, 1])
-                partial = alloc([tile_h, tile_w], NumericType.Float32, MemorySpace.TSM)
+                partial = alloc([cur_h, cur_w], NumericType.Float32, MemorySpace.TSM)
                 kernel.matmul(partial, lhs_tile, rhs_tile)
                 kernel.add(acc, acc, partial)
             if bias is not None:

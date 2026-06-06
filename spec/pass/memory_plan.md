@@ -8,7 +8,7 @@
   类型完全一致且生命周期不重叠的 `dma.alloc` 做保守复用。
 - 显式 `auto-pad=true` 时允许把可证明 static upper bound 的 dynamic tail `dma.alloc`
   改写为 padded backing alloc + 保留原 logical type 的 `dma.reinterpret` alias。
-- 本 pass 与 `memory-pool` 的 rewrite 语义分离，不做 pool rewrite、alignment 或 backing memory 合并；`npu-demo-lowering` 以 `MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=False)` 固定调用本 pass 补齐生命周期并启用保守复用。
+- 本 pass 与 `memory-pool` 的 rewrite 语义分离，不做 pool rewrite、alignment 或 backing memory 合并；`npu-demo-lowering` 以 `MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=True)` 固定调用本 pass 补齐生命周期、启用 padded backing / logical alias 改写并启用保守复用。
 
 ## API 列表
 
@@ -41,8 +41,8 @@
 
 ## 非目标
 
-- `default-lowering` 不接入本 pass；`npu-demo-lowering` 固定以 `insert_free=True, reuse=True, fold=False` 调用，不新增 memory-plan 专属 pipeline option。
-- 本计划不默认开启 `npu-demo-lowering` 中的 `auto_pad`，也不改变固定 pipeline 顺序。
+- `default-lowering` 不接入本 pass；`npu-demo-lowering` 固定以 `insert_free=True, reuse=True, fold=False, auto_pad=True` 调用，不新增 memory-plan 专属 pipeline option。
+- `npu-demo-lowering` 固定开启既有 `auto_pad` 能力，但不新增 `auto-pad` / `auto_pad` pipeline option，也不改变固定 pipeline 顺序。
 - `auto_pad` 不删除已有 fill、不改变 `dma.deslice` partial-write 语义、不改变 `kernel.matmul` consumer 语义。
 - 不处理完整 ownership indicator、retain、region-branch、跨函数所有权或多块 CFG；仅支持本文件明确列出的单块 `scf.if` branch-local alloc/free/reuse 形态。
 - 不复用、调用或改变 `memory-pool` 的 summary / rewrite 语义。
@@ -57,7 +57,7 @@
 - `insert-free=true`：执行生命周期分析并补插缺失 `dma.free`。
 - `reuse=false`：默认行为，不做 alloc 复用。
 - `reuse=true`：仅在 `insert-free=true` 时启用保守 linear-scan 复用；单独开启 `reuse=true` 仍保持 no-op。
-- `auto-pad=false`：默认行为，不做 padded backing rewrite。
+- `auto-pad` 取 false：默认行为，不做 padded backing rewrite。
 - `auto-pad=true`：在 lifecycle 分析与 `insert-free` 补齐之前尝试执行 padded backing rewrite；候选无法证明或无法物化时对当前 alloc no-op。
 - `fold` 是 registry 通用 option，由 [`spec/pass/registry.md`](../../spec/pass/registry.md) 解析；`MemoryPlanPass.from_options(...)` 不解析 `fold`。
 
@@ -161,6 +161,7 @@ pass_obj = build_registered_pass("memory-plan", {"insert-free": "true", "reuse":
 | TC-MPLAN-002E | auto_pad 乘积 tail | `K * min(T, tail)` 在 `K*T` SSA 可见时改写为 padded backing |
 | TC-MPLAN-002F | auto_pad `min(A, B)` | `A` 可作为正上界时使用 `A` 作为 padded backing shape |
 | TC-MPLAN-002G | auto_pad dynamic matmul effective tile | `symbol-buffer-hoist` 后 padded backing 外提，`kernel.matmul` 继续消费 logical alias，不直接读取 padded backing |
+| TC-MPLAN-002H | npu-demo-lowering 固定 auto_pad | 三段 `MemoryPlanPass` 均以 `auto_pad=True` 构造，matmul pipeline dump 中 padded backing / logical alias 与 alloc/free 外提语义可观察 |
 | TC-MPLAN-003 | 已有合法 free | 不重复插入 |
 | TC-MPLAN-003A | reuse 类型一致且生命周期不重叠 | 删除后一个 alloc 与前一个旧 free，保留最终 free |
 | TC-MPLAN-003B | reuse 类型不一致 | 保守 no-op，两个 alloc/free 都保留 |

@@ -854,44 +854,6 @@ def get_dma_alias_to_reinterpret_patterns() -> list[RewritePattern]:
     ]
 
 
-def _rewrite_module(ctx: Context, module: ModuleOp) -> None:
-    """对 module 执行 alias-to-reinterpret rewrite。
-
-    功能说明:
-    - 使用 greedy walker 收敛三类 alias op。
-    - 不在 pass 内执行 DCE；pipeline 级死代码清理由 PassManager 的通用 fold 开关控制。
-    - 保留未使用但可归一化的 alias 结果，便于 ircheck 合同观察 pass 的直接 rewrite 结果。
-
-    使用示例:
-    - _rewrite_module(ctx, module)
-    """
-
-    PatternRewriteWalker(
-        GreedyRewritePatternApplier(
-            get_dma_alias_to_reinterpret_patterns(),
-            ctx=ctx,
-            folding_enabled=True,
-            dce_enabled=False,
-        )
-    ).rewrite_module(module)
-
-
-def _replace_module_body(target: ModuleOp, source: ModuleOp) -> None:
-    """把 source module body 移入 target。
-
-    功能说明:
-    - rewrite 在 clone 上完成并验证通过后才替换原 module body。
-    - 该步骤保证 verifier 失败时原 module 文本保持不变。
-
-    使用示例:
-    - _replace_module_body(original, rewritten_clone)
-    """
-
-    for block in list(target.body.blocks):
-        target.body.erase_block(block, safe_erase=False)
-    source.body.move_blocks(target.body)
-
-
 class DmaAliasToReinterpretPass(Pass):
     """dma alias 归一化 pass。
 
@@ -932,7 +894,14 @@ class DmaAliasToReinterpretPass(Pass):
             ctx.load_dialect(Symbol)
         rewritten = module.clone()
         try:
-            _rewrite_module(ctx, rewritten)
+            PatternRewriteWalker(
+                GreedyRewritePatternApplier(
+                    get_dma_alias_to_reinterpret_patterns(),
+                    ctx=ctx,
+                    folding_enabled=self.fold,
+                    dce_enabled=False,
+                )
+            ).rewrite_module(rewritten)
             verify_generated_ops([rewritten])
         except KernelCodeError as exc:
             raise KernelCodeError(
@@ -940,7 +909,9 @@ class DmaAliasToReinterpretPass(Pass):
                 ErrorModule.PASS,
                 f"DmaAliasToReinterpretVerifierError: {exc}",
             ) from exc
-        _replace_module_body(module, rewritten)
+        for block in list(module.body.blocks):
+            module.body.erase_block(block, safe_erase=False)
+        rewritten.body.move_blocks(module.body)
 
 
 __all__ = ["DmaAliasToReinterpretPass", "get_dma_alias_to_reinterpret_patterns"]

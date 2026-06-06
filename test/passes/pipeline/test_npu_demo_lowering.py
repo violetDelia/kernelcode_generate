@@ -287,7 +287,7 @@ def _record_memory_plan(self, ctx: Context, target: ModuleOp) -> None:
 
 
     功能说明:
-    - 为 pipeline 顺序测试记录 `MemoryPlanPass` 的 `insert_free`、`reuse` 与 `fold` 固定参数。
+    - 为 pipeline 顺序测试记录 `MemoryPlanPass` 的 `insert_free`、`reuse`、`fold` 与 `auto_pad` 固定参数。
 
     使用示例:
     - monkeypatch.setattr(MemoryPlanPass, "apply", _record_memory_plan)
@@ -298,7 +298,8 @@ def _record_memory_plan(self, ctx: Context, target: ModuleOp) -> None:
     insert_free = self.insert_free
     reuse = self.reuse
     fold = self.fold
-    _PIPELINE_PASS_ORDER.append(f"memory-plan:{insert_free}:{reuse}:{fold}")
+    auto_pad = self.auto_pad
+    _PIPELINE_PASS_ORDER.append(f"memory-plan:{insert_free}:{reuse}:{fold}:{auto_pad}")
 
 
 def _record_arch_parallelize(self, ctx: Context, target: ModuleOp) -> None:
@@ -483,6 +484,70 @@ def _dump_stage_index(dump_dir: Path, marker: str, *, occurrence: int = 1) -> in
     raise AssertionError(f"dump stage marker {marker!r} occurrence {occurrence} not found")
 
 
+def _pattern_function_text(stage_text: str, function_name: str) -> str:
+    """截取 dump 中指定 pattern/device 函数文本。
+
+    功能说明:
+    - 只按公开 dump 文本中的 `func.func @name` 边界截取。
+    - 用于 pipeline 级测试观察 alloc/free 与 consumer 的相对位置。
+
+    使用示例:
+    - text = _pattern_function_text(stage_text, "matmul_kernel_pattern0")
+    """
+
+    start = stage_text.index(f"func.func @{function_name}")
+    next_func = stage_text.find("\n  func.func @", start + 1)
+    if next_func == -1:
+        return stage_text[start:]
+    return stage_text[start:next_func]
+
+
+def _assert_alloc_free_at_pattern_function_scope(function_text: str) -> None:
+    """断言 `dma.alloc/free` 均位于 pattern 函数首层。
+
+    功能说明:
+    - 通过 xDSL dump 的稳定缩进判断 alloc/free 不在 `symbol.for` 或 `scf.if` region 内。
+    - 首层缩进允许 alloc 在首个 supported loop 前、free 在 loop 后。
+    - 同时要求当前 pattern 函数实际保留 typed lifecycle op，避免空检查误通过。
+
+    使用示例:
+    - _assert_alloc_free_at_pattern_function_scope(pattern_text)
+    """
+
+    saw_alloc = False
+    saw_free = False
+    for line in function_text.splitlines():
+        if '"dma.alloc"' not in line and '"dma.free"' not in line:
+            continue
+        if not line.startswith("    ") or line.startswith("      "):
+            raise AssertionError(f"dma lifecycle op must be at pattern function scope: {line}")
+        saw_alloc = saw_alloc or '"dma.alloc"' in line
+        saw_free = saw_free or '"dma.free"' in line
+    if not saw_alloc or not saw_free:
+        raise AssertionError("expected pattern function scope dma.alloc and dma.free")
+
+
+def _assert_kernel_matmul_consumes_logical_reinterpret(function_text: str) -> None:
+    """断言 `kernel.matmul` out operand 来自 logical `dma.reinterpret` alias。
+
+    功能说明:
+    - 收集当前函数内 `dma.reinterpret` result。
+    - 验证每个 `kernel.matmul` 的第一个 memory operand 使用 logical alias，而不是 padded backing alloc。
+
+    使用示例:
+    - _assert_kernel_matmul_consumes_logical_reinterpret(pattern_text)
+    """
+
+    reinterpret_results = set(re.findall(r'^\s*(%\w+) = "dma\.reinterpret"', function_text, flags=re.MULTILINE))
+    matmul_operands = re.findall(r'"kernel\.matmul"\(([^)]*)\)', function_text)
+    if not matmul_operands:
+        raise AssertionError("expected at least one kernel.matmul op")
+    for operands in matmul_operands:
+        out_operand = operands.split(",", 1)[0].strip()
+        if out_operand not in reinterpret_results:
+            raise AssertionError(f"kernel.matmul out must use logical reinterpret alias; got {out_operand}")
+
+
 def matmul_kernel(lhs: Memory, rhs: Memory, out: Memory, TILE_M: SymbolDim, TILE_N: SymbolDim) -> None:
     """构造 npu_demo lowering 集成测试用 matmul kernel。
 
@@ -559,20 +624,20 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "canonicalize",
         "decompass",
         "lower-nn",
-        "memory-plan:True:True:False",
+        "memory-plan:True:True:False:True",
         "symbol-hoist-pipeline",
         "cse",
         "canonicalize",
         "tile-analysis",
         "kernel-pattern-attach",
         "transform-apply",
-        "memory-plan:True:True:False",
+        "memory-plan:True:True:False:True",
         "symbol-hoist-pipeline",
         "cse",
         "canonicalize",
         "kernel-aggregate:True",
         "kernel-decompose",
-        "memory-plan:True:True:False",
+        "memory-plan:True:True:False:True",
         "symbol-hoist-pipeline",
         "cse",
         "canonicalize",
@@ -1023,6 +1088,99 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
     assert "dma.free" not in str(module)
 
 
+# TC-PASS-PIPELINE-NPU-DEMO-LOWERING-008
+# 功能说明: 验证 static/static、static/dynamic、dynamic/dynamic matmul demo 的 alloc/free 在 final hoist 后位于 pattern 函数首层。
+# 测试目的: 通过公开 demo kernel 与 dump marker 锁定 `memory-plan(auto_pad=true) -> symbol-hoist-pipeline` 的 lifecycle 外提合同。
+# 使用示例: pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k matmul_demo_allocs_hoist
+# 对应功能实现文件路径: kernel_gen/pipeline/npu_demo_lowering.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/pipeline/npu_demo_lowering.md
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/pipeline/test_npu_demo_lowering.py
+def test_npu_demo_lowering_pipeline_matmul_demo_allocs_hoist_for_static_and_dynamic_tiles(tmp_path: Path) -> None:
+    """验证三类 matmul demo 在 pipeline pre-pool typed IR 中完成 alloc/free 最外提。
+
+    功能说明:
+    - 使用公开 matmul demo kernel 与公开 `set_dump_dir(...)` 生成真实 pipeline dump。
+    - 覆盖 static/static、static/dynamic、dynamic/dynamic 三类计划场景。
+    - 断言第三段 `symbol-hoist-pipeline` 后 pattern 函数中 `dma.alloc/free` 均位于首层，
+      且三类 demo 中 `kernel.matmul` 继续消费 logical `dma.reinterpret` alias。
+
+    使用示例:
+    - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k matmul_demo_allocs_hoist
+    """
+
+    static_static = importlib.import_module("kernel.matmul.inputs_static_tile_static")
+    static_dynamic = importlib.import_module("kernel.matmul.inputs_static_tile_dynamic")
+    dynamic_dynamic = importlib.import_module("kernel.matmul.inputs_dynamic_tile_dynamic")
+    cases = (
+        (
+            "static_static",
+            static_static.matmul_inputs_static_tile_static_kernel,
+            (
+                Memory([166, 172], NumericType.Float32),
+                Memory([166, 217], NumericType.Float32),
+                Memory([217, 172], NumericType.Float32),
+                Memory([172], NumericType.Float32),
+            ),
+            "matmul_inputs_static_tile_static_kernel_pattern0",
+            True,
+        ),
+        (
+            "static_dynamic",
+            static_dynamic.matmul_inputs_static_tile_dynamic_kernel,
+            (
+                Memory([197, 184], NumericType.Float32),
+                Memory([197, 178], NumericType.Float32),
+                Memory([178, 184], NumericType.Float32),
+                Memory([184], NumericType.Float32),
+                SymbolDim("TILE_H"),
+                SymbolDim("TILE_W"),
+                SymbolDim("TILE_K"),
+            ),
+            "matmul_inputs_static_tile_dynamic_kernel_pattern0",
+            True,
+        ),
+        (
+            "dynamic_dynamic",
+            dynamic_dynamic.matmul_inputs_dynamic_tile_dynamic_kernel,
+            (
+                Memory(["H", "W"], NumericType.Float32),
+                Memory(["H", "K"], NumericType.Float32),
+                Memory(["K", "W"], NumericType.Float32),
+                Memory(["W"], NumericType.Float32),
+                SymbolDim("TILE_H"),
+                SymbolDim("TILE_W"),
+                SymbolDim("TILE_K"),
+            ),
+            "matmul_inputs_dynamic_tile_dynamic_kernel_pattern0",
+            True,
+        ),
+    )
+
+    for case_name, kernel_func, args, pattern_name, requires_logical_matmul in cases:
+        case_dump_dir = tmp_path / case_name
+        case_dump_dir.mkdir()
+        module = mlir_gen(kernel_func, *args)
+        pipeline = build_npu_demo_lowering_pipeline()
+
+        set_dump_dir(case_dump_dir)
+        try:
+            pipeline.run(module)
+        finally:
+            reset_config()
+
+        final_hoist_text = _dump_stage_text_by_marker(case_dump_dir, "symbol-hoist-pipeline", occurrence=3)
+        memory_pool_text = _dump_stage_text_by_marker(case_dump_dir, "memory-pool")
+        pattern_text = _pattern_function_text(final_hoist_text, pattern_name)
+        _assert_alloc_free_at_pattern_function_scope(pattern_text)
+        assert '"kernel.matmul"' in pattern_text
+        assert '"dma.alloc"' not in memory_pool_text
+        assert '"dma.free"' not in memory_pool_text
+        if requires_logical_matmul:
+            _assert_kernel_matmul_consumes_logical_reinterpret(pattern_text)
+
+
 # TC-PIPELINE-115
 # 功能说明: 验证 npu-demo-lowering dump 中 symbol-hoist-pipeline 阶段按组合 pattern 合同收口。
 # 测试目的: 通过公开 dump marker 断言 alias descriptor 顺序、symbol 外提和 acc fill 删除事实。
@@ -1067,18 +1225,14 @@ def test_npu_demo_lowering_pipeline_symbol_hoist_pipeline_pattern_dump(
 
     first_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-hoist-pipeline")
     final_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-hoist-pipeline", occurrence=3)
+    final_pattern_text = _pattern_function_text(
+        final_hoist_text,
+        "matmul_inputs_static_tile_static_kernel_pattern0",
+    )
     markers = _dump_stage_markers(tmp_path)
-    p1_alias_before_consumer = re.search(
-        r'(?P<alias>%\d+) = "dma\.reinterpret"\([^\n]+\)\s+<\{[^\n]*\}> : [^\n]+\n'
-        r'\s+"dma\.deslice"\(%\d+, (?P=alias),',
-        final_hoist_text,
-    )
-    broadcast_effective_source = re.search(
-        r'"dma\.broadcast"\(%\d+, %\d+\)[^\n]* : '
-        r'\(!nn\.memory<\[#S\d+, #S\d+\], \[#S\d+, #C1\], f32, #nn\.space<tsm>>, '
-        r'!nn\.memory<\[#S\d+\], \[#C1\], f32, #nn\.space<tsm>>\) -> \(\)',
-        final_hoist_text,
-    )
+    reinterpret_results = set(re.findall(r'^\s*(%\w+) = "dma\.reinterpret"', final_pattern_text, flags=re.MULTILINE))
+    output_deslice = re.search(r'"dma\.deslice"\(%0, (?P<source>%\w+),', final_pattern_text)
+    broadcast = re.search(r'"dma\.broadcast"\(%\w+, (?P<source>%\w+)\)', final_pattern_text)
     guard_index = final_hoist_text.index("memory.get_data")
     cast_index = final_hoist_text.index("symbol.cast")
     cond_index = final_hoist_text.index("symbol.ne")
@@ -1094,8 +1248,12 @@ def test_npu_demo_lowering_pipeline_symbol_hoist_pipeline_pattern_dump(
     assert first_hoist_text.index("arith.constant") < first_stage_loop_index
     assert '"dma.fill"' in first_hoist_text
     assert '"dma.fill"' not in final_hoist_text
-    assert p1_alias_before_consumer is not None
-    assert broadcast_effective_source is not None
+    assert output_deslice is not None
+    assert output_deslice.group("source") in reinterpret_results
+    assert broadcast is not None
+    assert broadcast.group("source") in reinterpret_results
+    _assert_alloc_free_at_pattern_function_scope(final_pattern_text)
+    _assert_kernel_matmul_consumes_logical_reinterpret(final_pattern_text)
     assert "source_low" not in final_hoist_text
     assert "target_low" not in final_hoist_text
     assert "DmaViewDesliceGroupingPattern" not in final_hoist_text
