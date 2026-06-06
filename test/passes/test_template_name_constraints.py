@@ -149,7 +149,7 @@ def test_template_name_default_constraints_register_dma_ring_ops_verify_only() -
 
     register_default_template_constraints()
     slot_type = _memory_type()
-    ring_type = DmaRingType(SymbolExprAttr.from_expr("16"), slot_type)
+    ring_type = DmaRingType(slot_type)
     make_ring = DmaMakeRingOp(
         create_ssa_value(_byte_pool_type()),
         create_ssa_value(SymbolValueType.from_expr("3")),

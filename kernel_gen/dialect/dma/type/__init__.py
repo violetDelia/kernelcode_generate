@@ -4,7 +4,7 @@
 - 聚合 dma package 内部 type 定义。
 
 API 列表:
-- `class DmaRingType(offset: SymbolExprAttr, memory_type: NnMemoryType)`
+- `class DmaRingType(memory_type: NnMemoryType)`
 
 使用示例:
 - `from kernel_gen.dialect.dma.type import DmaRingType`

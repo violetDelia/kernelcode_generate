@@ -41,7 +41,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.core.config import reset_config, set_target
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaFreeOp, DmaLoadOp, DmaReinterpretOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaTransposeOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAdvanceRingOp, DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaCurrentRingOp, DmaDesliceOp, DmaFillOp, DmaFreeOp, DmaLoadOp, DmaMakeRingOp, DmaReinterpretOp, DmaReshapeOp, DmaRingType, DmaSliceOp, DmaStoreOp, DmaTransposeOp, DmaViewOp
 from kernel_gen.dialect.kernel import (
     KernelBinaryElewiseOp,
     KernelExpOp,
@@ -1388,6 +1388,37 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
 
     with pytest.raises(KernelCodeError, match="result must be nn.memory"):
         emit_c_op(DmaAllocOp([], i32), _npu_ctx())
+
+
+# EC-I3-001A2
+# 功能说明: 验证 target=npu_demo 下 `dma.make_ring/current_ring/advance_ring` 的 serial ring 发射合同。
+# 测试目的: 锁定 `dma.make_ring` 不生成 runtime helper，current/advance 使用 backing memory 的固定 `{0}` typed view。
+# 使用示例: pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_ring_contract
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/npu_demo/dma/ring.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/emit/npu_demo/dma/__init__.md
+# 对应测试文件路径: test/dsl/gen_kernel/emit/test_package.py
+def test_emit_c_lowers_npu_demo_dma_ring_contract() -> None:
+    backing_type = _make_memory_type([96], [1], space="tlm1", element_type=i8)
+    slot_type = _make_memory_type([2, 3], [3, 1], space="tlm1", element_type=f32)
+    backing = DmaAllocOp([], backing_type)
+    num = SymbolConstOp(4)
+    offset = SymbolConstOp(24)
+    shape_bytes = SymbolConstOp(24)
+    make_ring = DmaMakeRingOp(backing.result, num.result, offset.result, shape_bytes.result, DmaRingType(slot_type))
+    current = DmaCurrentRingOp(make_ring.result)
+    advance = DmaAdvanceRingOp(make_ring.result)
+    ctx = _npu_ctx()
+    ctx.bind_name(backing.result, "ring_backing")
+
+    assert emit_c_op(make_ring, ctx) == ""
+    assert emit_c_op(current, ctx) == (
+        "Memory<TLM1, float> ring_slot_0 = ring_backing.view<float>({0} /*offset*/, {(2) * (3)} /*size*/, {1} /*stride*/);\n"
+        "Memory<TLM1, float> v0 = ring_slot_0.reshape({2, 3} /*shape*/);"
+    )
+    assert emit_c_op(advance, ctx) == (
+        "Memory<TLM1, float> ring_slot_1 = ring_backing.view<float>({0} /*offset*/, {(2) * (3)} /*size*/, {1} /*stride*/);\n"
+        "Memory<TLM1, float> v1 = ring_slot_1.reshape({2, 3} /*shape*/);"
+    )
 
 
 # EC-I3-001B

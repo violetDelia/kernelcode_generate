@@ -4,12 +4,12 @@
 - 定义 `dma.make_ring`、`dma.current_ring` 与 `dma.advance_ring`。
 
 API 列表:
-- `class DmaMakeRingOp(memory: SSAValue | Operation, count: SSAValue | Operation, offset: SSAValue | Operation, shape_bytes: SSAValue | Operation, result_type: DmaRingType)`
+- `class DmaMakeRingOp(memory: SSAValue | Operation, num: SSAValue | Operation, offset: SSAValue | Operation, shape_bytes: SSAValue | Operation, result_type: DmaRingType)`
 - `class DmaCurrentRingOp(ring: SSAValue | Operation, result_type: NnMemoryType | None = None)`
 - `class DmaAdvanceRingOp(ring: SSAValue | Operation, result_type: NnMemoryType | None = None)`
 
 使用示例:
-- `DmaMakeRingOp(memory, count, offset, shape_bytes, ring_type)`
+- `DmaMakeRingOp(memory, num, offset, shape_bytes, ring_type)`
 
 关联文件:
 - spec: spec/dialect/dma.md
@@ -260,7 +260,7 @@ class _DmaRingHelpers :
         - 动态符号表达式仅校验类型，不做数值求解。
 
         使用示例:
-        - count = verify_positive_static_operand(op.count, "count")
+        - count = verify_positive_static_operand(op.num, "count")
 
         关联文件:
         - spec: spec/dialect/dma.md
@@ -292,7 +292,7 @@ class DmaMakeRingOp (IRDLOperation ):
     name ="dma.make_ring"
 
     memory =operand_def (NnMemoryType )
-    count =operand_def (SymbolValueType )
+    num =operand_def (SymbolValueType )
     offset =operand_def (SymbolValueType )
     shape_bytes =operand_def (SymbolValueType )
     result =result_def (DmaRingType )
@@ -300,7 +300,7 @@ class DmaMakeRingOp (IRDLOperation ):
     def __init__ (
     self ,
     memory :SSAValue |Operation ,
-    count :SSAValue |Operation ,
+    num :SSAValue |Operation ,
     offset :SSAValue |Operation ,
     shape_bytes :SSAValue |Operation ,
     result_type :DmaRingType ,
@@ -308,10 +308,10 @@ class DmaMakeRingOp (IRDLOperation ):
         """初始化 dma.make_ring。
 
         功能说明:
-        - 创建 ring buffer 描述，result type 记录 stage offset 与 slot memory type。
+        - 创建 ring buffer 描述，result type 记录 slot memory type。
 
         使用示例:
-        - DmaMakeRingOp(storage, count, offset, shape_bytes, ring_type)
+        - DmaMakeRingOp(storage, num, offset, shape_bytes, ring_type)
 
         关联文件:
         - spec: spec/dialect/dma.md
@@ -319,15 +319,15 @@ class DmaMakeRingOp (IRDLOperation ):
         - 功能实现: kernel_gen/dialect/dma/
         """
 
-        super ().__init__ (operands =[memory ,count ,offset ,shape_bytes ],result_types =[result_type ])
+        super ().__init__ (operands =[memory ,num ,offset ,shape_bytes ],result_types =[result_type ])
 
     def verify_ (self )->None :
         """校验 dma.make_ring。
 
         功能说明:
         - backing memory 必须是一维 i8 memory。
-        - count/offset/shape_bytes 必须为 `!symbol.int`，静态可判定时满足正数与容量关系。
-        - result ring 的 offset 和 slot space 必须与 operands/backing memory 一致。
+        - num/offset/shape_bytes 必须为 `!symbol.int`，静态可判定时满足正数与容量关系。
+        - result ring 的 slot space 必须与 backing memory 一致。
 
         使用示例:
         - DmaMakeRingOp(...).verify_()
@@ -345,18 +345,15 @@ class DmaMakeRingOp (IRDLOperation ):
         if not isinstance (ring_type ,DmaRingType ):
             raise kernel_code_error (ErrorKind .VERIFY ,ErrorModule .DIALECT ,"dma.make_ring result must be dma.ring")
         ring_type .verify ()
-        count_int =_DmaRingHelpers .verify_positive_static_operand (self .count ,"count")
+        count_int =_DmaRingHelpers .verify_positive_static_operand (self .num ,"count")
         offset_int =_DmaRingHelpers .verify_positive_static_operand (self .offset ,"offset")
         shape_bytes_int =_DmaRingHelpers .verify_positive_static_operand (self .shape_bytes ,"shape_bytes")
-        if offset_int is not None and shape_bytes_int is not None and shape_bytes_int >=offset_int :
-            raise kernel_code_error (ErrorKind .VERIFY ,ErrorModule .DIALECT ,"shape_bytes must be < offset")
+        if offset_int is not None and shape_bytes_int is not None and shape_bytes_int >offset_int :
+            raise kernel_code_error (ErrorKind .VERIFY ,ErrorModule .DIALECT ,"shape_bytes must be <= offset")
         backing_bytes =_DmaRingHelpers .maybe_numel (memory_type .shape )
         if backing_bytes is not None and count_int is not None and offset_int is not None :
             if backing_bytes <count_int *offset_int :
                 raise kernel_code_error (ErrorKind .VERIFY ,ErrorModule .DIALECT ,"dma.make_ring backing memory bytes must be >= count * offset")
-        offset_expr =_DmaRingHelpers .symbol_int_expr_text (self .offset ,"offset")
-        if ring_type .offset .expr .data !=offset_expr :
-            raise kernel_code_error (ErrorKind .VERIFY ,ErrorModule .DIALECT ,"dma.make_ring result ring offset must match offset operand")
         if ring_type .memory_type .space .space .data !=memory_type .space .space .data :
             raise kernel_code_error (ErrorKind .VERIFY ,ErrorModule .DIALECT ,"dma.make_ring result ring slot space must match backing memory space")
 

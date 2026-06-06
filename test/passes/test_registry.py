@@ -1157,15 +1157,17 @@ def test_build_registered_multi_buffer_options() -> None:
     load_builtin_passes()
     multi_buffer_module = importlib.import_module("kernel_gen.passes.multi_buffer")
 
-    pass_obj = build_registered_pass("multi-buffer", {"memory-stage": "3", "fold": "false"})
+    pass_obj = build_registered_pass("multi-buffer", {"memory-stage": "3", "target": "npu_demo", "fold": "false"})
     single_stage_pass = build_registered_pass("multi-buffer", {"memory-stage": "1"})
 
     assert isinstance(pass_obj, multi_buffer_module.MultiBufferPass)
     assert pass_obj.name == "multi-buffer"
     assert pass_obj.memory_stage == 3
+    assert pass_obj.target == "npu_demo"
     assert pass_obj.fold is False
     assert isinstance(single_stage_pass, multi_buffer_module.MultiBufferPass)
     assert single_stage_pass.memory_stage == 1
+    assert single_stage_pass.target is None
 
 
 # TC-REGISTRY-007H8
@@ -1184,6 +1186,8 @@ def test_build_registered_multi_buffer_rejects_invalid_options() -> None:
         multi_buffer_module.MultiBufferPass.from_options({"memory-stage": "x"})
     with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: memory-stage must be positive$"):
         multi_buffer_module.MultiBufferPass.from_options({"memory-stage": "0"})
+    with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: target must be non-empty$"):
+        multi_buffer_module.MultiBufferPass.from_options({"target": ""})
     with pytest.raises(
         KernelCodeError,
         match=r"^PassRegistryError: pass 'multi-buffer' option error: MultiBufferOptionError: unknown option: unknown$",
