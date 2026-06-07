@@ -26,11 +26,13 @@
 
 from __future__ import annotations
 
+import ast
 import random
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -43,6 +45,8 @@ from kernel_gen.execute_engine import (
     ExecuteRequest,
     ExecutionEngine,
 )
+from kernel_gen.execute_engine.runtime_args import RuntimeMemoryArgInfo, RuntimeScalarArgInfo, describe_runtime_arg
+from kernel_gen.symbol_variable.type import NumericType
 
 
 def _compile_minimal_kernel() -> CompiledKernel:
@@ -392,6 +396,98 @@ def test_execute_engine_invoke_runtime_throw_or_abort_on_unsupported_runtime_arg
     with pytest.raises(KernelCodeError) as exc:
         kernel.execute(args=(True,))  # type: ignore[arg-type]
     assert exc.value.failure_phrase == "runtime_throw_or_abort"
+
+
+@pytest.mark.parametrize(
+    ("value", "kind", "expected_value", "expected_type"),
+    (
+        (1, "int", 1, int),
+        (np.int64(4), "int", 4, int),
+        (1.5, "float", 1.5, float),
+        (np.float32(2.5), "float", 2.5, float),
+    ),
+)
+def test_describe_runtime_arg_scalar_matrix(
+    value: object,
+    kind: str,
+    expected_value: int | float,
+    expected_type: type[int] | type[float],
+) -> None:
+    """`describe_runtime_arg(...)` 应规整 Python/numpy scalar。"""
+
+    info = describe_runtime_arg(value)
+
+    assert isinstance(info, RuntimeScalarArgInfo)
+    assert info.kind == kind
+    assert info.value == expected_value
+    assert type(info.value) is expected_type
+
+
+@pytest.mark.parametrize("value", (None, True, False, np.bool_(True), object()))
+def test_describe_runtime_arg_returns_none_for_absent_bool_and_unsupported(value: object) -> None:
+    """`None`、bool / numpy bool scalar 与 unsupported object 不产生 RuntimeArgInfo。"""
+
+    assert describe_runtime_arg(value) is None
+
+
+def test_describe_runtime_arg_memory_matrix_uses_numeric_type_and_metadata() -> None:
+    """torch/numpy memory 参数应返回 NumericType、shape、元素 stride 与 contiguous 事实。"""
+
+    torch_info = describe_runtime_arg(_FakeTorchTensor(shape=(2, 3), dtype="torch.bfloat16", stride=(3, 1), contiguous=False))
+    numpy_info = describe_runtime_arg(_FakeNumpyArray(shape=(2, 3), dtype="float64", strides=(24, 8), itemsize=8))
+    bool_array_info = describe_runtime_arg(_FakeNumpyArray(shape=(1,), dtype="bool", strides=(1,), itemsize=1))
+
+    assert torch_info == RuntimeMemoryArgInfo(
+        kind="memory",
+        dtype=NumericType.BFloat16,
+        shape=(2, 3),
+        stride=(3, 1),
+        is_contiguous=False,
+    )
+    assert numpy_info == RuntimeMemoryArgInfo(
+        kind="memory",
+        dtype=NumericType.Float64,
+        shape=(2, 3),
+        stride=(3, 1),
+        is_contiguous=True,
+    )
+    assert isinstance(bool_array_info, RuntimeMemoryArgInfo)
+    assert bool_array_info.dtype is NumericType.Bool
+
+
+def test_describe_runtime_arg_returns_none_for_invalid_memory_metadata() -> None:
+    """unsupported dtype 或不可解析 shape 不应从 describe 层抛出异常。"""
+
+    unsupported_dtype = _FakeNumpyArray(shape=(2,), dtype="complex64")
+    invalid_shape = _FakeTorchTensor(shape=("bad",), dtype="float32")  # type: ignore[arg-type]
+
+    assert describe_runtime_arg(unsupported_dtype) is None
+    assert describe_runtime_arg(invalid_shape) is None
+
+
+def test_runtime_args_module_does_not_import_torch_or_numpy() -> None:
+    """runtime_args 真源应保持轻量识别，不直接导入 torch/numpy。"""
+
+    tree = ast.parse((REPO_ROOT / "kernel_gen/execute_engine/runtime_args.py").read_text(encoding="utf-8"))
+    imports: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(alias.name.split(".", maxsplit=1)[0] for alias in node.names)
+        if isinstance(node, ast.ImportFrom) and node.module is not None:
+            imports.add(node.module.split(".", maxsplit=1)[0])
+    assert "numpy" not in imports
+    assert "torch" not in imports
+
+
+def test_execute_engine_invoke_accepts_numpy_scalar_runtime_args() -> None:
+    """execute ABI slot 构造应复用 describe 结果并接受 numpy scalar。"""
+
+    kernel = _compile_minimal_kernel()
+
+    result = kernel.execute(args=(np.int64(3), np.float32(1.5)))
+
+    assert result.ok is True
+    assert result.failure_phrase is None
 
 
 def test_execute_engine_invoke_allows_none_with_absent_memory_metadata() -> None:

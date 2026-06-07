@@ -59,6 +59,7 @@ from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dialect.symbol import SymbolConstOp
 from kernel_gen.operation import deslice, loop, matmul, slice, store
+from kernel_gen.operation.dma import fill
 from kernel_gen.operation import kernel as kernel_ops
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import build_registered_pipeline, load_builtin_passes
@@ -78,8 +79,9 @@ _EXPECTED_TARGET_MESSAGE = "DslRunInvalidTarget: core config target must be non-
 _EXPECTED_PIPELINE_NAME_MESSAGE = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline'"
 _EXPECTED_PIPELINE_TYPE_MESSAGE = "DslRunInvalidPipeline: pipeline must be str or PassManager"
 _EXPECTED_REAL_ARG_TYPE_MESSAGE = (
-    "DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray, integer scalar and None for memory"
+    "DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray, integer scalar, float scalar and None for memory"
 )
+_EXPECTED_TENSOR_ARG_TYPE_MESSAGE = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor and numpy.ndarray"
 _EXPECTED_TILE_VALUE_MESSAGE = "DslRunInvalidTileValue: tile runtime scalar must be positive int"
 _EXPECTED_ARITY_MESSAGE = "DslRunArityMismatch: real_args count does not match function signature"
 _EXPECTED_NPU_DEMO_WRAPPER_MESSAGE = (
@@ -293,6 +295,19 @@ def add_dynamic_tile_kernel(
         lhs_tile = slice(lhs, [index], [cur_n], [1], MemorySpace.TSM)
         rhs_tile = slice(rhs, [index], [cur_n], [1], MemorySpace.TSM)
         store(out, lhs_tile + rhs_tile, [index], [cur_n], [1])
+
+
+def _fill_runtime_float_kernel(
+    out: "Tensor[f32, 4]",
+    fill_value: float,
+) -> None:
+    """runtime float scalar fill 样例。"""
+
+    value0 = fill_value
+    value1 = value0
+    value2 = value1
+    value3 = value2
+    fill(out, value3)
 
 
 def sub_store_kernel(
@@ -731,6 +746,26 @@ def test_dsl_run_accepts_numpy_integer_runtime_scalar() -> None:
     assert torch.equal(out, expected)
 
 
+@pytest.mark.parametrize("fill_value", (1.25, np.float32(2.5)))
+def test_dsl_run_accepts_float_runtime_scalar(fill_value: float | np.floating) -> None:
+    """dsl_run 应接受 Python / numpy floating scalar 并规整给执行入口。"""
+
+    set_target("cpu")
+    out = np.empty((4,), dtype=np.float32)
+    expected_value = float(fill_value)
+
+    result = dsl_run(
+        _fill_runtime_float_kernel,
+        (out, fill_value),
+        PassManager(),
+    )
+
+    assert result.execute_result.ok is True
+    assert result.runtime_args[-1] == expected_value
+    assert type(result.runtime_args[-1]) is float
+    assert "_fill_runtime_float_kernel" in result.source
+
+
 # TC-DSL-RUN-003B
 # 最后更改: 朽木露琪亚
 # 测试目的: 锁定 execute_engine/npu_demo/sub.py 的 lowering 与 compile/execute 公开合同在当前 worktree 下可直接复现。
@@ -1016,8 +1051,29 @@ def test_dsl_run_rejects_unsupported_runtime_arg_type() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = object()
 
-    with pytest.raises(KernelCodeError, match=_EXPECTED_REAL_ARG_TYPE_MESSAGE):
+    with pytest.raises(KernelCodeError, match=_EXPECTED_TENSOR_ARG_TYPE_MESSAGE):
         dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
+
+
+@pytest.mark.parametrize("rhs", (1, 1.0, np.float32(1.0)))
+def test_dsl_run_rejects_scalar_for_tensor_parameter(rhs: int | float | np.floating) -> None:
+    """Tensor[...] 形参收到 scalar 时应保持 tensor-only 错误文本。"""
+
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+
+    with pytest.raises(KernelCodeError, match=_EXPECTED_TENSOR_ARG_TYPE_MESSAGE):
+        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
+
+
+@pytest.mark.parametrize("fill_value", (True, np.bool_(True), object()))
+def test_dsl_run_rejects_unsupported_runtime_arg_on_non_tile_parameter(fill_value: object) -> None:
+    """非 tile 普通参数上的 bool / unsupported object 应走通用 unsupported real_args 错误。"""
+
+    out = np.empty((4,), dtype=np.float32)
+
+    with pytest.raises(KernelCodeError, match=_EXPECTED_REAL_ARG_TYPE_MESSAGE):
+        dsl_run(_fill_runtime_float_kernel, (out, fill_value), "npu-demo-lowering")
 
 
 # TC-DSL-RUN-009A
@@ -1034,15 +1090,16 @@ def test_dsl_run_rejects_non_positive_tile_runtime_scalar() -> None:
         dsl_run(add_dynamic_tile_kernel, (out, lhs, rhs, 0), "npu-demo-lowering")
 
 
-def test_dsl_run_rejects_float_runtime_scalar() -> None:
-    """float 不属于公开 runtime scalar 绑定类型。"""
+@pytest.mark.parametrize("tile_value", (4.0, True, np.bool_(True)))
+def test_dsl_run_rejects_invalid_tile_runtime_scalar(tile_value: float | bool | np.bool_) -> None:
+    """tile_* 参数上的 float / bool / numpy bool 必须走 tile 专属错误。"""
 
     out = torch.empty((6,), dtype=torch.int32)
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
-    with pytest.raises(KernelCodeError, match=_EXPECTED_REAL_ARG_TYPE_MESSAGE):
-        dsl_run(add_dynamic_tile_kernel, (out, lhs, rhs, 4.0), "npu-demo-lowering")
+    with pytest.raises(KernelCodeError, match=_EXPECTED_TILE_VALUE_MESSAGE):
+        dsl_run(add_dynamic_tile_kernel, (out, lhs, rhs, tile_value), "npu-demo-lowering")
 
 
 # TC-DSL-RUN-009B

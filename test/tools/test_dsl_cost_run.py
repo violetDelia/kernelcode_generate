@@ -158,6 +158,21 @@ def add_kernel(
     store(out, lhs + rhs, [0], [128], [1])
 
 
+def _add_with_runtime_float_kernel(
+    out: "Tensor[i32, 128]",
+    lhs: "Tensor[i32, 128]",
+    rhs: "Tensor[i32, 128]",
+    alpha: float,
+) -> None:
+    """带 runtime float 参数的 add 样例，用于证明 dsl_cost_run 绑定层放行。"""
+
+    alpha0 = alpha
+    alpha1 = alpha0
+    alpha2 = alpha1
+    _alpha3 = alpha2
+    store(out, lhs + rhs, [0], [128], [1])
+
+
 # TC-DSL-COST-RUN-001
 # 功能说明: 验证 LaunchKernelCostFuncPass 下线后，命名 npu-demo pipeline 不再自动生成 cost sibling。
 # 使用示例: pytest -q test/tools/test_dsl_cost_run.py -k test_dsl_cost_run_named_pipeline_rejects_missing_cost_sibling
@@ -253,3 +268,22 @@ def test_dsl_cost_run_accepts_numpy_torch_mixed_real_args_before_missing_sibling
         match=r"^DslCostRunMissingCostFunction: lowered module does not contain _cost_VECTOR1_ sibling function$",
     ):
         dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")
+
+
+@pytest.mark.parametrize("alpha", (1.25, np.float32(2.5)))
+def test_dsl_cost_run_accepts_float_runtime_scalar_before_missing_sibling(alpha: float | np.floating) -> None:
+    """普通 float / numpy floating 必须先通过 real_args 绑定，再按缺 cost sibling 失败。"""
+
+    out = np.full((128,), -1, dtype=np.int32)
+    original_out = out.copy()
+    lhs = np.arange(128, dtype=np.int32)
+    rhs = np.arange(128, dtype=np.int32)
+
+    with pytest.raises(KernelCodeError) as exc:
+        dsl_cost_run(_add_with_runtime_float_kernel, (out, lhs, rhs, alpha), "npu-demo-lowering", "VECTOR1")
+
+    message = str(exc.value)
+    assert message == "DslCostRunMissingCostFunction: lowered module does not contain _cost_VECTOR1_ sibling function"
+    assert "DslRunUnsupportedRealArg" not in message
+    assert "DslRunInvalidTileValue" not in message
+    assert np.array_equal(out, original_out)

@@ -17,6 +17,10 @@
 - `CompileStrategy.compile(self, request: CompileRequest) -> CompiledKernel`
 - `register_compile_strategy(target: str, strategy: CompileStrategy, *, override: bool = False) -> None`
 - `get_compile_strategy(target: str) -> CompileStrategy`
+- `class RuntimeScalarArgInfo(kind: Literal["int", "float"], value: int | float)`（`kernel_gen.execute_engine.runtime_args` 文件级 API，不进入包根导出）
+- `class RuntimeMemoryArgInfo(kind: Literal["memory"], dtype: NumericType, shape: tuple[int, ...], stride: tuple[int, ...] | None, is_contiguous: bool)`（`kernel_gen.execute_engine.runtime_args` 文件级 API，不进入包根导出）
+- `RuntimeArgInfo: TypeAlias = RuntimeScalarArgInfo | RuntimeMemoryArgInfo`（`kernel_gen.execute_engine.runtime_args` 文件级 API，不进入包根导出）
+- `describe_runtime_arg(value: object) -> RuntimeArgInfo | None`（`kernel_gen.execute_engine.runtime_args` 文件级 API，不进入包根导出）
 
 ## 文档信息
 
@@ -57,7 +61,7 @@
 - `compiler.py` 只承接公开请求/结果/facade 和旧公开导入路径；内置 target 编译细节在 `builtin_strategy/` package，运行时参数封送和动态库 entry 调用在 `runtime_args.py`。
 - `P0` 不支持 `stream` 与输出回收；当 `ExecuteRequest.stream is not None` 或 `capture_function_output=True` 必须失败。
 - `args` 必须与 `function` 形参顺序严格一致；不做自动重排或参数推断。
-- 运行时参数仅允许 memory / int / float 三类输入；`None` 只允许作为源码元数据声明的 allow-absent memory runtime input；其他类型必须失败。
+- 运行时参数仅允许 memory / int / float 三类输入；Python / numpy integer scalar 与 Python / numpy floating scalar 进入 ABI 前必须规整为 Python `int` / `float`；`None` 只允许作为源码元数据声明的 allow-absent memory runtime input；其他类型必须失败。
 - 失败短语只允许取 8 个固定值（见 `ExecuteResult`）；禁止同义词扩散与 silent fallback。
 ## API详细说明
 
@@ -85,7 +89,7 @@
 
 - api：`class ExecuteRequest(args: tuple[RuntimeInput, ...], entry_point: str | None = None, capture_function_output: bool = False, stream: None = None)`
 - 参数：
-  - `args`：位置参数序列，按公开调用约定传递给目标函数或工具入口；类型 `tuple[RuntimeInput, ...]`；无默认值，调用方必须显式提供；`RuntimeInput` 的 memory 参数公开形态包含 `torch.Tensor` 与 `numpy.ndarray`，并允许 `int` / `float` 标量；元素 `None` 仅允许在编译产物源码元数据声明对应 index 为 allow-absent memory 时使用；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `args`：位置参数序列，按公开调用约定传递给目标函数或工具入口；类型 `tuple[RuntimeInput, ...]`；无默认值，调用方必须显式提供；`RuntimeInput` 的 memory 参数公开形态包含 `torch.Tensor` 与 `numpy.ndarray`，并允许 Python / numpy integer scalar 与 Python / numpy floating scalar；元素 `None` 仅允许在编译产物源码元数据声明对应 index 为 allow-absent memory 时使用；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `entry_point`：`entry_point` 输入值，参与 `ExecuteRequest` 的公开处理流程；类型 `str | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `capture_function_output`：函数对象或函数级 IR；类型 `bool`；默认值 `False`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `stream`：输入或输出流对象，用于读取源码、写入文本或传递诊断；类型 `None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -104,6 +108,46 @@
   ```
 - 功能说明：定义 `ExecuteRequest` 公开类型。
 - 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口；`None` runtime input 不改变 `ExecuteRequest` 公开参数列表，执行引擎只能从生成源码注释 `// kg.allow_absent_memory_args: <index>:<dtype>:<rank>;...` 解析 allow-absent metadata。
+
+### `describe_runtime_arg(value: object) -> RuntimeArgInfo | None`
+
+- api：`describe_runtime_arg(value: object) -> RuntimeArgInfo | None`
+- 参数：
+  - `value`：待描述的真实 runtime 参数；类型为 `object` 是本 API 的公开分类入口语义；调用方通过 `RuntimeArgInfo | None` 判断是否受支持。
+- 返回值：`RuntimeScalarArgInfo | RuntimeMemoryArgInfo | None`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.execute_engine.runtime_args import describe_runtime_arg
+
+  info = describe_runtime_arg(1.5)
+  assert info.kind == "float"
+  ```
+- 功能说明：描述 runtime arg 基础事实，供 execute ABI 与工具层复用同一分类真源。
+- 注意事项：Python / numpy integer scalar 返回 `RuntimeScalarArgInfo(kind="int", value=int(value))`；Python / numpy floating scalar 返回 `RuntimeScalarArgInfo(kind="float", value=float(value))`；torch / numpy memory 参数返回 `RuntimeMemoryArgInfo(kind="memory", dtype=<NumericType>, shape=<tuple>, stride=<tuple | None>, is_contiguous=<bool>)`；`bool`、numpy bool scalar、`None`、unsupported dtype、非法 shape 或 unsupported object 返回 `None`；本 API 不返回 data pointer、不分配 ctypes buffer、不加载 entry symbol，也不抛 tools 层错误文本或 execute failure phrase。
+
+### `class RuntimeScalarArgInfo(kind: Literal["int", "float"], value: int | float)`
+
+- api：`class RuntimeScalarArgInfo(kind: Literal["int", "float"], value: int | float)`
+- 参数：
+  - `kind`：scalar 分类；只允许 `"int"` 或 `"float"`。
+  - `value`：规整后的 Python scalar；类型 `int | float`。
+- 返回值：`RuntimeScalarArgInfo` 实例。
+- 功能说明：承载 scalar runtime arg 的基础分类结果。
+- 注意事项：Python bool 与 numpy bool scalar 不产生该类型。
+
+### `class RuntimeMemoryArgInfo(kind: Literal["memory"], dtype: NumericType, shape: tuple[int, ...], stride: tuple[int, ...] | None, is_contiguous: bool)`
+
+- api：`class RuntimeMemoryArgInfo(kind: Literal["memory"], dtype: NumericType, shape: tuple[int, ...], stride: tuple[int, ...] | None, is_contiguous: bool)`
+- 参数：
+  - `kind`：memory 分类；固定为 `"memory"`。
+  - `dtype`：公开 dtype 真源；类型 `NumericType`。
+  - `shape`：规整后的 shape；类型 `tuple[int, ...]`。
+  - `stride`：元素单位 stride；类型 `tuple[int, ...] | None`。
+  - `is_contiguous`：运行时对象报告的连续性事实；类型 `bool`。
+- 返回值：`RuntimeMemoryArgInfo` 实例。
+- 功能说明：承载 torch / numpy memory runtime arg 的基础元数据。
+- 注意事项：`is_contiguous=False` 不在 describe 层抛错；execute ABI 是否拒绝由 `CompiledKernel.execute(...)` 路径处理。
 
 ### `class CompiledKernel(target: str, soname_path: str, function: str, entry_point: str, compile_stdout: str = "", compile_stderr: str = "")`
 

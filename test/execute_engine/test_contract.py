@@ -113,6 +113,10 @@ def test_execute_engine_public_api_exports_only_runtime_contract() -> None:
         "install_builtin_compile" + "_strategies",
         "BuiltinCompileArtifacts",
         "build_builtin_compile_artifacts",
+        "RuntimeScalarArgInfo",
+        "RuntimeMemoryArgInfo",
+        "RuntimeArgInfo",
+        "describe_runtime_arg",
         "AllowAbsentMemoryArg",
         "RuntimeInput",
         "invoke_compiled_kernel",
@@ -260,6 +264,10 @@ def test_execute_engine_compiler_facade_static_boundary() -> None:
     assert "_build_builtin_compile_artifacts" in call_names
     compiler_module = importlib.import_module("kernel_gen.execute_engine.compiler")
     for name in (
+        "RuntimeScalarArgInfo",
+        "RuntimeMemoryArgInfo",
+        "RuntimeArgInfo",
+        "describe_runtime_arg",
         "AllowAbsentMemoryArg",
         "RuntimeInput",
         "invoke_compiled_kernel",
@@ -321,6 +329,10 @@ def test_execute_engine_internal_module_file_api_exact_sets() -> None:
         "install_builtin_compile_strategies",
     ]
     assert runtime_module.__all__ == [
+        "RuntimeScalarArgInfo",
+        "RuntimeMemoryArgInfo",
+        "RuntimeArgInfo",
+        "describe_runtime_arg",
         "AllowAbsentMemoryArg",
         "RuntimeInput",
         "invoke_compiled_kernel",

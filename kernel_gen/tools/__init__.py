@@ -4,7 +4,7 @@
 功能说明:
 - 暴露面向脚本与测试的轻量工具模块（例如 ircheck）。
 - 包根惰性暴露 `DslRunResult` 公开类型，以及稳定的 `dsl_run(...)` / `dsl_cost_run(...)` 公开函数入口。
-- `RuntimeRealArg` 文档类型覆盖 tensor/ndarray 协议与整数 runtime scalar。
+- `RuntimeRealArg` 文档类型覆盖 tensor/ndarray 协议、整数 runtime scalar、浮点 runtime scalar 与 memory absent `None`。
 
 API 列表:
 - `DslRunResult(func_op: func.FuncOp, module: ModuleOp, source: str, compiled_kernel: CompiledKernel, execute_result: ExecuteResult, runtime_args: tuple[RuntimeRealArg, ...])`
@@ -61,7 +61,7 @@ class TensorRuntimeArg(Protocol):
     dtype: _StringLike
 
 
-RuntimeRealArg: TypeAlias = "TensorRuntimeArg | int"
+RuntimeRealArg: TypeAlias = "TensorRuntimeArg | int | float | None"
 DslFunctionReturn: TypeAlias = "Memory | SymbolDim | int | float | bool | str | None"
 
 __all__ = ["DslRunResult"]

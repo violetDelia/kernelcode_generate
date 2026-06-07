@@ -11,7 +11,7 @@
 - `dsl_run(...)` 在 `dump_dir` 非空且 runtime trance 开启时只生成 `dump_dir/<kernel name>/trance/block_XXXX.log` block 文件；`dsl_cost_run(...)` 即使配置 `dump_dir` 也只 stdout，不生成 block trace 或旧单文件 trace。
 - 失败统一抛出 `KernelCodeError(ErrorModule.TOOLS, message)`；不再定义或导出工具专属错误类。
 - `dsl_run(...)` 不向 kernel 函数隐式注入 operation helper、`MemorySpace`、`NumericType` 或 `SymbolDim`；kernel 体引用的名称必须来自显式 import、闭包或函数全局绑定，缺失时必须报错。
-- `real_args` 支持真实 tensor/array 参数、运行期整数标量参数，以及仅在对应 DSL 形参是 memory 且函数体包含 allow-absent presence guard 时的 `None` memory 参数；Python `int` 与 numpy integer 标量会规整为 Python `int` 后绑定到 DSL 函数形参，供 runtime tile、stride、padding 等 `SymbolDim` 形参使用；`bool` 与 `float` 必须拒绝。
+- `real_args` 支持真实 tensor/array 参数、运行期整数标量参数、运行期浮点标量参数，以及仅在对应 DSL 形参是 memory 且函数体包含 allow-absent presence guard 时的 `None` memory 参数；Python / numpy integer 标量会规整为 Python `int`，Python / numpy floating 标量会规整为 Python `float`；`bool` 与 numpy bool scalar 必须拒绝，`tile_*` 形参仍只接受正整数。
 
 ## API 列表
 
@@ -32,6 +32,7 @@
 - DSL 解析：[`spec/dsl/ast/mlir_gen.md`](../../spec/dsl/ast/mlir_gen.md)
 - 源码生成：[`spec/dsl/gen_kernel/gen_kernel.md`](../../spec/dsl/gen_kernel/gen_kernel.md)
 - 执行引擎：[`spec/execute_engine/execute_engine.md`](../../spec/execute_engine/execute_engine.md)
+- 运行参数分类真源：`kernel_gen.execute_engine.runtime_args.describe_runtime_arg(...)`
 - pass / pipeline：[`spec/pass/pass_manager.md`](../../spec/pass/pass_manager.md)、[`spec/pass/registry.md`](../../spec/pass/registry.md)
 
 ## 额外补充
@@ -44,9 +45,9 @@
 
 ### helper 边界
 
-- 当前文件内 `_runtime_module_name(...)`、`_normalize_real_args(...)`、`_resolve_pipeline(...)`、`_run_pipeline_with_optional_dump(...)`、`_select_source_and_entry(...)`、`_append_cost_capture_wrapper(...)` 等下划线 helper 只服务当前文件内部实现。
+- 当前文件内 `_normalize_real_args(...)`、`_resolve_pipeline(...)`、`_run_pipeline_with_optional_dump(...)`、`_select_source_and_entry(...)`、`_append_cost_capture_wrapper(...)` 等下划线 helper 只服务当前文件内部实现。
 - 实现、测试和外部调用方不得跨文件导入或断言这些 helper；公开行为只能通过 `DslRunResult(...)`、`dsl_run(...)` 与 `dsl_cost_run(...)` 观察。
-- `RuntimeRealArg` 是文档类型别名，表示 `torch.Tensor | numpy.ndarray | int | None`；Python `int` 与 numpy integer 属于合法整数 scalar，`bool` 与 `float` 不属于合法 runtime scalar；`None` 只允许作为 memory 形参的运行期 absent 值。该别名不新增独立可调用公开入口。
+- `RuntimeRealArg` 是文档类型别名，表示 `torch.Tensor | numpy.ndarray | int | float | None`；Python / numpy integer 属于合法整数 scalar，Python / numpy floating 属于合法浮点 scalar；`bool` 与 numpy bool scalar 不属于合法 runtime scalar；`None` 只允许作为 memory 形参的运行期 absent 值。该别名不新增独立可调用公开入口。
 
 ## API详细说明
 
@@ -96,11 +97,12 @@
 - 注意事项：
   - target 只能来自 `kernel_gen.core.config.get_target()`；未设置或不是非空 `str` 时必须失败，固定短语为 `DslRunInvalidTarget: core config target must be non-empty str`。
   - `pipeline` 仅接受 `str | PassManager`。
-  - `real_args` 容器仅接受 `tuple | list`，元素仅允许 `torch.Tensor`、`numpy.ndarray`、Python `int`、numpy integer 标量或 memory 形参位置的 `None`。
-  - `bool` 不属于运行期标量参数；不允许借 `bool` 是 `int` 子类的 Python 行为进入 DSL runtime。
-  - 运行期整数标量不构造成 `Memory`，必须规整为 Python `int` 后传入 `mlir_gen(...)` 并继续作为执行阶段真实参数。
-  - 名称以 `tile_` 开头的运行期标量必须是正整数；`0`、负数、`float` 或 `bool` 必须失败，固定短语为 `DslRunInvalidTileValue: tile runtime scalar must be positive int`。
-  - 非 tensor/array、非合法整数标量且非合法 memory absent `None` 的元素必须失败，固定短语为 `DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray, integer scalar and None for memory`。
+  - `real_args` 容器仅接受 `tuple | list`，元素基础分类必须来自 `kernel_gen.execute_engine.runtime_args.describe_runtime_arg(...)`；元素仅允许 `torch.Tensor`、`numpy.ndarray`、Python / numpy integer scalar、Python / numpy floating scalar 或 memory 形参位置的 `None`。
+  - `bool` 与 numpy bool scalar 不属于运行期标量参数；不允许借 `bool` 是 `int` 子类的 Python 行为进入 DSL runtime。
+  - 运行期整数和浮点标量不构造成 `Memory`，必须分别规整为 Python `int` / `float` 后传入 `mlir_gen(...)` 并继续作为执行阶段真实参数。
+  - `Tensor[...]` 形参收到 scalar 时必须失败，固定短语为 `DslRunUnsupportedRealArg: real_args only supports torch.Tensor and numpy.ndarray`。
+  - 名称以 `tile_` 开头的运行期标量必须是正整数；`0`、负数、`float`、Python bool 或 numpy bool scalar 必须失败，固定短语为 `DslRunInvalidTileValue: tile runtime scalar must be positive int`。
+  - 非 tensor/array、非合法整数 / 浮点标量且非合法 memory absent `None` 的元素必须失败，固定短语为 `DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray, integer scalar, float scalar and None for memory`。
   - `None` 只能用于带 `Tensor[...]` 注解的 memory 形参；工具层必须从该注解构造 nominal compile-time `Memory`，不能从 `None` 推断 dtype、rank、shape 或 ABI slot。
   - `None` memory 只有在生成源码包含对应 `// kg.allow_absent_memory_args: <index>:<dtype>:<rank>;...` 元数据、且所有真实 data-use 均被 non-null pointer 分支保护时才允许执行；否则必须按公开错误失败，错误说明包含 `None` 与 `allow-absent memory metadata` 或 `absent memory data-use must be guarded by non-null pointer branch`。
   - DSL 函数只要存在值返回，就必须失败。
@@ -208,7 +210,11 @@
 | TC-TOOLS-DSL-RUN-029 | 公开入口 | tools package supports direct DSL run import | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_tools_package_supports_direct_dsl_run_import`。 | 公开入口在“tools package supports direct DSL run import”场景下可导入、构造、注册或按名称发现。 | `test_tools_package_supports_direct_dsl_run_import` |
 | TC-TOOLS-DSL-RUN-030 | 边界/异常 | tools package rejects unknown public name | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_tools_package_rejects_unknown_public_name`。 | “tools package rejects unknown public name”场景按公开错误语义失败或被拒绝。 | `test_tools_package_rejects_unknown_public_name` |
 | TC-TOOLS-DSL-RUN-031 | 执行结果 | DSL run accepts runtime scalar tile args | 准备带 `tile_*` 形参的公开 DSL kernel 和真实 torch/numpy 张量。 | 运行 `test_dsl_run_add_dynamic_tile_scalar_matches_public_contract`。 | `int` runtime tile 绑定到 `SymbolDim` 形参，生成并执行 npu_demo 链路。 | `test_dsl_run_add_dynamic_tile_scalar_matches_public_contract` |
+| TC-TOOLS-DSL-RUN-031A | 执行结果 | DSL run accepts float runtime scalar | 准备带普通 `float` 形参的公开 DSL kernel。 | 运行 `test_dsl_run_accepts_float_runtime_scalar`。 | Python / numpy floating scalar 被规整为 Python `float`，进入 `DslRunResult.runtime_args` 和 CPU dry-run execute args。 | `test_dsl_run_accepts_float_runtime_scalar` |
 | TC-TOOLS-DSL-RUN-032 | 边界/异常 | DSL run rejects non-positive tile scalar | 准备 `tile_*` 形参并传入 `0` 或负数。 | 运行 `test_dsl_run_rejects_non_positive_tile_runtime_scalar`。 | 按 `DslRunInvalidTileValue: tile runtime scalar must be positive int` 失败。 | `test_dsl_run_rejects_non_positive_tile_runtime_scalar` |
+| TC-TOOLS-DSL-RUN-032A | 边界/异常 | DSL run rejects invalid tile scalar type | 准备 `tile_*` 形参并传入 `float`、Python bool 或 numpy bool scalar。 | 运行 `test_dsl_run_rejects_invalid_tile_runtime_scalar`。 | 均按 `DslRunInvalidTileValue: tile runtime scalar must be positive int` 失败。 | `test_dsl_run_rejects_invalid_tile_runtime_scalar` |
+| TC-TOOLS-DSL-RUN-032B | 边界/异常 | DSL run rejects scalar for tensor parameter | 准备 `Tensor[...]` 形参并传入整数 / 浮点 scalar。 | 运行 `test_dsl_run_rejects_scalar_for_tensor_parameter`。 | 按 tensor-only `DslRunUnsupportedRealArg` 文本失败。 | `test_dsl_run_rejects_scalar_for_tensor_parameter` |
+| TC-TOOLS-DSL-RUN-032C | 边界/异常 | DSL run rejects unsupported arg on non tile parameter | 准备普通非 tile 参数并传入 Python bool、numpy bool scalar 或 unsupported object。 | 运行 `test_dsl_run_rejects_unsupported_runtime_arg_on_non_tile_parameter`。 | 按通用 `DslRunUnsupportedRealArg` 文本失败，不误走 tile 错误。 | `test_dsl_run_rejects_unsupported_runtime_arg_on_non_tile_parameter` |
 | TC-TOOLS-DSL-RUN-033 | 边界/异常 | DSL run empty function name uses kernel dump fallback | 设置 `dump_dir` 且 DSL 函数名为空，同时传入 arity 不匹配的公开参数。 | 运行 `test_dsl_run_empty_function_name_uses_kernel_dump_fallback`。 | `dsl_run(...)` 先稳定解析 dump 子目录 fallback，再按公开 arity 错误失败。 | `test_dsl_run_empty_function_name_uses_kernel_dump_fallback` |
 | TC-TOOLS-DSL-RUN-034 | 边界/异常 | DSL run custom pipeline dump uses public fallback name | 设置 `dump_dir` 并传入覆盖 `run(...)`、名称为空的公开 `PassManager` 子类。 | 运行 `test_dsl_run_custom_pipeline_dump_uses_public_fallback_name`。 | 工具写出 alias `01-first-ir.mlir` 与 alias `02-pipeline.mlir`，pipeline dump 首行回退为 `pipeline`，后续 CPU 源码生成按公开错误失败。 | `test_dsl_run_custom_pipeline_dump_uses_public_fallback_name` |
 | TC-TOOLS-DSL-RUN-035 | 边界/异常 | DSL run rejects target cleared after pipeline | 传入公开 `PassManager` 子类，在 `run(...)` 后使 core target 变为空字符串。 | 运行 `test_dsl_run_rejects_target_cleared_after_pipeline`。 | 源码生成入口按公开 target 错误 `DslRunInvalidTarget` 失败。 | `test_dsl_run_rejects_target_cleared_after_pipeline` |
@@ -220,6 +226,7 @@
 | TC-TOOLS-DSL-RUN-044 | 边界/异常 | DSL cost run rejects missing cost sibling without fallback | 准备不生成 `_cost_<kind>_*` sibling 的公开 `PassManager` 链路。 | 运行 `test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback`。 | 按 `DslCostRunMissingCostFunction` 公开错误失败，输出参数保持原值，不 fallback 到普通 kernel。 | `test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback` |
 | TC-TOOLS-DSL-RUN-045 | 边界/异常 | DSL cost run rejects non npu demo target | 通过公开 target 配置设置 `target="cpu"`。 | 运行 `test_dsl_cost_run_rejects_non_npu_demo_target`。 | 按 `DslCostRunInvalidTarget` 公开错误失败。 | `test_dsl_cost_run_rejects_non_npu_demo_target` |
 | TC-TOOLS-DSL-RUN-046 | 边界/异常 | DSL cost run accepts numpy torch mixed real args before missing sibling | 准备 `torch.Tensor` 输出、`numpy.ndarray` 输入和 `torch.Tensor` 输入。 | 运行 `test_dsl_cost_run_accepts_numpy_torch_mixed_real_args_before_missing_sibling`。 | 参数校验通过后按缺少 cost sibling 稳定失败。 | `test_dsl_cost_run_accepts_numpy_torch_mixed_real_args_before_missing_sibling` |
+| TC-TOOLS-DSL-RUN-046A | 边界/异常 | DSL cost run accepts float scalar before missing sibling | 准备带普通 `float` 形参的 npu_demo kernel。 | 运行 `test_dsl_cost_run_accepts_float_runtime_scalar_before_missing_sibling`。 | Python / numpy floating scalar 通过 real_args 绑定层，随后按缺少 cost sibling 稳定失败，失败文本不是 `DslRunUnsupportedRealArg` 或 tile 错误。 | `test_dsl_cost_run_accepts_float_runtime_scalar_before_missing_sibling` |
 | TC-TOOLS-DSL-RUN-047 | 执行结果 | DSL run accepts allow-absent memory None real arg | 准备带 `Tensor[...]` memory bias 形参且函数体使用 `bias is not None` guard 的公开 DSL kernel。 | 运行 `test_dsl_run_optional_bias_none_and_present_paths`。 | `None` 运行期实参通过注解构造 nominal memory，并由源码元数据放行 absent memory；真实 bias 与 absent 两路都执行。 | `test_dsl_run_optional_bias_none_and_present_paths` |
 | TC-TOOLS-DSL-RUN-048 | 边界/异常 | DSL run rejects unguarded None memory data use | 准备 memory 形参为 `None` 但函数体未用 non-null pointer guard 支配 data-use 的公开 DSL kernel。 | 运行 `test_dsl_run_rejects_none_without_allow_absent_metadata`。 | 按 allow-absent metadata 或 guarded data-use 错误稳定失败。 | `test_dsl_run_rejects_none_without_allow_absent_metadata` |
 | TC-TOOLS-DSL-RUN-049 | 执行结果 | DSL run runtime trance stdout logs entry and args | 设置 `set_trance_enabled(True)` 且不设置 `dump_dir`，准备公开 add kernel 与真实运行参数。 | 运行 `test_dsl_run_trance_stdout_logs_entry_and_runtime_args`。 | stdout 包含 `in func:`、`template=<none>`、`args =` 和 `Memory` 参数摘要。 | `test_dsl_run_trance_stdout_logs_entry_and_runtime_args` |

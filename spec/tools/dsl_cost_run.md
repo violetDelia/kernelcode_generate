@@ -6,6 +6,7 @@
 - 该入口只面向 `target="npu_demo"`，在 `mlir_gen -> pipeline -> gen_kernel -> ExecutionEngine` 链路上选择 pipeline 已有的 `_cost_<cost_kind>_*` sibling cost function 并返回真实 `int` cost。
 - `dsl_cost_run(...)` 不改变 `dsl_run(...)` 的返回模型，不给 `dsl_run(...)` 增加 `cost_kind` 参数，也不在缺少 cost sibling 时 fallback 到普通 kernel。
 - `LaunchKernelCostFuncPass` 已下线；当前入口不再为命名 pipeline 自动生成 cost sibling。
+- `real_args` 校验复用 `dsl_run(...)` 规则，支持 torch/numpy memory、Python / numpy integer scalar、Python / numpy floating scalar 与合法 memory absent `None`。
 
 ## API 列表
 
@@ -31,7 +32,7 @@
 - api：`dsl_cost_run(func_obj: Callable[..., DslFunctionReturn], real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg], pipeline: str | PassManager, cost_kind: str) -> int`
 - 参数：
   - `func_obj`：DSL callable；类型 `Callable[..., DslFunctionReturn]`；无默认值。
-  - `real_args`：运行期真实实参；类型 `tuple[RuntimeRealArg, ...] | list[RuntimeRealArg]`；校验规则与 `dsl_run(...)` 一致。
+  - `real_args`：运行期真实实参；类型 `tuple[RuntimeRealArg, ...] | list[RuntimeRealArg]`；校验规则与 `dsl_run(...)` 一致，包含普通 float / numpy floating scalar 支持、bool 拒绝与 `tile_*` 正整数限制。
   - `pipeline`：pipeline 名称或 `PassManager`；类型 `str | PassManager`；校验规则与 `dsl_run(...)` 一致。
   - `cost_kind`：成本统计视角；类型 `str`；无默认值；只接受 `DMA1`、`DMA2`、`DMA3`、`DMA4`、`MAC`、`VECTOR1`、`VECTOR2`。
 - 返回值：`int`，对应 `_cost_<cost_kind>_<device body>` 的 `S_INT` 返回值。
@@ -84,6 +85,7 @@
 - 验证缺少 `_cost_<kind>_*` sibling 时按 `DslCostRunMissingCostFunction` 失败，且不 fallback 到普通 kernel。
 - 验证非 `npu_demo` target 按 `DslCostRunInvalidTarget` 失败。
 - 验证 `numpy.ndarray` 与 `torch.Tensor` 混用运行参数仍可通过公开入口校验，并在当前无 sibling 阶段稳定失败。
+- 验证普通 float 与 numpy floating scalar 通过 real_args 绑定层后，再按缺少 cost sibling 的现有合同失败。
 
 ### 功能与用例清单
 
@@ -94,4 +96,5 @@
 | TC-TOOLS-DSL-COST-RUN-003 | 边界/异常 | custom pipeline missing cost sibling | 准备不生成 `_cost_<kind>_*` sibling 的公开 `PassManager` 链路。 | 运行 `test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback`。 | 按 `DslCostRunMissingCostFunction` 失败，输出参数保持原值，不 fallback 到普通 kernel。 | `test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback` |
 | TC-TOOLS-DSL-COST-RUN-004 | 边界/异常 | 非 npu_demo target | 通过公开 target 配置设置 `target="cpu"`。 | 运行 `test_dsl_cost_run_rejects_non_npu_demo_target`。 | 按 `DslCostRunInvalidTarget` 失败。 | `test_dsl_cost_run_rejects_non_npu_demo_target` |
 | TC-TOOLS-DSL-COST-RUN-005 | 边界/异常 | ndarray + torch 混用参数 | 准备 `torch.Tensor` 输出、`numpy.ndarray` 输入和 `torch.Tensor` 输入。 | 运行 `test_dsl_cost_run_accepts_numpy_torch_mixed_real_args_before_missing_sibling`。 | 参数校验通过后按缺少 cost sibling 稳定失败。 | `test_dsl_cost_run_accepts_numpy_torch_mixed_real_args_before_missing_sibling` |
+| TC-TOOLS-DSL-COST-RUN-006 | 边界/异常 | float scalar 参数 | 准备带普通 `float` 形参的 kernel，并传入 Python / numpy floating scalar。 | 运行 `test_dsl_cost_run_accepts_float_runtime_scalar_before_missing_sibling`。 | 参数绑定层放行后按 `DslCostRunMissingCostFunction` 失败，失败文本不是 `DslRunUnsupportedRealArg` 或 `DslRunInvalidTileValue`。 | `test_dsl_cost_run_accepts_float_runtime_scalar_before_missing_sibling` |
 | TC-TOOLS-DSL-COST-RUN-009 | 公开入口 | 包根导入 | 从 `kernel_gen.tools` 导入 `dsl_cost_run`。 | 运行 `test_tools_package_supports_direct_dsl_cost_run_import`。 | 包根公开入口可达。 | `test_tools_package_supports_direct_dsl_cost_run_import` |

@@ -8,7 +8,7 @@
   - `source`：C++ 源码字符串（单个 translation unit）。
   - `target`：目标后端标识（`cpu` / `npu_demo` / `cuda_sm86`）。
   - `function`：要调用的目标函数符号（例如 `"npu_demo::add"`）。
-  - `args`：按形参顺序排列的入参序列，元素类型仅允许：`memory` / `int` / `float`。
+  - `args`：按形参顺序排列的入参序列，元素类型仅允许：`memory` / `int` / `float`；Python / numpy integer scalar 与 Python / numpy floating scalar 进入 ABI 前规整为 Python scalar。
 - **失败短语入口**：所有失败必须在 `ExecuteResult.failure_phrase` 以“固定短语”表达，禁止静默 fallback 或同义词扩散。
 - **非目标（P0 不支持）**：
   - `stream` / 异步调度。
@@ -53,7 +53,7 @@
   - `npu_demo`：`include/npu_demo/*`
   - `cpu`：`include/cpu/*`
 - 内置 target 后端实现：由 `kernel_gen/execute_engine/builtin_strategy/` package 生成 include、entry shim、compile unit / SourceBundle artifact 与 shared object。
-- 运行时 ABI：由 `kernel_gen/execute_engine/runtime_args.py` 封送 runtime args 并调用 `kg_execute_entry`。
+- 运行时 ABI：由 `kernel_gen/execute_engine/runtime_args.py` 封送 runtime args 并调用 `kg_execute_entry`；该文件还提供不进入包根导出的 `RuntimeScalarArgInfo`、`RuntimeMemoryArgInfo`、`RuntimeArgInfo` 与 `describe_runtime_arg(value: object) -> RuntimeArgInfo | None` 文件级 API，作为 runtime arg 基础分类真源。
 
 ## 术语
 
@@ -164,7 +164,7 @@ assert result.ok and result.failure_phrase is None
 
 - api：`CompiledKernel.execute(args: tuple[RuntimeInput, ...] | None = None, *, request: ExecuteRequest | None = None, entry_point: str | None = None, capture_function_output: bool = False, stream: None = None) -> ExecuteResult`
 - 参数：
-  - `args`：位置参数序列，按公开调用约定传递给目标函数或工具入口；类型 `tuple[RuntimeInput, ...] | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `args`：位置参数序列，按公开调用约定传递给目标函数或工具入口；类型 `tuple[RuntimeInput, ...] | None`；默认值 `None`；外层 `None` 表示使用 `request.args` 或空参数；元素允许 memory、Python / numpy integer scalar、Python / numpy floating scalar，元素 `None` 仅用于 allow-absent memory runtime input；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `request`：请求对象，承载工具、执行引擎或服务入口需要处理的输入信息；类型 `ExecuteRequest | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `entry_point`：`entry_point` 输入值，参与 `execute` 的公开处理流程；类型 `str | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `capture_function_output`：函数对象或函数级 IR；类型 `bool`；默认值 `False`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。

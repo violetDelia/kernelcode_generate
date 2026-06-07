@@ -7,6 +7,10 @@
 - 使用 execute_engine 已定义 failure phrase，保持 runtime 参数错误和 symbol 解析错误语义不变。
 
 API 列表:
+- `class RuntimeScalarArgInfo(kind: Literal["int", "float"], value: int | float)`
+- `class RuntimeMemoryArgInfo(kind: Literal["memory"], dtype: NumericType, shape: tuple[int, ...], stride: tuple[int, ...] | None, is_contiguous: bool)`
+- `RuntimeArgInfo: TypeAlias = RuntimeScalarArgInfo | RuntimeMemoryArgInfo`
+- `describe_runtime_arg(value: object) -> RuntimeArgInfo | None`
 - `class AllowAbsentMemoryArg(index: int, dtype: str, rank: int)`
 - `RuntimeInput: TypeAlias`
 - `invoke_compiled_kernel(soname_path: str, entry_point: str, args: tuple[RuntimeInput, ...], allow_absent_memory_args: tuple[AllowAbsentMemoryArg, ...]) -> int`
@@ -15,7 +19,8 @@ helper 清单:
 - 本文件内部 helper 不进入 `__all__`，只服务 `invoke_compiled_kernel(...)` 的 ABI 封送。
 
 使用示例:
-- from kernel_gen.execute_engine.runtime_args import invoke_compiled_kernel
+- from kernel_gen.execute_engine.runtime_args import describe_runtime_arg, invoke_compiled_kernel
+- info = describe_runtime_arg(1.5)
 - status = invoke_compiled_kernel("libkernel.so", "kg_execute_entry", (1, 2.0), ())
 
 关联文件:
@@ -31,10 +36,12 @@ from collections.abc import Iterable
 import ctypes
 from dataclasses import dataclass
 from functools import partial
+from numbers import Integral, Real
 from pathlib import Path
 from typing import Callable, Literal, Protocol, TypeAlias
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
+from kernel_gen.symbol_variable.type import NumericType
 
 
 _RUNTIME_THROW_OR_ABORT = "runtime_throw_or_abort"
@@ -45,6 +52,60 @@ _RUNTIME_KNOWN_ERROR_PHRASES: frozenset[str] = frozenset(
         _SYMBOL_RESOLVE_FAILED,
     }
 )
+_RUNTIME_NUMERIC_TYPE_BY_DTYPE: dict[str, NumericType] = {
+    "int8": NumericType.Int8,
+    "i8": NumericType.Int8,
+    "int16": NumericType.Int16,
+    "i16": NumericType.Int16,
+    "int": NumericType.Int32,
+    "int32": NumericType.Int32,
+    "int32_t": NumericType.Int32,
+    "i32": NumericType.Int32,
+    "longlong": NumericType.Int64,
+    "longlongint": NumericType.Int64,
+    "int64": NumericType.Int64,
+    "int64_t": NumericType.Int64,
+    "i64": NumericType.Int64,
+    "uint8": NumericType.Uint8,
+    "ui8": NumericType.Uint8,
+    "uint16": NumericType.Uint16,
+    "ui16": NumericType.Uint16,
+    "uint32": NumericType.Uint32,
+    "uint32_t": NumericType.Uint32,
+    "ui32": NumericType.Uint32,
+    "uint64": NumericType.Uint64,
+    "uint64_t": NumericType.Uint64,
+    "ui64": NumericType.Uint64,
+    "float16": NumericType.Float16,
+    "f16": NumericType.Float16,
+    "half": NumericType.Float16,
+    "bfloat16": NumericType.BFloat16,
+    "bf16": NumericType.BFloat16,
+    "float": NumericType.Float32,
+    "float32": NumericType.Float32,
+    "f32": NumericType.Float32,
+    "double": NumericType.Float64,
+    "float64": NumericType.Float64,
+    "f64": NumericType.Float64,
+    "bool": NumericType.Bool,
+}
+_RUNTIME_DTYPE_CODE_BY_DTYPE: dict[str, int] = {
+    "float": 1,
+    "float32": 1,
+    "f32": 1,
+    "double": 2,
+    "float64": 2,
+    "f64": 2,
+    "int": 3,
+    "int32": 3,
+    "int32_t": 3,
+    "i32": 3,
+    "longlong": 4,
+    "longlongint": 4,
+    "int64": 4,
+    "int64_t": 4,
+    "i64": 4,
+}
 
 
 class _StringValue(Protocol):
@@ -61,7 +122,7 @@ class _MemoryRuntimeInput(Protocol):
     dtype: _StringValue
 
 
-RuntimeInput: TypeAlias = _MemoryRuntimeInput | int | float | None
+RuntimeInput: TypeAlias = _MemoryRuntimeInput | Integral | Real | None
 _RuntimeInputValue: TypeAlias = RuntimeInput | _StringValue | None
 
 
@@ -73,6 +134,44 @@ class _LoadedEntrySymbol(Protocol):
 
     def __call__(self, slots: ctypes.Array, count: ctypes.c_ulonglong) -> int:
         """调用 C ABI entry symbol。"""
+
+
+@dataclass(frozen=True)
+class RuntimeScalarArgInfo:
+    """runtime scalar 参数描述。
+
+    功能说明:
+    - 描述 Python / numpy integer 或 floating scalar 的基础分类结果。
+    - `value` 已规整为 Python `int` 或 `float`，可直接进入 DSL binding 与 ABI slot。
+
+    使用示例:
+    - info = RuntimeScalarArgInfo(kind="int", value=4)
+    """
+
+    kind: Literal["int", "float"]
+    value: int | float
+
+
+@dataclass(frozen=True)
+class RuntimeMemoryArgInfo:
+    """runtime memory 参数描述。
+
+    功能说明:
+    - 描述 torch / numpy memory 参数的 dtype、shape、元素 stride 与连续性事实。
+    - `dtype` 使用公开 `NumericType`，不把字符串 dtype 作为公开真源。
+
+    使用示例:
+    - info = RuntimeMemoryArgInfo(kind="memory", dtype=NumericType.Float32, shape=(2, 2), stride=(2, 1), is_contiguous=True)
+    """
+
+    kind: Literal["memory"]
+    dtype: NumericType
+    shape: tuple[int, ...]
+    stride: tuple[int, ...] | None
+    is_contiguous: bool
+
+
+RuntimeArgInfo: TypeAlias = RuntimeScalarArgInfo | RuntimeMemoryArgInfo
 
 
 @dataclass(frozen=True)
@@ -192,16 +291,11 @@ class _RuntimeArgSupport:
 
         if dtype is None:
             return 0
-        normalized = dtype.strip().lower().replace(" ", "")
-        if normalized in {"float", "float32", "f32"}:
-            return 1
-        if normalized in {"double", "float64", "f64"}:
-            return 2
-        if normalized in {"int", "int32", "int32_t", "i32"}:
-            return 3
-        if normalized in {"longlong", "longlongint", "int64", "int64_t", "i64"}:
-            return 4
-        return 0
+        normalized = dtype.strip().lower()
+        if normalized.startswith("torch."):
+            normalized = normalized.split(".", 1)[1]
+        normalized = normalized.replace(" ", "")
+        return _RUNTIME_DTYPE_CODE_BY_DTYPE.get(normalized, 0)
 
 
     @staticmethod
@@ -246,7 +340,7 @@ class _RuntimeArgSupport:
             return None
         try:
             return tuple(int(dim) for dim in getattr(value, "shape"))
-        except TypeError:
+        except (TypeError, ValueError):
             return None
 
 
@@ -315,13 +409,13 @@ class _RuntimeArgSupport:
             stride = stride_attr() if callable(stride_attr) else stride_attr
             try:
                 return tuple(int(dim) for dim in stride)
-            except TypeError:
+            except (TypeError, ValueError):
                 return None
         if hasattr(value, "strides"):
             stride = getattr(value, "strides")
             try:
                 stride_tuple = tuple(int(dim) for dim in stride)
-            except TypeError:
+            except (TypeError, ValueError):
                 return None
             if _RuntimeArgSupport.is_numpy_array(value):
                 itemsize = getattr(value, "itemsize", None)
@@ -332,38 +426,6 @@ class _RuntimeArgSupport:
                 return tuple(int(dim // itemsize) for dim in stride_tuple)
             return stride_tuple
         return None
-
-
-    @staticmethod
-    def is_runtime_int(value: _RuntimeInputValue) -> bool:
-        """判断是否为合法 int RuntimeInput（排除 bool）。
-
-        功能说明:
-        - 允许 int 作为运行时参数的标量输入。
-        - 显式排除 bool，避免把布尔值误判为整数。
-
-        使用示例:
-        - assert _RuntimeArgSupport.is_runtime_int(3) is True
-        - assert _RuntimeArgSupport.is_runtime_int(True) is False
-        """
-
-        return isinstance(value, int) and not isinstance(value, bool)
-
-
-    @staticmethod
-    def is_runtime_float(value: _RuntimeInputValue) -> bool:
-        """判断是否为合法 float RuntimeInput（排除 bool）。
-
-        功能说明:
-        - 允许 float 作为运行时参数的标量输入。
-        - 显式排除 bool，确保失败路径可控。
-
-        使用示例:
-        - assert _RuntimeArgSupport.is_runtime_float(1.25) is True
-        - assert _RuntimeArgSupport.is_runtime_float(False) is False
-        """
-
-        return isinstance(value, float) and not isinstance(value, bool)
 
 
     @staticmethod
@@ -450,27 +512,31 @@ class _RuntimeArgSupport:
                     )
                 )
                 continue
-            if _RuntimeArgSupport.is_runtime_int(arg):
-                slots.append(_ArgSlot(position=idx, kind="int", dtype="int", dtype_code=0, shape=None, stride=None, value=arg))
+            info = describe_runtime_arg(arg)
+            if isinstance(info, RuntimeScalarArgInfo):
+                slots.append(
+                    _ArgSlot(
+                        position=idx,
+                        kind=info.kind,
+                        dtype=info.kind,
+                        dtype_code=0,
+                        shape=None,
+                        stride=None,
+                        value=info.value,
+                    )
+                )
                 continue
-            if _RuntimeArgSupport.is_runtime_float(arg):
-                slots.append(_ArgSlot(position=idx, kind="float", dtype="float", dtype_code=0, shape=None, stride=None, value=arg))
-                continue
-            if _RuntimeArgSupport.is_memory_runtime_arg(arg):
-                if not _RuntimeArgSupport.is_contiguous_memory(arg):
+            if isinstance(info, RuntimeMemoryArgInfo):
+                if not info.is_contiguous:
                     raise _RuntimeArgSupport.runtime_args_error(_RUNTIME_THROW_OR_ABORT, f"memory arg is not contiguous at position {idx}")
-                dtype = _RuntimeArgSupport.normalize_dtype(getattr(arg, "dtype", None))
-                shape = _RuntimeArgSupport.normalize_shape(arg)
-                if dtype is None or shape is None:
-                    raise _RuntimeArgSupport.runtime_args_error(_RUNTIME_THROW_OR_ABORT, f"memory arg missing dtype/shape at position {idx}")
                 slots.append(
                     _ArgSlot(
                         position=idx,
                         kind="memory",
-                        dtype=dtype,
-                        dtype_code=_RuntimeArgSupport.dtype_code_from_name(dtype),
-                        shape=shape,
-                        stride=_RuntimeArgSupport.normalize_stride(arg),
+                        dtype=info.dtype.value,
+                        dtype_code=_RuntimeArgSupport.dtype_code_from_name(info.dtype.value),
+                        shape=info.shape,
+                        stride=info.stride,
                         value=arg,
                     )
                 )
@@ -642,7 +708,7 @@ class _RuntimeArgSupport:
 
         功能说明:
         - 对真实 `.so` 执行动态加载，并把 Python 槽位转换为 C ABI 参数后调用入口。
-        - 对 dry-run 生成的空产物，保留历史占位成功行为，避免破坏骨架测试。
+        - 对 dry-run 生成的空产物或空白占位产物，保留历史占位成功行为，避免破坏骨架测试。
 
         使用示例:
         - invoke = _RuntimeArgSupport.load_entry_point("libkernel.so", "kg_execute_entry")
@@ -656,6 +722,12 @@ class _RuntimeArgSupport:
             raise _RuntimeArgSupport.runtime_args_error(_RUNTIME_THROW_OR_ABORT, "soname_path is missing")
         if soname.stat().st_size == 0:
             return _RuntimeArgSupport.invoke_placeholder_entry
+        if soname.stat().st_size <= 8:
+            try:
+                if not soname.read_bytes().strip():
+                    return _RuntimeArgSupport.invoke_placeholder_entry
+            except OSError:
+                pass
 
         try:
             library = ctypes.CDLL(str(soname))
@@ -666,6 +738,54 @@ class _RuntimeArgSupport:
         except AttributeError as exc:
             raise _RuntimeArgSupport.runtime_args_error(_SYMBOL_RESOLVE_FAILED, f"entry_point '{entry_point}' is missing") from exc
         return partial(_RuntimeArgSupport.invoke_loaded_entry_symbol, symbol=symbol)
+
+
+def describe_runtime_arg(value: object) -> RuntimeArgInfo | None:
+    """描述单个真实 runtime 参数的基础分类结果。
+
+    功能说明:
+    - 将 Python / numpy integer scalar 规整为 Python `int`，floating scalar 规整为 Python `float`。
+    - 将 torch / numpy memory 参数描述为 `RuntimeMemoryArgInfo`，dtype 使用公开 `NumericType`。
+    - 对 `None`、bool / numpy bool scalar、unsupported dtype 或非法 memory metadata 返回 `None`。
+
+    使用示例:
+    - info = describe_runtime_arg(4)
+    - assert info == RuntimeScalarArgInfo(kind="int", value=4)
+    """
+
+    dtype_value = getattr(value, "dtype", None)
+    dtype_text = getattr(dtype_value, "name", None)
+    if not isinstance(dtype_text, str) or not dtype_text:
+        dtype_text = _RuntimeArgSupport.normalize_dtype(dtype_value)
+    if dtype_text is not None:
+        normalized_dtype = dtype_text.strip().lower()
+        if normalized_dtype.startswith("torch."):
+            normalized_dtype = normalized_dtype.split(".", 1)[1]
+        normalized_dtype = normalized_dtype.replace(" ", "")
+    else:
+        normalized_dtype = ""
+    module_name = _RuntimeArgSupport.runtime_module_name(value)
+    class_name = getattr(value.__class__, "__name__", "")
+    is_numpy_bool_scalar = module_name.startswith("numpy") and class_name in {"bool", "bool_"}
+    if value is None or isinstance(value, bool) or is_numpy_bool_scalar:
+        return None
+    if isinstance(value, Integral):
+        return RuntimeScalarArgInfo(kind="int", value=int(value))
+    if isinstance(value, Real) and (isinstance(value, float) or module_name.startswith("numpy")):
+        return RuntimeScalarArgInfo(kind="float", value=float(value))
+    if not _RuntimeArgSupport.is_memory_runtime_arg(value):
+        return None
+    dtype = _RUNTIME_NUMERIC_TYPE_BY_DTYPE.get(normalized_dtype)
+    shape = _RuntimeArgSupport.normalize_shape(value)
+    if dtype is None or shape is None:
+        return None
+    return RuntimeMemoryArgInfo(
+        kind="memory",
+        dtype=dtype,
+        shape=shape,
+        stride=_RuntimeArgSupport.normalize_stride(value),
+        is_contiguous=_RuntimeArgSupport.is_contiguous_memory(value),
+    )
 
 
 def invoke_compiled_kernel(
@@ -690,6 +810,10 @@ def invoke_compiled_kernel(
 
 
 __all__ = [
+    "RuntimeScalarArgInfo",
+    "RuntimeMemoryArgInfo",
+    "RuntimeArgInfo",
+    "describe_runtime_arg",
     "AllowAbsentMemoryArg",
     "RuntimeInput",
     "invoke_compiled_kernel",

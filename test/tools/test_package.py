@@ -38,6 +38,7 @@ def test_tools_package_public_exports() -> None:
     assert tools_package.dsl_cost_run.__name__ == "dsl_cost_run"
     assert tools_package.dsl_cost_run.__module__ == "kernel_gen.tools"
     assert tools_package.DslRunResult.__name__ == "DslRunResult"
+    assert tools_package.RuntimeRealArg == "TensorRuntimeArg | int | float | None"
 
 
 def test_tools_package_supports_direct_dsl_run_import() -> None:
