@@ -605,7 +605,7 @@ def test_npu_demo_lowering_pipeline_builds_pass_manager() -> None:
 
 
 # TC-PIPELINE-101
-# 功能说明: 验证 npu-demo-lowering 的固定顺序包含三次 memory-plan、四次 CSE、五次 canonicalize、pre-pool multi-buffer / producer-consumer-analysis 和 late attach。
+# 功能说明: 验证 npu-demo-lowering 的固定顺序包含三次 memory-plan、五次 CSE、五次 canonicalize、pre-pool multi-buffer / producer-consumer-analysis 和 late attach。
 # 测试目的: 锁定 dsl_run 新正向管线的最小公开顺序。
 # 使用示例: pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k test_npu_demo_lowering_pipeline_pass_order
 # 对应功能实现文件路径: kernel_gen/pipeline/npu_demo_lowering.py
@@ -664,6 +664,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "multi-buffer:2:npu_demo",
         "producer-consumer-analysis",
         "memory-pool:True:1024",
+        "cse",
         "canonicalize",
         "arch-parallelize:npu_demo:block",
         "attach-arch-information",
@@ -854,7 +855,7 @@ def test_npu_demo_lowering_pipeline_dynamic_acc_kernel_decompose_dump_shows_life
     - 断言 `kernel-aggregate` 与 `kernel-decompose` 位于第二段 hoist cleanup 后、
       第三段 memory-plan 前，且 producer stage
       仍保留 typed `dma.alloc` 形态。
-    - 断言 `arch-parallelize` 位于 memory-pool 后的 `canonicalize` 之后，且 memory-pool 后没有第 5 个 CSE。
+    - 断言 `arch-parallelize` 位于 memory-pool 后的 `cse -> canonicalize` 之后。
 
     使用示例:
     - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k dynamic_acc_kernel_decompose_dump
@@ -884,6 +885,7 @@ def test_npu_demo_lowering_pipeline_dynamic_acc_kernel_decompose_dump_shows_life
     decompose_text = _dump_stage_text_by_marker(tmp_path, "kernel-decompose")
     producer_consumer_text = _dump_stage_text_by_marker(tmp_path, "producer-consumer-analysis")
     memory_pool_text = _dump_stage_text_by_marker(tmp_path, "memory-pool")
+    post_pool_cse_text = _dump_stage_text_by_marker(tmp_path, "cse", occurrence=5)
     post_pool_canonicalize_text = _dump_stage_text_by_marker(tmp_path, "canonicalize", occurrence=5)
     arch_parallelize_text = _dump_stage_text_by_marker(tmp_path, "arch-parallelize")
     attach_text = _dump_stage_text_by_marker(tmp_path, "attach-arch-information")
@@ -913,6 +915,7 @@ def test_npu_demo_lowering_pipeline_dynamic_acc_kernel_decompose_dump_shows_life
     assert "dma.reinterpret" in memory_pool_text
     assert "dma.alloc" not in memory_pool_text
     assert "dma.free" not in memory_pool_text
+    assert post_pool_cse_text.startswith("cse\n")
     assert post_pool_canonicalize_text.startswith("canonicalize\n")
     assert arch_parallelize_text.startswith("arch-parallelize\n")
     assert "arch.get_block_id" in arch_parallelize_text
@@ -925,7 +928,8 @@ def test_npu_demo_lowering_pipeline_dynamic_acc_kernel_decompose_dump_shows_life
     assert _dump_stage_index(tmp_path, "cse", occurrence=2) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=2)
     assert _dump_stage_index(tmp_path, "cse", occurrence=3) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=3)
     assert _dump_stage_index(tmp_path, "cse", occurrence=4) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=4)
-    assert markers.count("cse") == 4
+    assert _dump_stage_index(tmp_path, "cse", occurrence=5) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=5)
+    assert markers.count("cse") == 5
     assert _dump_stage_index(tmp_path, "memory-plan", occurrence=1) == 7
     assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=1) == 8
     assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=1) + 1 == _dump_stage_index(
@@ -954,11 +958,12 @@ def test_npu_demo_lowering_pipeline_dynamic_acc_kernel_decompose_dump_shows_life
     assert _dump_stage_index(tmp_path, "multi-buffer") == 24
     assert _dump_stage_index(tmp_path, "producer-consumer-analysis") == 25
     assert _dump_stage_index(tmp_path, "memory-pool") == 26
-    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=5) == 27
-    assert _dump_stage_index(tmp_path, "arch-parallelize") == 28
-    assert _dump_stage_index(tmp_path, "attach-arch-information") == 29
-    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 30
-    assert _dump_stage_index(tmp_path, "template-name-infer") == 31
+    assert _dump_stage_index(tmp_path, "cse", occurrence=5) == 27
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=5) == 28
+    assert _dump_stage_index(tmp_path, "arch-parallelize") == 29
+    assert _dump_stage_index(tmp_path, "attach-arch-information") == 30
+    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 31
+    assert _dump_stage_index(tmp_path, "template-name-infer") == 32
     assert markers.count("attach-arch-information") == 1
     assert markers.count("symbol-hoist-pipeline") == 3
     assert "dma-alias-to-reinterpret" not in markers
@@ -981,7 +986,7 @@ def test_npu_demo_lowering_pipeline_dynamic_acc_kernel_decompose_dump_shows_life
         "cse",
         "canonicalize",
     ]
-    assert markers[17:29] == [
+    assert markers[17:30] == [
         "kernel-aggregate",
         "kernel-decompose",
         "memory-plan",
@@ -991,6 +996,7 @@ def test_npu_demo_lowering_pipeline_dynamic_acc_kernel_decompose_dump_shows_life
         "multi-buffer",
         "producer-consumer-analysis",
         "memory-pool",
+        "cse",
         "canonicalize",
         "arch-parallelize",
         "attach-arch-information",
@@ -1094,10 +1100,13 @@ def test_npu_demo_lowering_pipeline_static_dump_runs_multi_buffer_before_pool(tm
     assert _dump_stage_index(tmp_path, "producer-consumer-analysis") + 1 == _dump_stage_index(
         tmp_path, "memory-pool"
     )
-    assert markers.count("cse") == 4
+    assert markers.count("cse") == 5
     assert markers.count("symbol-hoist-pipeline") == 3
     assert "hoist-dma-alias-ops" not in markers
     assert _dump_stage_index(tmp_path, "memory-pool") + 1 == _dump_stage_index(
+        tmp_path, "cse", occurrence=5
+    )
+    assert _dump_stage_index(tmp_path, "cse", occurrence=5) + 1 == _dump_stage_index(
         tmp_path, "canonicalize", occurrence=5
     )
     assert _dump_stage_index(tmp_path, "canonicalize", occurrence=5) + 1 == _dump_stage_index(

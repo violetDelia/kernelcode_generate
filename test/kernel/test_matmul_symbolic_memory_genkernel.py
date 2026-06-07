@@ -69,6 +69,7 @@ def _assert_source_uses_accumulator(source: str, *, expect_initial_fill: bool = 
     功能说明:
     - 当前测试文件内 helper，只服务公开 demo 输出的源码文本断言。
     - 默认要求 `fill -> matmul -> add -> output deslice`，避免 K loop partial 直接覆盖 output。
+    - 输出 deslice 兼容旧 `deslice(arg0, ...)` 与 context-first `deslice(ctx, arg0, ...)` 生成源码形态。
     - dynamic acc 形态要求无 `fill<`，但 `matmul(... acc)` 仍早于 bias add 与 output deslice。
 
     使用示例:
@@ -79,10 +80,14 @@ def _assert_source_uses_accumulator(source: str, *, expect_initial_fill: bool = 
     if expect_initial_fill:
         fill_index = source.index("fill<")
         add_index = source.index("add<")
-        output_deslice_index = source.index("deslice(arg0", add_index)
+        output_deslice_index = source.find("deslice(arg0", add_index)
+        if output_deslice_index == -1:
+            output_deslice_index = source.index("deslice(ctx, arg0", add_index)
         assert fill_index < matmul_index < add_index < output_deslice_index
         return
-    output_deslice_index = source.index("deslice(arg0", matmul_index)
+    output_deslice_index = source.find("deslice(arg0", matmul_index)
+    if output_deslice_index == -1:
+        output_deslice_index = source.index("deslice(ctx, arg0", matmul_index)
     add_index = source.find("add<", matmul_index, output_deslice_index)
     assert "fill<" not in source
     assert "/*acc*/" in source
