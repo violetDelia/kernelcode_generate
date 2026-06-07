@@ -8,7 +8,7 @@
 
 ## API 列表
 
-- `class SymbolLoopHoistPass()`
+- `class SymbolLoopHoistPass(fold: bool = True)`
   - `name: str`
   - `apply(ctx: Context, module: ModuleOp) -> None`
 - `class SymbolConstHoistPattern()`
@@ -136,7 +136,7 @@ raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "SymbolLoopHoistVeri
 
 - 抛出后立即终止当前 pass。
 
-### `class SymbolLoopHoistPass()`
+### `class SymbolLoopHoistPass(fold: bool = True)`
 
 - 功能说明：
 
@@ -146,7 +146,7 @@ raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "SymbolLoopHoistVeri
 
 - 参数：
 
-- 无构造参数。
+- `fold: bool = True`：symbol-loop-hoist pattern walker 是否启用 folding。
 
 - 使用示例：
 
@@ -352,10 +352,11 @@ assert isinstance(patterns[0], SymbolConstHoistPattern)
 
 ## API详细说明
 
-### `class SymbolLoopHoistPass()`
+### `class SymbolLoopHoistPass(fold: bool = True)`
 
-- api：`class SymbolLoopHoistPass()`
-- 参数：无。
+- api：`class SymbolLoopHoistPass(fold: bool = True)`
+- 参数：
+  - `fold`：symbol-loop-hoist pattern walker 是否启用 folding；类型 `bool`；默认值 `True`。
 - 返回值：`SymbolLoopHoistPass` 实例。
 - 使用示例：
 

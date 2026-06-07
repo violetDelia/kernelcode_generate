@@ -20,41 +20,41 @@
 - 不全量重导出所有 pass pattern；新增公开 pattern 以所属 canonical module path 的 `__all__` 为准。
 
 API 列表:
-- `class Pass()`
+- `class Pass(fold: bool = True)`
 - `class PassManager(name: str | None = None)`
 - `PassManager.add_pass(self: PassManager, pass_obj: XdslModulePass) -> None`
 - `PassManager.extend(self: PassManager, passes: Sequence[XdslModulePass]) -> None`
 - `PassManager.run(self: PassManager, target: ModuleOp) -> ModuleOp`
-- `class InlinePass()`
-- `class AttachArchInformationPass(target: str = "npu_demo")`
+- `class InlinePass(fold: bool = True)`
+- `class AttachArchInformationPass(target: str = "npu_demo", fold: bool = True)`
 - `class ArchParallelizePass(target: str = "npu_demo", parallel_level: str = "block")`
-- `class BufferResultsToOutParamsPass()`
+- `class BufferResultsToOutParamsPass(fold: bool = True)`
 - `class BufferResultsToOutParamsCallPattern(targets: dict[str, RewriteTarget])`
 - `class BufferResultsToOutParamsFuncPattern(targets: dict[str, RewriteTarget])`
 - `get_buffer_results_to_out_params_pass_patterns(targets: dict[str, RewriteTarget]) -> list[RewritePattern]`
-- `class DecompassPass()`
+- `class DecompassPass(fold: bool = True)`
 - `class NnSoftmaxDecompPattern()`
 - `get_decompass_pass_patterns() -> list[RewritePattern]`
 - `class MemoryPlanPass(insert_free: bool = False, fold: bool = True, reuse: bool = False, auto_pad: bool = False)`
 - `class MultiBufferPass(memory_stage: int = 2, fold: bool = True, target: str | None = None)`
-- `class OutlineDeviceKernelPass()`
+- `class OutlineDeviceKernelPass(fold: bool = True)`
 - `class DmaAllocInSymbolForHoistPattern()`
 - `get_symbol_buffer_hoist_patterns() -> list[RewritePattern]`
-- `class SymbolBufferHoistPass()`
+- `class SymbolBufferHoistPass(fold: bool = True)`
 - `class TileAnalysisBinaryPattern()`
 - `class TileAnalysisBroadcastPattern()`
 - `class TileAnalysisMatmulPattern()`
-- `class TileAnalysisPass()`
+- `class TileAnalysisPass(fold: bool = True)`
 - `get_tile_analysis_pass_patterns() -> list[RewritePattern]`
 - `class TileElewiseBinaryPattern()`
 - `class TileElewiseBroadcastPattern()`
 - `class TileElewiseMatmulPattern()`
-- `class TileElewisePass()`
+- `class TileElewisePass(fold: bool = True)`
 - `get_tile_elewise_pass_patterns() -> list[RewritePattern]`
 - `class TileReduceMatmulPattern()`
-- `class TileReducePass()`
+- `class TileReducePass(fold: bool = True)`
 - `get_tile_reduce_pass_patterns() -> list[RewritePattern]`
-- `class SymbolLoopHoistPass()`
+- `class SymbolLoopHoistPass(fold: bool = True)`
 - `class SymbolMinHoistPattern()`
 - `class SymbolMaxHoistPattern()`
 - `class TemplateNameInferPass(fold: bool = True)`
@@ -64,12 +64,12 @@ API 列表:
 - pass_module = importlib.import_module("kernel_gen.passes.pass_manager")
 - Pass, PassManager = pass_module.Pass, pass_module.PassManager
 - from kernel_gen.passes import BufferResultsToOutParamsPass, DecompassPass
-- buffer_pass = BufferResultsToOutParamsPass()
-- decompass_pass = DecompassPass()
+- buffer_pass = BufferResultsToOutParamsPass(fold=True)
+- decompass_pass = DecompassPass(fold=True)
 - from kernel_gen.passes import InlinePass
-- inline_pass = InlinePass()
+- inline_pass = InlinePass(fold=True)
 - from kernel_gen.passes import AttachArchInformationPass
-- attach_pass = AttachArchInformationPass(target="npu_demo")
+- attach_pass = AttachArchInformationPass(target="npu_demo", fold=True)
 - from kernel_gen.passes import MemoryPlanPass
 - memory_plan_pass = MemoryPlanPass(insert_free=True, reuse=True, auto_pad=True)
 - from kernel_gen.passes import MultiBufferPass
@@ -77,19 +77,19 @@ API 列表:
 - from kernel_gen.passes import ArchParallelizePass
 - arch_parallelize_pass = ArchParallelizePass(target="npu_demo", parallel_level="block")
 - from kernel_gen.passes import OutlineDeviceKernelPass
-- outline_pass = OutlineDeviceKernelPass()
+- outline_pass = OutlineDeviceKernelPass(fold=True)
 - from kernel_gen.passes import DmaAllocInSymbolForHoistPattern, SymbolBufferHoistPass
 - symbol_buffer_patterns = get_symbol_buffer_hoist_patterns()
-- symbol_buffer_pass = SymbolBufferHoistPass()
+- symbol_buffer_pass = SymbolBufferHoistPass(fold=True)
 - from kernel_gen.passes import TileAnalysisPass, TileAnalysisBinaryPattern
-- tile_analysis_pass = TileAnalysisPass()
+- tile_analysis_pass = TileAnalysisPass(fold=True)
 - from kernel_gen.passes import TileElewisePass, TileReducePass
-- tile_elewise_pass = TileElewisePass()
-- tile_reduce_pass = TileReducePass()
+- tile_elewise_pass = TileElewisePass(fold=True)
+- tile_reduce_pass = TileReducePass(fold=True)
 - from kernel_gen.passes import SymbolLoopHoistPass
-- hoist_pass = SymbolLoopHoistPass()
+- hoist_pass = SymbolLoopHoistPass(fold=True)
 - from kernel_gen.passes import TemplateNameInferPass
-- infer_pass = TemplateNameInferPass()
+- infer_pass = TemplateNameInferPass(fold=True)
 
 关联文件:
 - spec:

@@ -23,6 +23,8 @@ API 列表:
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
+
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.context import Context
@@ -44,6 +46,7 @@ _DYNAMIC_MEMORY_CAPACITY_KEYS = {
 }
 
 
+@dataclass(frozen=True)
 class AttachArchInformationPass(Pass):
     """attach-arch-information pass。
 
@@ -65,6 +68,8 @@ class AttachArchInformationPass(Pass):
     """
 
     name = "attach-arch-information"
+    target: str = "npu_demo"
+    fold: bool = True
 
     def __init__(self: "AttachArchInformationPass", target: str = "npu_demo", fold: bool = True) -> None:
         """初始化 attach-arch-information pass。
@@ -86,8 +91,8 @@ class AttachArchInformationPass(Pass):
         - 功能实现: [kernel_gen/passes/arch/attach_arch_information.py](../../kernel_gen/passes/arch/attach_arch_information.py)
         """
 
-        super().__init__(fold=fold)
-        self.target = target
+        object.__setattr__(self, "target", target)
+        object.__setattr__(self, "fold", bool(fold))
 
     @classmethod
     def from_options(

@@ -10,7 +10,7 @@ API 列表:
 - `class TileReduceMatmulPattern(RewritePattern)`
 - `TileReduceMatmulPattern.match_and_rewrite(op: KernelMatmulOp, rewriter: PatternRewriter) -> None`
 - `get_tile_reduce_pass_patterns() -> list[RewritePattern]`
-- `class TileReducePass(ModulePass)`
+- `class TileReducePass(fold: bool = True)`
 - `TileReducePass.__init__(fold: bool = True) -> None`
 - `TileReducePass.apply(ctx: Context, module: ModuleOp) -> None`
 
@@ -21,7 +21,7 @@ API 列表:
 -     get_tile_reduce_pass_patterns,
 - )
 - patterns = get_tile_reduce_pass_patterns()
-- TileReducePass().apply(Context(), module)
+- TileReducePass(fold=True).apply(Context(), module)
 
 关联文件:
 - spec: [spec/pass/tile/reduce.md](spec/pass/tile/reduce.md)
@@ -31,6 +31,8 @@ API 列表:
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from xdsl.context import Context
 from xdsl.dialects import func
@@ -301,10 +303,12 @@ def get_tile_reduce_pass_patterns() -> list[RewritePattern]:
     return [TileReduceMatmulPattern()]
 
 
+@dataclass(frozen=True)
 class TileReducePass(ModulePass):
     """`tile-reduce` 的公开 `ModulePass`。"""
 
     name = "tile-reduce"
+    fold: bool = True
 
     def __init__(self: "TileReducePass", fold: bool = True) -> None:
         """初始化 tile-reduce pass 公共选项。
@@ -314,7 +318,7 @@ class TileReducePass(ModulePass):
         - 记录 `fold` 开关，默认允许 pass 内 pattern walker 执行 folding。
 
         使用示例:
-        - pass_obj = TileReducePass()
+        - pass_obj = TileReducePass(fold=True)
         - pass_obj = TileReducePass(fold=False)
 
         关联文件:
@@ -323,7 +327,7 @@ class TileReducePass(ModulePass):
         - 功能实现: [kernel_gen/passes/tile/reduce.py](kernel_gen/passes/tile/reduce.py)
         """
 
-        self.fold = bool(fold)
+        object.__setattr__(self, "fold", bool(fold))
 
     def apply(self: "TileReducePass", ctx: Context, module: ModuleOp) -> None:
         ensure_builtin_module(module)

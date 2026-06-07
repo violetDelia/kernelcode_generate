@@ -33,6 +33,7 @@ API 列表:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from xdsl.context import Context
 from xdsl.dialects.builtin import ArrayAttr, IntegerType, ModuleOp
@@ -1001,6 +1002,7 @@ def get_hoist_dma_alias_ops_pass_patterns(module: ModuleOp) -> list[RewritePatte
     return [DmaAliasThroughWriteNoReadPattern(module), DmaAliasHoistPattern(module)]
 
 
+@dataclass(frozen=True)
 class HoistDmaAliasOpsPass(Pass):
     """`hoist-dma-alias-ops` pass 公开入口。
 
@@ -1013,6 +1015,7 @@ class HoistDmaAliasOpsPass(Pass):
     """
 
     name = "hoist-dma-alias-ops"
+    fold: bool = True
 
     def apply(self: "HoistDmaAliasOpsPass", ctx: Context, module: ModuleOp) -> None:
         """执行 `hoist-dma-alias-ops` ModulePass。

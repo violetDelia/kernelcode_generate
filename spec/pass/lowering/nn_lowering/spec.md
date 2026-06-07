@@ -8,7 +8,7 @@
 
 ## API 列表
 
-- `class NnLoweringPass()`
+- `class NnLoweringPass(fold: bool = True)`
 - `NnLoweringPass.apply(ctx: Context, module: ModuleOp) -> None`
 - `nn_lowering_patterns() -> list[RewritePattern]`
 - `class RejectUnsupportedNnOpPattern()`
@@ -51,17 +51,18 @@
 
 ## API详细说明
 
-### `class NnLoweringPass()`
+### `class NnLoweringPass(fold: bool = True)`
 
-- api：`class NnLoweringPass()`
-- 参数：无。
+- api：`class NnLoweringPass(fold: bool = True)`
+- 参数：
+  - `fold`：nn lowering pattern walker 是否启用 folding；类型 `bool`；默认值 `True`。
 - 返回值：`NnLoweringPass` 实例。
 - 使用示例：
 
   ```python
   from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 
-  pass_obj = NnLoweringPass()
+  pass_obj = NnLoweringPass(fold=True)
   ```
 - 功能说明：表示 `nn -> kernel/dma` lowering pass。
 - 注意事项：固定公开名称为 `"lower-nn"`；公开执行入口固定为 `apply(ctx, module)`；不再保留 `run(module)` 兼容入口；若出现不支持的 op 或校验失败，必须抛出 `KernelCodeError`。
@@ -80,7 +81,7 @@
 
   from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 
-  NnLoweringPass().apply(Context(), module)
+  NnLoweringPass(fold=True).apply(Context(), module)
   ```
 - 功能说明：对输入 module 执行 `nn -> kernel/dma` lowering，并原地改写 `module`。
 - 注意事项：`module` 不是 `builtin.module` 时必须抛出 `KernelCodeError`；`apply(...)` 必须直接消费 `nn_lowering_patterns()` 返回的顺序化 pattern 列表，构造 `PatternRewriteWalker(GreedyRewritePatternApplier(...))`，不得回退为手写 `while progress` 或 family 分发循环；返回 `None`。

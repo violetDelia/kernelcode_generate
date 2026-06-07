@@ -11,7 +11,7 @@
 - `build_registered_pass(name: str, options: dict[str, str] | None = None) -> ModulePass`
 - `class TileReduceMatmulPattern(RewritePattern)`
 - `TileReduceMatmulPattern.match_and_rewrite(op: KernelMatmulOp, rewriter: PatternRewriter) -> None`
-- `class TileReducePass(ModulePass)`
+- `class TileReducePass(fold: bool = True)`
 - `TileReducePass.__init__(fold: bool = True) -> None`
 - `TileReducePass.apply(ctx: Context, module: ModuleOp) -> None`
 - `get_tile_reduce_pass_patterns() -> list[RewritePattern]`
@@ -86,15 +86,16 @@
 - 功能说明：使用 `TileReduceMatmulPattern` 匹配目标 operation 并执行 rewrite。
 - 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
 
-### `class TileReducePass(ModulePass)`
+### `class TileReducePass(fold: bool = True)`
 
-- api：`class TileReducePass(ModulePass)`
-- 参数：无。
+- api：`class TileReducePass(fold: bool = True)`
+- 参数：
+  - `fold`：tile-reduce pattern walker 是否启用 folding；类型 `bool`；默认值 `True`。
 - 返回值：`TileReducePass` 实例。
 - 使用示例：
 
   ```python
-  tile_reduce_pass = TileReducePass()
+  tile_reduce_pass = TileReducePass(fold=True)
   ```
 - 功能说明：定义 `TileReducePass` pass 对象。
 - 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。

@@ -12,16 +12,16 @@ API 列表:
 - `class OutlineDeviceKernelFuncPattern(candidates: dict[str, tuple[int, int, int, int]])`
 - `OutlineDeviceKernelFuncPattern.match_and_rewrite(op: func.FuncOp, rewriter: PatternRewriter) -> None`
 - `get_outline_device_kernel_pass_patterns(candidates: dict[str, tuple[int, int, int, int]]) -> list[RewritePattern]`
-- `class OutlineDeviceKernelPass()`
+- `class OutlineDeviceKernelPass(fold: bool = True)`
 - `OutlineDeviceKernelPass.apply(ctx: Context, module: ModuleOp) -> None`
 - `class TransformApplyPass(fold: bool = True)`
 
 使用示例:
 - from kernel_gen.passes.tuning import LowerDmaMemoryHierarchyPass, KernelPatternAttachPass
 - pass_obj = LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", "tlm2"]}')
-- pattern_pass = KernelPatternAttachPass()
-- outline_pass = OutlineDeviceKernelPass()
-- transform_pass = TransformApplyPass()
+- pattern_pass = KernelPatternAttachPass(fold=True)
+- outline_pass = OutlineDeviceKernelPass(fold=True)
+- transform_pass = TransformApplyPass(fold=True)
 
 关联文件:
 - spec: [spec/pass/tuning/dma_memory_hierarchy.md](spec/pass/tuning/dma_memory_hierarchy.md)

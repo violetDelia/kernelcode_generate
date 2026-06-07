@@ -854,6 +854,7 @@ def get_dma_alias_to_reinterpret_patterns() -> list[RewritePattern]:
     ]
 
 
+@dataclass(frozen=True)
 class DmaAliasToReinterpretPass(Pass):
     """dma alias 归一化 pass。
 
@@ -872,6 +873,7 @@ class DmaAliasToReinterpretPass(Pass):
     """
 
     name = "dma-alias-to-reinterpret"
+    fold: bool = True
 
     def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行 `dma-alias-to-reinterpret`。

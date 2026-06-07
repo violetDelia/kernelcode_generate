@@ -26,7 +26,7 @@ API 列表:
 
 from __future__ import annotations
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import kernel_gen.target.registry as targetregistry
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
@@ -539,6 +539,7 @@ def _lower_gm_out_to_lm_with_writeback(
     return pre_ops, post_ops, alloc_lm.result
 
 
+@dataclass(frozen=True)
 class LowerDmaMemoryHierarchyPass(Pass):
     """执行 dma memory hierarchy 规则化 lowering。
 
@@ -558,6 +559,9 @@ class LowerDmaMemoryHierarchyPass(Pass):
     """
 
     name = "lower-dma-memory-hierarchy"
+    fold: bool = True
+    apply_op: str | None = None
+    _rule: _ApplyOpRule | None = field(init=False, repr=False, compare=False)
 
     def __init__(self, fold: bool = True, apply_op: str | None = None) -> None:
         """初始化 `lower-dma-memory-hierarchy` pass。
@@ -577,9 +581,9 @@ class LowerDmaMemoryHierarchyPass(Pass):
         - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
         """
 
-        self.fold = fold
-        self.apply_op = apply_op
-        self._rule = _parse_apply_op(apply_op)
+        object.__setattr__(self, "fold", bool(fold))
+        object.__setattr__(self, "apply_op", apply_op)
+        object.__setattr__(self, "_rule", _parse_apply_op(apply_op))
 
     @classmethod
     def from_options(cls, options: dict[str, str]) -> "LowerDmaMemoryHierarchyPass":

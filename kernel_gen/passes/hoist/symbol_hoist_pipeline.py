@@ -22,6 +22,8 @@ API 列表:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.pattern_rewriter import GreedyRewritePatternApplier, PatternRewriteWalker
@@ -37,6 +39,7 @@ from kernel_gen.passes.hoist.symbol_loop_hoist import get_symbol_loop_hoist_patt
 from kernel_gen.passes.pass_manager import Pass
 
 
+@dataclass(frozen=True)
 class SymbolHoistPipelinePass(Pass):
     """组合 hoist pattern 的公开 pass。
 
@@ -51,6 +54,7 @@ class SymbolHoistPipelinePass(Pass):
     """
 
     name = "symbol-hoist-pipeline"
+    fold: bool = True
 
     def apply(self: "SymbolHoistPipelinePass", ctx: Context, module: ModuleOp) -> None:
         """执行 `symbol-hoist-pipeline` ModulePass。

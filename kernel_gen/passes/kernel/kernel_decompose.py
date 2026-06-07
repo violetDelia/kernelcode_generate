@@ -23,6 +23,8 @@ API 列表:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from xdsl.context import Context
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import FloatAttr, IntAttr, IntegerAttr, ModuleOp
@@ -64,6 +66,7 @@ def _kernel_decompose_error(message: str) -> KernelCodeError:
     return KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, text)
 
 
+@dataclass(frozen=True)
 class KernelDecomposePass(Pass):
     """分解 kernel 中间聚合 op 的公开 pass。
 
@@ -78,6 +81,7 @@ class KernelDecomposePass(Pass):
     """
 
     name = "kernel-decompose"
+    fold: bool = True
 
     def __init__(self, fold: bool = True) -> None:
         """初始化 kernel-decompose pass。
@@ -90,7 +94,7 @@ class KernelDecomposePass(Pass):
         - KernelDecomposePass()
         """
 
-        super().__init__(fold=fold)
+        object.__setattr__(self, "fold", bool(fold))
 
     @classmethod
     def from_options(cls, options: dict[str, str]) -> "KernelDecomposePass":

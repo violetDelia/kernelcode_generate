@@ -22,6 +22,7 @@ API 列表:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import shlex
 
 from xdsl.context import Context
@@ -237,6 +238,7 @@ def _apply_transform_pipeline_to_module(ctx: Context, module: ModuleOp) -> None:
         target_block.add_op(op)
 
 
+@dataclass(frozen=True)
 class TransformApplyPass(Pass):
     """应用 `kernel.transform_pipeline` 的 ModulePass。
 
@@ -254,6 +256,7 @@ class TransformApplyPass(Pass):
     """
 
     name = "transform-apply"
+    fold: bool = True
 
     @classmethod
     def from_options(cls: type["TransformApplyPass"], options: dict[str, str]) -> "TransformApplyPass":

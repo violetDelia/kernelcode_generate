@@ -105,7 +105,12 @@ def _first_op(module: ModuleOp, op_type: type[Operation]) -> Operation:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_public_name.py
 def test_nn_lowering_pass_public_name() -> None:
     pass_obj = NnLoweringPass()
+    configured_pass = NnLoweringPass(fold=False)
     assert pass_obj.name == "lower-nn"
+    assert pass_obj.fold is True
+    assert configured_pass.fold is False
+    assert str(pass_obj.pipeline_pass_spec(include_default=True)) == "lower-nn{fold=true}"
+    assert str(configured_pass.pipeline_pass_spec(include_default=True)) == "lower-nn{fold=false}"
     assert isinstance(pass_obj, ModulePass)
 
 

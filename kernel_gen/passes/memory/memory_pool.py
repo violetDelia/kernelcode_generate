@@ -33,7 +33,7 @@ API 列表:
 from __future__ import annotations
 
 import contextlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import io
 import os
 import re
@@ -237,6 +237,7 @@ class _RewriteInfo:
     metadata_ops: tuple[Operation, ...]
 
 
+@dataclass(frozen=True)
 class MemoryPoolPass(Pass):
     """memory-pool pass。
 
@@ -257,6 +258,10 @@ class MemoryPoolPass(Pass):
     """
 
     name = "memory-pool"
+    rewrite: bool = False
+    fold: bool = True
+    alignment: int = 1024
+    _summaries: dict[str, MemoryPoolSummary] = field(init=False, repr=False, compare=False)
 
     def __init__(self, rewrite: bool = False, fold: bool = True, alignment: int = 1024) -> None:
         """初始化 memory-pool pass。
@@ -286,10 +291,10 @@ class MemoryPoolPass(Pass):
         if alignment < 0:
             raise_pass_contract_error("MemoryPoolOptionError", "alignment must be non-negative integer")
 
-        super().__init__(fold=fold)
-        self.rewrite = rewrite
-        self.alignment = alignment
-        self._summaries: dict[str, MemoryPoolSummary] = {}
+        object.__setattr__(self, "rewrite", rewrite)
+        object.__setattr__(self, "fold", bool(fold))
+        object.__setattr__(self, "alignment", alignment)
+        object.__setattr__(self, "_summaries", {})
 
     @classmethod
     def from_options(cls, options: dict[str, str]) -> "MemoryPoolPass":
@@ -379,7 +384,7 @@ class MemoryPoolPass(Pass):
         if not isinstance(module, ModuleOp):
             raise_pass_contract_error("MemoryPoolInvalidModule", "module must be builtin.module")
 
-        self._summaries = {}
+        object.__setattr__(self, "_summaries", {})
         for op in module.ops:
             if not isinstance(op, func.FuncOp):
                 continue

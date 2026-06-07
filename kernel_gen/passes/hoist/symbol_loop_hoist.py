@@ -56,6 +56,8 @@ API 列表:
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
+
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.context import Context
@@ -638,6 +640,7 @@ def get_symbol_loop_hoist_patterns() -> list[RewritePattern]:
     ]
 
 
+@dataclass(frozen=True)
 class SymbolLoopHoistPass(Pass):
     """symbol-loop-hoist pass。
 
@@ -659,6 +662,7 @@ class SymbolLoopHoistPass(Pass):
     """
 
     name = "symbol-loop-hoist"
+    fold: bool = True
 
     def apply(self: "SymbolLoopHoistPass", ctx: Context, module: ModuleOp) -> None:
         """执行 symbol-loop-hoist ModulePass。

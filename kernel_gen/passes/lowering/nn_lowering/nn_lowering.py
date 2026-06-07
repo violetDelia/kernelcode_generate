@@ -12,13 +12,13 @@ API 列表:
 - `nn_lowering_patterns() -> list[RewritePattern]`
 - `class RejectUnsupportedNnOpPattern()`
 - `RejectUnsupportedNnOpPattern.match_and_rewrite(op: Operation, rewriter: PatternRewriter) -> None`
-- `class NnLoweringPass()`
+- `class NnLoweringPass(fold: bool = True)`
 - `NnLoweringPass.apply(self: NnLoweringPass, ctx: Context, op: ModuleOp) -> None`
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 - from xdsl.context import Context
-- NnLoweringPass().apply(Context(), module)
+- NnLoweringPass(fold=True).apply(Context(), module)
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/spec.md
@@ -28,6 +28,8 @@ API 列表:
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
@@ -109,6 +111,7 @@ class RejectUnsupportedNnOpPattern(RewritePattern):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"unknown op: {op.name}")
 
 
+@dataclass(frozen=True)
 class NnLoweringPass(Pass):
     """nn -> kernel lowering pass。
 
@@ -120,7 +123,7 @@ class NnLoweringPass(Pass):
       `run(...)` 兼容入口。
 
     使用示例:
-    - NnLoweringPass().apply(Context(), module)
+    - NnLoweringPass(fold=True).apply(Context(), module)
 
     关联文件:
     - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
@@ -129,6 +132,7 @@ class NnLoweringPass(Pass):
     """
 
     name = "lower-nn"
+    fold: bool = True
 
     def apply(self, ctx: Context, op: ModuleOp) -> None:
         """执行 nn lowering。
@@ -140,7 +144,7 @@ class NnLoweringPass(Pass):
         - 显式加载 `Symbol` dialect，保证 folding 物化 `symbol.*` 常量时可从 context 取得 materialization interface。
 
         使用示例:
-        - NnLoweringPass().apply(Context(), module)
+        - NnLoweringPass(fold=True).apply(Context(), module)
 
         关联文件:
         - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)

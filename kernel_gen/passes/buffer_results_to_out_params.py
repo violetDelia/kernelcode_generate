@@ -248,6 +248,7 @@ class BufferResultsToOutParamsFuncPattern(RewritePattern):
         rewriter.notify_op_modified(op)
 
 
+@dataclass(frozen=True)
 class BufferResultsToOutParamsPass(ModulePass):
     """将 `memory` 返回值改写为最前置 out 参数的 lowering pass。
 
@@ -268,6 +269,7 @@ class BufferResultsToOutParamsPass(ModulePass):
     """
 
     name = "buffer-results-to-out-params"
+    fold: bool = True
 
     def __init__(self: "BufferResultsToOutParamsPass", fold: bool = True) -> None:
         """初始化 buffer-results-to-out-params pass 公共选项。
@@ -286,7 +288,7 @@ class BufferResultsToOutParamsPass(ModulePass):
         - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
         """
 
-        self.fold = bool(fold)
+        object.__setattr__(self, "fold", bool(fold))
 
     def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行最小骨架改写。

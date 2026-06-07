@@ -14,7 +14,7 @@ API 列表:
 
 使用示例:
 - from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
-- pass_obj = OutlineDeviceKernelPass()
+- pass_obj = OutlineDeviceKernelPass(fold=True)
 
 关联文件:
 - spec: spec/pass/tuning/outline_device_kernel.md

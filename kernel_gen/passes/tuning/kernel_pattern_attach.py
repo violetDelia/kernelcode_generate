@@ -22,6 +22,8 @@ API 列表:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from xdsl.context import Context
 from xdsl.dialects import func, scf
 from xdsl.dialects.builtin import IntAttr, ModuleOp, StringAttr, UnregisteredOp, i1
@@ -264,6 +266,7 @@ def _replace_entry_with_patterns(module: ModuleOp, entry_func: func.FuncOp) -> N
     parent_block.erase_op(entry_func)
 
 
+@dataclass(frozen=True)
 class KernelPatternAttachPass(Pass):
     """生成 pattern dispatcher 的 ModulePass。
 
@@ -281,6 +284,7 @@ class KernelPatternAttachPass(Pass):
     """
 
     name = "kernel-pattern-attach"
+    fold: bool = True
 
     @classmethod
     def from_options(cls: type["KernelPatternAttachPass"], options: dict[str, str]) -> "KernelPatternAttachPass":

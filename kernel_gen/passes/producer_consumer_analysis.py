@@ -609,6 +609,7 @@ def _apply_event_attrs(
                 op.attributes[attr_name] = _EventListAttr(tuple(event_ids))
 
 
+@dataclass(frozen=True)
 class ProducerConsumerAnalysisPass(Pass):
     """生产消费分析 pass。
 
@@ -628,6 +629,7 @@ class ProducerConsumerAnalysisPass(Pass):
     """
 
     name = "producer-consumer-analysis"
+    fold: bool = True
 
     def __init__(self: "ProducerConsumerAnalysisPass", fold: bool = True) -> None:
         """初始化 pass。
@@ -640,7 +642,7 @@ class ProducerConsumerAnalysisPass(Pass):
         - pass_obj = ProducerConsumerAnalysisPass(fold=False)
         """
 
-        super().__init__(fold=fold)
+        object.__setattr__(self, "fold", bool(fold))
 
     @classmethod
     def from_options(

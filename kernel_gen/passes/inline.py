@@ -7,12 +7,12 @@
 - 不承担通用跨 module inline，也不处理外部声明或复杂 CFG。
 
 API 列表:
-- `class InlinePass()`
+- `class InlinePass(fold: bool = True)`
 
 使用示例:
 - from xdsl.context import Context
 - from kernel_gen.passes.inline import InlinePass
-- InlinePass().apply(Context(), module)
+- InlinePass(fold=True).apply(Context(), module)
 
 关联文件:
 - spec: [spec/pass/inline.md](../../spec/pass/inline.md)
@@ -21,6 +21,8 @@ API 列表:
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from xdsl.context import Context
 from xdsl.dialects import func
@@ -31,6 +33,7 @@ from kernel_gen.passes.common import raise_pass_contract_error
 from kernel_gen.passes.pass_manager import Pass
 
 
+@dataclass(frozen=True)
 class InlinePass(Pass):
     """inline pass。
 
@@ -42,7 +45,7 @@ class InlinePass(Pass):
 
     使用示例:
     - from kernel_gen.passes.inline import InlinePass
-    - InlinePass().apply(Context(), module)
+    - InlinePass(fold=True).apply(Context(), module)
 
     关联文件:
     - spec: [spec/pass/inline.md](../../spec/pass/inline.md)
@@ -51,6 +54,7 @@ class InlinePass(Pass):
     """
 
     name = "inline"
+    fold: bool = True
 
     def apply(self: "InlinePass", ctx: Context, module: ModuleOp) -> None:
         """执行 inline pass。
@@ -62,7 +66,7 @@ class InlinePass(Pass):
         - 若仍残留可内联 local call，则显式失败。
 
         使用示例:
-        - InlinePass().apply(Context(), module)
+        - InlinePass(fold=True).apply(Context(), module)
 
         关联文件:
         - spec: [spec/pass/inline.md](../../spec/pass/inline.md)

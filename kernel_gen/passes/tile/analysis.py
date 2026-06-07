@@ -14,13 +14,13 @@ API 列表:
 - `class TileAnalysisMatmulPattern(RewritePattern)`
 - `TileAnalysisMatmulPattern.match_and_rewrite(op: KernelMatmulOp, rewriter: PatternRewriter) -> None`
 - `get_tile_analysis_pass_patterns() -> list[RewritePattern]`
-- `class TileAnalysisPass(ModulePass)`
+- `class TileAnalysisPass(fold: bool = True)`
 - `TileAnalysisPass.__init__(fold: bool = True) -> None`
 - `TileAnalysisPass.apply(ctx: Context, module: ModuleOp) -> None`
 
 使用示例:
 - from kernel_gen.passes.tile.analysis import TileAnalysisPass, TileAnalysisBinaryPattern, get_tile_analysis_pass_patterns
-- TileAnalysisPass().apply(Context(), module)
+- TileAnalysisPass(fold=True).apply(Context(), module)
 - patterns = get_tile_analysis_pass_patterns()
 
 关联文件:
@@ -30,6 +30,8 @@ API 列表:
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from xdsl.context import Context
 from xdsl.dialects.builtin import ArrayAttr, ModuleOp, StringAttr
@@ -447,6 +449,7 @@ def get_tile_analysis_pass_patterns() -> list[RewritePattern]:
     ]
 
 
+@dataclass(frozen=True)
 class TileAnalysisPass(ModulePass):
     """`tile-analysis` 的公开 `ModulePass`。
 
@@ -456,7 +459,7 @@ class TileAnalysisPass(ModulePass):
     - 逐个对模块中的 tile 目标 op 运行公开 pattern，补齐缺失的 `tile.analysis` 与 `tile.tile_exprs`。
 
     使用示例:
-    - TileAnalysisPass().apply(Context(), module)
+    - TileAnalysisPass(fold=True).apply(Context(), module)
 
     关联文件:
     - spec: [spec/pass/tile/analysis.md](spec/pass/tile/analysis.md)
@@ -465,6 +468,7 @@ class TileAnalysisPass(ModulePass):
     """
 
     name = "tile-analysis"
+    fold: bool = True
 
     def __init__(self: "TileAnalysisPass", fold: bool = True) -> None:
         """初始化 tile-analysis pass 公共选项。
@@ -474,7 +478,7 @@ class TileAnalysisPass(ModulePass):
         - 记录 `fold` 开关，默认允许 pass 内 pattern walker 执行 folding。
 
         使用示例:
-        - pass_obj = TileAnalysisPass()
+        - pass_obj = TileAnalysisPass(fold=True)
         - pass_obj = TileAnalysisPass(fold=False)
 
         关联文件:
@@ -483,7 +487,7 @@ class TileAnalysisPass(ModulePass):
         - 功能实现: [kernel_gen/passes/tile/analysis.py](kernel_gen/passes/tile/analysis.py)
         """
 
-        self.fold = bool(fold)
+        object.__setattr__(self, "fold", bool(fold))
 
     def apply(self: "TileAnalysisPass", ctx: Context, module: ModuleOp) -> None:
         ensure_builtin_module(module)

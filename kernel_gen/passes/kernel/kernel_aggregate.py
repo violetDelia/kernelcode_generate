@@ -21,6 +21,8 @@ API 列表:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp, i1
 from xdsl.ir import Attribute, Block, Operation, SSAValue
@@ -308,6 +310,7 @@ class _KernelMatmulAggregatePattern(RewritePattern):
         self.rewritten_tmps.add(tmp)
 
 
+@dataclass(frozen=True)
 class KernelAggregatePass(Pass):
     """聚合 matmul 累加形态的公开 pass。
 
@@ -326,6 +329,8 @@ class KernelAggregatePass(Pass):
     """
 
     name = "kernel-aggregate"
+    matmul_acc: bool = False
+    fold: bool = True
 
     def __init__(self, matmul_acc: bool = False, fold: bool = True) -> None:
         """初始化 kernel-aggregate pass。
@@ -338,8 +343,8 @@ class KernelAggregatePass(Pass):
         - KernelAggregatePass(matmul_acc=True)
         """
 
-        super().__init__(fold=fold)
-        self.matmul_acc = bool(matmul_acc)
+        object.__setattr__(self, "matmul_acc", bool(matmul_acc))
+        object.__setattr__(self, "fold", bool(fold))
 
     @classmethod
     def from_options(cls, options: dict[str, str]) -> "KernelAggregatePass":

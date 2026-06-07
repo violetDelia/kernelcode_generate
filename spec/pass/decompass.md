@@ -219,7 +219,7 @@ from kernel_gen.passes.pass_manager import PassManager
 
 pm = PassManager(name="lowering")
 pm.add_pass(DecompassPass())
-pm.add_pass(NnLoweringPass())
+pm.add_pass(NnLoweringPass(fold=True))
 pm.add_pass(BufferResultsToOutParamsPass())
 module = pm.run(module)
 ```

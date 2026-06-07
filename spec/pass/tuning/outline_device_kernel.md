@@ -13,7 +13,7 @@
 - `class OutlineDeviceKernelFuncPattern(candidates: dict[str, tuple[int, int, int, int]])`
 - `OutlineDeviceKernelFuncPattern.match_and_rewrite(op: func.FuncOp, rewriter: PatternRewriter) -> None`
 - `get_outline_device_kernel_pass_patterns(candidates: dict[str, tuple[int, int, int, int]]) -> list[RewritePattern]`
-- `class OutlineDeviceKernelPass()`
+- `class OutlineDeviceKernelPass(fold: bool = True)`
 - `OutlineDeviceKernelPass.apply(ctx: Context, module: ModuleOp) -> None`
 
 ## 文档信息
@@ -70,7 +70,7 @@
 - 当前文件级公开 API 只包含 `OutlineDeviceKernelPass`；pattern、候选收集、属性规整与 wrapper/device 改写步骤不额外暴露文件级 helper，跨文件实现与测试不得直连这些内部步骤。
 - 本轮范围排除 `gen_kernel(target="npu_demo")` / `ctx` 专用适配，也不把 `buffer-results-to-out-params` 并入本 pass 职责面。
 
-### `class OutlineDeviceKernelPass(Pass)`
+### `class OutlineDeviceKernelPass(fold: bool = True)`
 
 - 功能说明：
 
@@ -78,14 +78,14 @@
 
 - 参数：
 
-- 无参数。
+- `fold: bool = True`：pass 后是否启用通用 folding + DCE 清理。
 
 - 使用示例：
 
 ```python
 from kernel_gen.passes.tuning.outline_device_kernel import OutlineDeviceKernelPass
 
-OutlineDeviceKernelPass().apply(Context(), module)
+OutlineDeviceKernelPass(fold=True).apply(Context(), module)
 ```
 
 - 注意事项：
@@ -213,15 +213,16 @@ builtin.module {
 
 ## API详细说明
 
-### `class OutlineDeviceKernelPass()`
+### `class OutlineDeviceKernelPass(fold: bool = True)`
 
-- api：`class OutlineDeviceKernelPass()`
-- 参数：无。
+- api：`class OutlineDeviceKernelPass(fold: bool = True)`
+- 参数：
+  - `fold`：pass 后是否启用通用 folding + DCE 清理；类型 `bool`；默认值 `True`。
 - 返回值：`OutlineDeviceKernelPass` 实例。
 - 使用示例：
 
   ```python
-  outline_device_kernel_pass = OutlineDeviceKernelPass()
+  outline_device_kernel_pass = OutlineDeviceKernelPass(fold=True)
   ```
 - 功能说明：定义 `OutlineDeviceKernelPass` pass 对象。
 - 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。

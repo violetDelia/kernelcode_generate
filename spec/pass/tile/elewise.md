@@ -18,7 +18,7 @@
 - `TileElewiseBroadcastPattern.match_and_rewrite(op: DmaBroadcastOp, rewriter: PatternRewriter) -> None`
 - `class TileElewiseMatmulPattern(RewritePattern)`
 - `TileElewiseMatmulPattern.match_and_rewrite(op: KernelMatmulOp, rewriter: PatternRewriter) -> None`
-- `class TileElewisePass(ModulePass)`
+- `class TileElewisePass(fold: bool = True)`
 - `TileElewisePass.__init__(fold: bool = True) -> None`
 - `TileElewisePass.apply(ctx: Context, module: ModuleOp) -> None`
 - `get_tile_elewise_pass_patterns() -> list[RewritePattern]`
@@ -151,15 +151,16 @@
 - 功能说明：使用 `TileElewiseMatmulPattern` 匹配目标 operation 并执行 rewrite。
 - 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
 
-### `class TileElewisePass(ModulePass)`
+### `class TileElewisePass(fold: bool = True)`
 
-- api：`class TileElewisePass(ModulePass)`
-- 参数：无。
+- api：`class TileElewisePass(fold: bool = True)`
+- 参数：
+  - `fold`：tile-elewise pattern walker 是否启用 folding；类型 `bool`；默认值 `True`。
 - 返回值：`TileElewisePass` 实例。
 - 使用示例：
 
   ```python
-  tile_elewise_pass = TileElewisePass()
+  tile_elewise_pass = TileElewisePass(fold=True)
   ```
 - 功能说明：定义 `TileElewisePass` pass 对象。
 - 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。

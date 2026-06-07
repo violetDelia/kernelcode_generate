@@ -687,6 +687,7 @@ class _ArchParallelizeFuncPattern(RewritePattern):
         _rewrite_func(op, self.block_num, rewriter)
 
 
+@dataclass(frozen=True)
 class ArchParallelizePass(Pass):
     """arch-parallelize pass。
 
@@ -701,6 +702,8 @@ class ArchParallelizePass(Pass):
     """
 
     name = "arch-parallelize"
+    target: str = "npu_demo"
+    parallel_level: str = "block"
 
     def __init__(self, target: str = "npu_demo", parallel_level: str = "block") -> None:
         """初始化 pass 参数。
@@ -712,8 +715,8 @@ class ArchParallelizePass(Pass):
         - pass_obj = ArchParallelizePass("npu_demo", "block")
         """
 
-        self.target = target
-        self.parallel_level = parallel_level
+        object.__setattr__(self, "target", target)
+        object.__setattr__(self, "parallel_level", parallel_level)
 
     @classmethod
     def from_options(cls, options: dict[str, str]) -> "ArchParallelizePass":

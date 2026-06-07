@@ -10,29 +10,29 @@
 - 当前文件只重导出 spec 已定义的公开 pass 类；不新增跨文件 private helper 入口。
 
 API 列表:
-- `class NnLoweringPass()`
-- `class DecompassPass()`
-- `class OutlineDeviceKernelPass()`
-- `class TileAnalysisPass()`
-- `class TileElewisePass()`
-- `class TileReducePass()`
-- `class SymbolLoopHoistPass()`
+- `class NnLoweringPass(fold: bool = True)`
+- `class DecompassPass(fold: bool = True)`
+- `class OutlineDeviceKernelPass(fold: bool = True)`
+- `class TileAnalysisPass(fold: bool = True)`
+- `class TileElewisePass(fold: bool = True)`
+- `class TileReducePass(fold: bool = True)`
+- `class SymbolLoopHoistPass(fold: bool = True)`
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
-- pass_obj = NnLoweringPass()
+- pass_obj = NnLoweringPass(fold=True)
 - from kernel_gen.passes.decompass import DecompassPass
-- pass_obj = DecompassPass()
+- pass_obj = DecompassPass(fold=True)
 - from kernel_gen.passes.lowering import OutlineDeviceKernelPass
-- pass_obj = OutlineDeviceKernelPass()
+- pass_obj = OutlineDeviceKernelPass(fold=True)
 - from kernel_gen.passes.tile.analysis import TileAnalysisPass
-- pass_obj = TileAnalysisPass()
+- pass_obj = TileAnalysisPass(fold=True)
 - from kernel_gen.passes.tile.elewise import TileElewisePass
-- pass_obj = TileElewisePass()
+- pass_obj = TileElewisePass(fold=True)
 - from kernel_gen.passes.tile.reduce import TileReducePass
-- pass_obj = TileReducePass()
+- pass_obj = TileReducePass(fold=True)
 - from kernel_gen.passes import SymbolLoopHoistPass
-- pass_obj = SymbolLoopHoistPass()
+- pass_obj = SymbolLoopHoistPass(fold=True)
 
 关联文件:
 - spec:

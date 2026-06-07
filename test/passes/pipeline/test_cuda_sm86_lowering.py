@@ -31,6 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.config import reset_config, set_dump_dir
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.pipeline import build_cuda_sm86_lowering_pipeline
 from kernel_gen.passes.arch.arch_parallelize import ArchParallelizePass
@@ -246,3 +247,68 @@ def test_cuda_sm86_lowering_pipeline_order_has_no_memory_pool(monkeypatch: pytes
         c5_rule.data
         == '--pass "lower-dma-memory-hierarchy={fold=true,apply_op=matmul{[\\"tlm1\\", \\"tlm1\\", \\"tlm1\\"]}}" --pass canonicalize'
     )
+
+
+def test_cuda_sm86_lowering_pipeline_dump_pass_order_markers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """验证 CUDA pipeline dump 使用 xDSL pass spec marker。
+
+    功能说明:
+    - 通过公开 `set_dump_dir(...)` 与公开 pipeline builder 生成 pass dump。
+    - 继续使用公开 `apply(...)` monkeypatch 记录顺序，不读取 PassManager 私有状态。
+    - 锁定 option-bearing pass 的 raw marker，同时证明 stage base name 仍能用于顺序识别。
+
+    使用示例:
+    - pytest -q test/passes/pipeline/test_cuda_sm86_lowering.py -k dump_pass_order
+    """
+
+    _PIPELINE_ORDER.clear()
+    for pass_cls in (
+        InlinePass,
+        CommonSubexpressionElimination,
+        CanonicalizePass,
+        DecompassPass,
+        NnLoweringPass,
+        MemoryPlanPass,
+        SymbolHoistPipelinePass,
+        TileAnalysisPass,
+        KernelPatternAttachPass,
+        TransformApplyPass,
+        KernelAggregatePass,
+        KernelDecomposePass,
+        ProducerConsumerAnalysisPass,
+        ArchParallelizePass,
+        AttachArchInformationPass,
+        OutlineDeviceKernelPass,
+        TemplateNameInferPass,
+    ):
+        monkeypatch.setattr(pass_cls, "apply", _record_pass_apply)
+
+    monkeypatch.setattr(KernelPatternAttachPass, "apply", _record_kernel_pattern_attach_apply)
+
+    module = _make_pipeline_probe_module()
+    try:
+        set_dump_dir(tmp_path)
+        build_cuda_sm86_lowering_pipeline().run(module)
+    finally:
+        reset_config()
+
+    raw_markers: list[str] = []
+    base_markers: list[str] = []
+    for path in sorted(tmp_path.glob("*.mlir")):
+        marker = path.read_text(encoding="utf-8").splitlines()[0]
+        raw_markers.append(marker)
+        base_markers.append(marker.split("{", 1)[0].strip())
+
+    assert base_markers[0] == "builtin.module"
+    assert base_markers[1:] == _PIPELINE_ORDER
+    assert "memory-pool" not in base_markers
+    assert raw_markers[1] == "inline{fold=true}"
+    assert raw_markers[6] == "memory-plan{insert_free=true fold=false reuse=true auto_pad=false}"
+    assert raw_markers[11] == "kernel-pattern-attach"
+    assert raw_markers[17] == "kernel-aggregate{matmul_acc=true fold=true}"
+    assert raw_markers[25] == "arch-parallelize"
+    assert raw_markers[26] == 'attach-arch-information{target="cuda_sm86" fold=true}'
+    assert raw_markers[27] == "outline-device-kernel{fold=true}"
+    assert raw_markers[28] == "template-name-infer{fold=true}"

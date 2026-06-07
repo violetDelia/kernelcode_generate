@@ -453,7 +453,7 @@ def _dump_stage_text_by_marker(dump_dir: Path, marker: str, *, occurrence: int =
         text = path.read_text(encoding="utf-8")
         stage_marker = text.splitlines()[0] if text.splitlines() else ""
         available_markers.append(stage_marker)
-        if stage_marker != marker:
+        if stage_marker.split("{", 1)[0] != marker:
             continue
         seen += 1
         if seen == occurrence:
@@ -475,7 +475,11 @@ def _dump_stage_markers(dump_dir: Path) -> list[str]:
     - markers = _dump_stage_markers(tmp_path)
     """
 
-    return [path.read_text(encoding="utf-8").splitlines()[0] for path in sorted(dump_dir.glob("*.mlir"))]
+    markers: list[str] = []
+    for path in sorted(dump_dir.glob("*.mlir")):
+        raw_marker = path.read_text(encoding="utf-8").splitlines()[0]
+        markers.append(raw_marker.split("{", 1)[0])
+    return markers
 
 
 def _dump_stage_index(dump_dir: Path, marker: str, *, occurrence: int = 1) -> int:
@@ -495,7 +499,7 @@ def _dump_stage_index(dump_dir: Path, marker: str, *, occurrence: int = 1) -> in
     for index, path in enumerate(sorted(dump_dir.glob("*.mlir")), start=1):
         text = path.read_text(encoding="utf-8")
         stage_marker = text.splitlines()[0] if text.splitlines() else ""
-        if stage_marker != marker:
+        if stage_marker.split("{", 1)[0] != marker:
             continue
         seen += 1
         if seen == occurrence:
@@ -891,39 +895,39 @@ def test_npu_demo_lowering_pipeline_dynamic_acc_kernel_decompose_dump_shows_life
     attach_text = _dump_stage_text_by_marker(tmp_path, "attach-arch-information")
     outline_text = _dump_stage_text_by_marker(tmp_path, "outline-device-kernel")
     markers = _dump_stage_markers(tmp_path)
-    assert memory_plan_text.startswith("memory-plan\n")
+    assert memory_plan_text.splitlines()[0] == "memory-plan{insert_free=true fold=false reuse=true auto_pad=true}"
     assert "dma.free" in memory_plan_text
-    assert first_symbol_hoist_text.startswith("symbol-hoist-pipeline\n")
+    assert first_symbol_hoist_text.splitlines()[0] == "symbol-hoist-pipeline{fold=true}"
     assert "symbol.for" in first_symbol_hoist_text
-    assert second_memory_plan_text.startswith("memory-plan\n")
+    assert second_memory_plan_text.splitlines()[0] == "memory-plan{insert_free=true fold=false reuse=true auto_pad=true}"
     assert "dma.free" in second_memory_plan_text
-    assert second_symbol_hoist_text.startswith("symbol-hoist-pipeline\n")
-    assert kernel_aggregate_text.startswith("kernel-aggregate\n")
-    assert decompose_text.startswith("kernel-decompose\n")
+    assert second_symbol_hoist_text.splitlines()[0] == "symbol-hoist-pipeline{fold=true}"
+    assert kernel_aggregate_text.splitlines()[0] == "kernel-aggregate{matmul_acc=true fold=true}"
+    assert decompose_text.splitlines()[0] == "kernel-decompose{fold=true}"
     assert '"kernel.matmul_fusion"' not in decompose_text
     assert "acc = true" not in decompose_text
     assert "acc = false" not in decompose_text
     assert '"kernel.matmul"' in decompose_text
-    assert third_memory_plan_text.startswith("memory-plan\n")
-    assert third_symbol_hoist_text.startswith("symbol-hoist-pipeline\n")
-    assert producer_consumer_text.startswith("producer-consumer-analysis\n")
+    assert third_memory_plan_text.splitlines()[0] == "memory-plan{insert_free=true fold=false reuse=true auto_pad=true}"
+    assert third_symbol_hoist_text.splitlines()[0] == "symbol-hoist-pipeline{fold=true}"
+    assert producer_consumer_text.splitlines()[0] == "producer-consumer-analysis{fold=true}"
     assert "dma.alloc" in producer_consumer_text
     assert "!nn.memory" in producer_consumer_text
     assert "arch.get_dynamic_memory" not in producer_consumer_text
-    assert memory_pool_text.startswith("memory-pool\n")
+    assert memory_pool_text.splitlines()[0] == "memory-pool{rewrite=true fold=true alignment=1024}"
     assert "arch.get_dynamic_memory" in memory_pool_text
     assert "dma.reinterpret" in memory_pool_text
     assert "dma.alloc" not in memory_pool_text
     assert "dma.free" not in memory_pool_text
     assert post_pool_cse_text.startswith("cse\n")
     assert post_pool_canonicalize_text.startswith("canonicalize\n")
-    assert arch_parallelize_text.startswith("arch-parallelize\n")
+    assert arch_parallelize_text.splitlines()[0] == 'arch-parallelize{target="npu_demo" parallel_level="block"}'
     assert "arch.get_block_id" in arch_parallelize_text
     assert "symbol.const 2" in arch_parallelize_text
-    assert attach_text.startswith("attach-arch-information\n")
+    assert attach_text.splitlines()[0] == 'attach-arch-information{target="npu_demo" fold=true}'
     assert "arch.get_dynamic_memory" in attach_text
     assert "!nn.memory<[#C2097152]" in attach_text
-    assert outline_text.startswith("outline-device-kernel\n")
+    assert outline_text.splitlines()[0] == "outline-device-kernel{fold=true}"
     assert _dump_stage_index(tmp_path, "cse", occurrence=1) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=1)
     assert _dump_stage_index(tmp_path, "cse", occurrence=2) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=2)
     assert _dump_stage_index(tmp_path, "cse", occurrence=3) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=3)
@@ -1036,22 +1040,22 @@ def test_npu_demo_lowering_pipeline_static_dump_runs_multi_buffer_before_pool(tm
     arch_parallelize_text = _dump_stage_text_by_marker(tmp_path, "arch-parallelize")
     attach_text = _dump_stage_text_by_marker(tmp_path, "attach-arch-information")
     markers = _dump_stage_markers(tmp_path)
-    assert transform_apply_text.startswith("transform-apply\n")
+    assert transform_apply_text.splitlines()[0] == "transform-apply{fold=true}"
     assert "dma.make_ring" not in transform_apply_text
     assert "dma.current_ring" not in transform_apply_text
     assert "dma.advance_ring" not in transform_apply_text
-    assert kernel_aggregate_text.startswith("kernel-aggregate\n")
-    assert decompose_text.startswith("kernel-decompose\n")
+    assert kernel_aggregate_text.splitlines()[0] == "kernel-aggregate{matmul_acc=true fold=true}"
+    assert decompose_text.splitlines()[0] == "kernel-decompose{fold=true}"
     assert '"kernel.matmul_fusion"' not in decompose_text
     assert "acc = true" not in decompose_text
     assert "acc = false" not in decompose_text
     assert '"kernel.matmul"' in decompose_text
-    assert multi_buffer_text.startswith("multi-buffer\n")
+    assert multi_buffer_text.splitlines()[0] == 'multi-buffer{memory_stage=2 fold=true target="npu_demo"}'
     assert "dma.alloc" in multi_buffer_text
-    assert producer_consumer_text.startswith("producer-consumer-analysis\n")
+    assert producer_consumer_text.splitlines()[0] == "producer-consumer-analysis{fold=true}"
     assert "dma.alloc" in producer_consumer_text
     assert "arch.get_dynamic_memory" not in producer_consumer_text
-    assert memory_pool_text.startswith("memory-pool\n")
+    assert memory_pool_text.splitlines()[0] == "memory-pool{rewrite=true fold=true alignment=1024}"
     assert "arch.get_dynamic_memory" in memory_pool_text
     assert "dma.reinterpret" in memory_pool_text
     assert "dma.make_ring" not in memory_pool_text
@@ -1115,9 +1119,9 @@ def test_npu_demo_lowering_pipeline_static_dump_runs_multi_buffer_before_pool(tm
     assert _dump_stage_index(tmp_path, "arch-parallelize") + 1 == _dump_stage_index(
         tmp_path, "attach-arch-information"
     )
-    assert arch_parallelize_text.startswith("arch-parallelize\n")
+    assert arch_parallelize_text.splitlines()[0] == 'arch-parallelize{target="npu_demo" parallel_level="block"}'
     assert "arch.get_block_id" in arch_parallelize_text
-    assert attach_text.startswith("attach-arch-information\n")
+    assert attach_text.splitlines()[0] == 'attach-arch-information{target="npu_demo" fold=true}'
     assert "launch_block = #builtin.int<2>" in attach_text
     assert "arch.get_dynamic_memory" in attach_text
     assert "!nn.memory<[#C2097152]" in attach_text
@@ -1279,8 +1283,8 @@ def test_npu_demo_lowering_pipeline_symbol_hoist_pipeline_pattern_dump(
     first_loop_index = final_hoist_text.index("symbol.for")
     first_stage_loop_index = first_hoist_text.index("symbol.for")
 
-    assert first_hoist_text.startswith("symbol-hoist-pipeline\n")
-    assert final_hoist_text.startswith("symbol-hoist-pipeline\n")
+    assert first_hoist_text.splitlines()[0] == "symbol-hoist-pipeline{fold=true}"
+    assert final_hoist_text.splitlines()[0] == "symbol-hoist-pipeline{fold=true}"
     assert markers.count("symbol-hoist-pipeline") == 3
     assert "symbol-loop-hoist" not in markers
     assert "hoist-dma-alias-ops" not in markers

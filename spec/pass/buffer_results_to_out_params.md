@@ -86,10 +86,11 @@
 - 注意事项：所有“半改半留必须失败”的场景都应统一抛出该错误。
 - 返回与限制：抛错即终止当前 pass。
 
-### `class BufferResultsToOutParamsPass(Pass)`
+### `class BufferResultsToOutParamsPass(fold: bool = True)`
 
 - 功能说明：将函数返回中的 `memory` 结果改写为最前置 out 参数。
-- 参数说明：无。
+- 参数说明：
+  - `fold: bool = True`：pass 后是否启用通用 folding + DCE 清理。
 - 使用示例：
 
   ```python
@@ -358,7 +359,8 @@ use %out
 ### `class BufferResultsToOutParamsPass(fold: bool = True)`
 
 - api：`class BufferResultsToOutParamsPass(fold: bool = True)`
-- 参数：无。
+- 参数：
+  - `fold`：pass 后是否启用通用 folding + DCE 清理；类型 `bool`；默认值 `True`。
 - 返回值：`BufferResultsToOutParamsPass` 实例。
 - 使用示例：
 

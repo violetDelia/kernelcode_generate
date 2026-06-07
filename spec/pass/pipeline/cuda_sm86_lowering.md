@@ -60,6 +60,7 @@
 - 验证公开 builder 与 registry 名称可构造。
 - 验证非法 option 和非 CUDA target 按公开错误语义失败。
 - 验证 pipeline 公开顺序、“不包含 memory-pool”边界和 CUDA C5 all-TLM1 transform rule。
+- 验证 `dump_dir` 生成的 pass dump 第一行使用 xDSL pass spec marker，且可按 base pass name 识别 CUDA pipeline 顺序。
 
 ### 功能与用例清单
 
@@ -68,4 +69,5 @@
 | TC-CUDA-SM86-PIPELINE-001 | 公开入口 | 构造 builder 与 registry pipeline。 | 已导入 pipeline package。 | 运行 `test_cuda_sm86_lowering_pipeline_builds_pass_manager`。 | 返回 `PassManager(name="cuda-sm86-lowering")`，registry 可见同名 pipeline。 | `test_cuda_sm86_lowering_pipeline_builds_pass_manager` |
 | TC-CUDA-SM86-PIPELINE-002 | 边界/异常 | 拒绝非 CUDA target 与未知 option。 | 准备非法 options。 | 运行 `test_cuda_sm86_lowering_pipeline_rejects_non_cuda_target`。 | 抛出 `KernelCodeError`。 | `test_cuda_sm86_lowering_pipeline_rejects_non_cuda_target` |
 | TC-CUDA-SM86-PIPELINE-003 | pass 顺序 | 运行公开 pipeline 并记录 apply 顺序。 | monkeypatch 各公开 pass 的 `apply(...)`。 | 运行 `test_cuda_sm86_lowering_pipeline_order_has_no_memory_pool`。 | 顺序与 spec 一致，且不出现 `memory-pool`。 | `test_cuda_sm86_lowering_pipeline_order_has_no_memory_pool` |
-| TC-CUDA-SM86-PIPELINE-004 | C5 transform | CUDA pattern 函数使用 all-TLM1 materialization。 | 构造含合格 `kernel.matmul(out, lhs, rhs)` 的 CUDA demo module。 | 运行 CUDA lowering pipeline 与 DMA hierarchy 测试。 | `kernel.transform_pipeline` 使用 `matmul{["tlm1", "tlm1", "tlm1"]}`，out/lhs/rhs staged 到 `tlm1` 且 out write-back 可见。 | `test_cuda_sm86_emit_module_returns_source_bundle`、`test_dma_memory_hierarchy_apply_op_all_tlm1_writes_back_out` |
+| TC-CUDA-SM86-PIPELINE-004 | dump marker | 运行公开 pipeline 并开启 `dump_dir`。 | monkeypatch 各公开 pass 的 `apply(...)` 并设置临时 dump 目录。 | 运行 `test_cuda_sm86_lowering_pipeline_dump_pass_order_markers`。 | dump 第一行包含 `inline{fold=true}`、`memory-plan{insert_free=true fold=false reuse=true auto_pad=false}`、`attach-arch-information{target="cuda_sm86" fold=true}` 等 xDSL pass spec；base pass name 顺序与公开 pipeline 顺序一致，且不出现 `memory-pool`。 | `test_cuda_sm86_lowering_pipeline_dump_pass_order_markers` |
+| TC-CUDA-SM86-PIPELINE-005 | C5 transform | CUDA pattern 函数使用 all-TLM1 materialization。 | 构造含合格 `kernel.matmul(out, lhs, rhs)` 的 CUDA demo module。 | 运行 CUDA lowering pipeline 与 DMA hierarchy 测试。 | `kernel.transform_pipeline` 使用 `matmul{["tlm1", "tlm1", "tlm1"]}`，out/lhs/rhs staged 到 `tlm1` 且 out write-back 可见。 | `test_cuda_sm86_emit_module_returns_source_bundle`、`test_dma_memory_hierarchy_apply_op_all_tlm1_writes_back_out` |

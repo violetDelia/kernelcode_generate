@@ -28,6 +28,8 @@ API 列表:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp
@@ -401,6 +403,7 @@ def _entry_point_call_template_constraints(
     return tuple(constraints)
 
 
+@dataclass(frozen=True)
 class TemplateNameInferPass(Pass):
     """推导 `NnMemoryType.template_name` 的 ModulePass。
 
@@ -418,6 +421,7 @@ class TemplateNameInferPass(Pass):
     """
 
     name = "template-name-infer"
+    fold: bool = True
 
     @classmethod
     def from_options(cls, options: dict[str, str]) -> "TemplateNameInferPass":

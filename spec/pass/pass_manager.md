@@ -34,7 +34,7 @@
 - 统一 Pass 的注册、执行与错误传播规则，便于后续实现与测试闭环。
 - PassManager 只负责 Pass 编排与执行，不承载默认 pipeline builder；默认 builder 见 [`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)。
 - PassManager 固定支持两类公开对象：`Pass` 与 xdsl `ModulePass`；执行时内部创建并复用单个 `Context`。
-- `dump_dir` 是来自 `kernel_gen.core.config` 的诊断开关；非空时写入初始 IR 与逐 pass 后 IR，不改变 pass 执行结果；IR dump 文本默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias IR。
+- `dump_dir` 是来自 `kernel_gen.core.config` 的诊断开关；非空时写入初始 IR 与逐 pass 后 IR，不改变 pass 执行结果；pass 后 dump 文件第一行使用 xDSL `ModulePass.pipeline_pass_spec(include_default=True)` 生成的 pass spec，IR dump 正文默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias IR。
 - fold 是 pass 级通用开关；未声明 `fold` 的第三方 `ModulePass` 按 `fold=True` 处理，只有显式 `fold=False` 才关闭 pass 后 folding + DCE sweep。
 - 通用 fold sweep 启用 folding 与 DCE；DCE 仅删除无使用者且无副作用的 op，不承担 CSE、业务重写或 canonicalization pattern。
 - 业务顺序约束不属于 PassManager 职责；具体 lowering / tuning / tile / backend pipeline 的顺序由对应 builder 与其 spec 固定。
@@ -82,7 +82,7 @@
 - `LowerDmaMemoryHierarchyPass`、`MemoryPoolPass` 与 `MemoryPlanPass` 的调用方不得再把 lowering compat 路径当作主入口；若需要添加这些 pass，应从 canonical public path 导入后再交给 `PassManager`。
 - `MemoryPoolPass` 的 `rewrite` 与 `alignment` 由 `MemoryPoolPass(...)` 或 registry/ircheck 构造入口决定；`PassManager` 只负责按 pass 对象现有配置执行和处理通用 `fold` sweep，不解析 `memory-pool` 专属 option。
 - `MemoryPlanPass` 的 `insert_free/reuse` 由 `MemoryPlanPass(...)` 或 registry/ircheck 构造入口决定；`PassManager` 不解析 `memory-plan` 专属 option。
-- `npu-demo-lowering` 中三次 `MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=False)`、三次 `SymbolHoistPipelinePass` 与 `MemoryPoolPass(rewrite=True, alignment=1024)` 的相对顺序由 [`spec/pass/pipeline/npu_demo_lowering.md`](../../spec/pass/pipeline/npu_demo_lowering.md) 固定；`PassManager` 不额外检查或推导这些业务顺序。
+- `npu-demo-lowering` 中三次 `MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=True)`、三次 `SymbolHoistPipelinePass` 与 `MemoryPoolPass(rewrite=True, alignment=1024)` 的相对顺序由 [`spec/pass/pipeline/npu_demo_lowering.md`](../../spec/pass/pipeline/npu_demo_lowering.md) 固定；`PassManager` 不额外检查或推导这些业务顺序。
 - 以下旧兼容入口在当前基线中必须稳定失败：
   - `kernel_gen.passes.pass_manager.build_default_lowering_pass_manager`
   - `kernel_gen.passes.pipeline`
@@ -173,6 +173,8 @@ result = pm.run(module)
 - Pass 执行顺序与添加顺序一致。
 - `add_pass` 只接受 `Pass` 或 xdsl `ModulePass` 实例；不再接受仅靠 duck typing 暴露 `name/apply` 的 pass-like 对象。
 - 业务顺序由调用方决定；PassManager 只保证“按添加顺序执行”。
+- `kernel_gen.core.config.dump_dir` 非空时，`01-first-ir.mlir` 只写初始 IR；每个 pass 后 dump 文件第一行必须是 `str(pass_obj.pipeline_pass_spec(include_default=True))`。带 dataclass 公开选项的 pass 必须包含默认 option，例如 `memory-plan{insert_free=true fold=false reuse=true auto_pad=true}`；值为 `None` 的 option 按 xDSL 原生格式输出为裸 key，例如 `multi-buffer{memory_stage=2 fold=true target}`；字段名使用 xDSL dataclass 字段名，即下划线 key。
+- pass 后 dump 文件名必须继续使用 pass name，例如 `02-memory-plan.mlir`；不得把 `{...}` option spec 写入文件名。
 
 前置条件：
 
@@ -260,7 +262,7 @@ result = pm.run(module)
 - Pass 抛出的 `KernelCodeError` 应原样传播；其它异常必须包装为 `KernelCodeError`，错误文本包含失败 pass 名称。
 - 所有 pass 固定走 `apply(ctx, module)`；不再按“是否额外提供 run/apply”做兼容优先级分支。
 - `kernel_gen.core.config.dump_dir` 非空时，目录内必须包含 `01-first-ir.mlir`；每个 pass 完成后写入 `NN-<pass-name>.mlir`；这些 `.mlir` 文件的 IR 正文必须使用 alias IR，普通 `str(op)` 与比较工具默认文本不因本接口改变。
-- 每个 pass 后 dump 文件第一行必须是当前 pass 的可解析名称文本，后续内容为该 pass 后的 IR 文本。
+- 每个 pass 后 dump 文件第一行必须是当前 pass 的 xDSL pass spec 文本，包含默认 option；无公开 dataclass 字段或无 option 的 xDSL pass 仍可输出裸 pass name，后续内容为该 pass 后的 IR 文本。
 
 前置条件：
 

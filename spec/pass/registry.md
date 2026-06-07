@@ -225,12 +225,16 @@
 - 使用示例：
 
 ```python
+from dataclasses import dataclass
+
 from xdsl.passes import ModulePass
 from kernel_gen.passes.registry import register_pass
 
 @register_pass
+@dataclass(frozen=True)
 class TileAnalysisPass(ModulePass):
     name = "tile-analysis"
+    fold: bool = True
 
     def apply(self, ctx, module):
         return None

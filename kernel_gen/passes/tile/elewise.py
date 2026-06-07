@@ -14,7 +14,7 @@ API 列表:
 - `class TileElewiseMatmulPattern(RewritePattern)`
 - `TileElewiseMatmulPattern.match_and_rewrite(op: KernelMatmulOp, rewriter: PatternRewriter) -> None`
 - `get_tile_elewise_pass_patterns() -> list[RewritePattern]`
-- `class TileElewisePass(ModulePass)`
+- `class TileElewisePass(fold: bool = True)`
 - `TileElewisePass.__init__(fold: bool = True) -> None`
 - `TileElewisePass.apply(ctx: Context, module: ModuleOp) -> None`
 
@@ -27,7 +27,7 @@ API 列表:
 -     get_tile_elewise_pass_patterns,
 - )
 - patterns = get_tile_elewise_pass_patterns()
-- TileElewisePass().apply(Context(), module)
+- TileElewisePass(fold=True).apply(Context(), module)
 
 关联文件:
 - spec: [spec/pass/tile/elewise.md](spec/pass/tile/elewise.md)
@@ -38,6 +38,7 @@ API 列表:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from itertools import permutations
 
 from xdsl.context import Context
@@ -810,10 +811,12 @@ def get_tile_elewise_pass_patterns() -> list[RewritePattern]:
     ]
 
 
+@dataclass(frozen=True)
 class TileElewisePass(ModulePass):
     """`tile-elewise` 的公开 `ModulePass`。"""
 
     name = "tile-elewise"
+    fold: bool = True
 
     def __init__(self: "TileElewisePass", fold: bool = True) -> None:
         """初始化 tile-elewise pass 公共选项。
@@ -823,7 +826,7 @@ class TileElewisePass(ModulePass):
         - 记录 `fold` 开关，默认允许 pass 内 pattern walker 执行 folding。
 
         使用示例:
-        - pass_obj = TileElewisePass()
+        - pass_obj = TileElewisePass(fold=True)
         - pass_obj = TileElewisePass(fold=False)
 
         关联文件:
@@ -832,7 +835,7 @@ class TileElewisePass(ModulePass):
         - 功能实现: [kernel_gen/passes/tile/elewise.py](kernel_gen/passes/tile/elewise.py)
         """
 
-        self.fold = bool(fold)
+        object.__setattr__(self, "fold", bool(fold))
 
     def apply(self: "TileElewisePass", ctx: Context, module: ModuleOp) -> None:
         ensure_builtin_module(module)

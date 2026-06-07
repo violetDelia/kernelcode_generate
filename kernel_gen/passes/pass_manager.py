@@ -6,7 +6,8 @@
 - 固定 `kernel_gen.passes.pass_manager` 只承载 Pass 抽象与 PassManager，不再承载默认 pipeline builder。
 - 当前文件不额外公开 helper；内部状态仅通过 `Pass` / `PassManager` 两个公开入口对外生效。
 - `PassManager.run(...)` 从 `kernel_gen.core.config.get_dump_dir()` 读取诊断产物落盘开关，不改变 pass 执行语义。
-- dump IR 默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias 文本。
+- pass 后 dump 第一行使用 xDSL `pipeline_pass_spec(include_default=True)`，稳定包含 pass 公开配置。
+- dump IR 正文默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias 文本。
 - pass 实例默认 `fold=True`；管理器在每个 pass 后对 `ModuleOp` 执行一次 folding + DCE sweep。
 
 API 列表:
@@ -312,6 +313,7 @@ class PassManager:
         - 逐个调用 `ModulePass.apply(ctx, module)`。
         - 只接受 `builtin.module`，不再兼容任意对象 passthrough 或单 pass `run(...)`。
         - `kernel_gen.core.config.dump_dir` 非空时写入初始 IR 与每个 pass 后的 IR，便于定位 pipeline 中间态。
+        - 每个 pass dump 的第一行使用 xDSL pass spec，并包含默认 option；dump 文件名仍只使用 pass name。
 
         使用示例:
         - result = pm.run(module)
@@ -345,7 +347,8 @@ class PassManager:
             if dump_path is not None:
                 pass_name = getattr(item, "name", "pass")
                 safe_name = _sanitize_dump_name(pass_name)
-                dump_text = f"{pass_name}\n{_format_dump_ir(result)}"
+                dump_marker = str(item.pipeline_pass_spec(include_default=True))
+                dump_text = f"{dump_marker}\n{_format_dump_ir(result)}"
                 _write_dump_file(dump_path / f"{index:02d}-{safe_name}.mlir", dump_text)
         return result
 

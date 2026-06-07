@@ -6,14 +6,14 @@
 - 不全量重导出 child module pattern；child pattern 以所属模块 canonical path 的 `__all__` 为准。
 
 API 列表:
-- `class NnLoweringPass()`
+- `class NnLoweringPass(fold: bool = True)`
 - `nn_lowering_patterns() -> list[RewritePattern]`
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 - from kernel_gen.passes.lowering.nn_lowering import nn_lowering_patterns
 - from xdsl.context import Context
-- NnLoweringPass().apply(Context(), module)
+- NnLoweringPass(fold=True).apply(Context(), module)
 - patterns = nn_lowering_patterns()
 
 关联文件:

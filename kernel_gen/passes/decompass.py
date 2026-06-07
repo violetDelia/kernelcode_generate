@@ -25,6 +25,8 @@ API 列表:
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
+
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.context import Context
@@ -237,6 +239,7 @@ def get_decompass_pass_patterns() -> list[RewritePattern]:
     return [NnSoftmaxDecompPattern()]
 
 
+@dataclass(frozen=True)
 class DecompassPass(ModulePass):
     """执行 decompass 分解链。
 
@@ -256,6 +259,7 @@ class DecompassPass(ModulePass):
     """
 
     name = "decompass"
+    fold: bool = True
 
     def __init__(self: "DecompassPass", fold: bool = True) -> None:
         """初始化 decompass pass 公共选项。
@@ -274,7 +278,7 @@ class DecompassPass(ModulePass):
         - 功能实现: kernel_gen/passes/decompass.py
         """
 
-        self.fold = bool(fold)
+        object.__setattr__(self, "fold", bool(fold))
 
     def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行 `decompass` pass。

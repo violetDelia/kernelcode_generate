@@ -48,6 +48,7 @@ from __future__ import annotations
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from collections.abc import Callable
+from dataclasses import FrozenInstanceError, dataclass
 import inspect
 from typing import TypeVar
 
@@ -64,6 +65,7 @@ _PIPELINE_REGISTRY: dict[str, Callable[..., PassManager]] = {}
 _BUILTINS_LOADED = False
 
 
+@dataclass(frozen=True)
 class _NoOpPass(Pass):
     """内置 no-op pass。
 
@@ -81,6 +83,7 @@ class _NoOpPass(Pass):
     """
 
     name = "no-op"
+    fold: bool = True
 
     def apply(self: "_NoOpPass", ctx: Context, module: ModuleOp) -> None:
         _ = ctx
@@ -113,7 +116,9 @@ def _set_pass_fold_option(pass_obj: XdslModulePass, fold: bool) -> None:
 
 
     功能说明:
-    - 统一处理 `ModulePass` 的属性写入。
+    - 统一处理 `ModulePass` 的通用 fold 覆盖。
+    - 对 frozen dataclass pass 使用 `object.__setattr__(...)` 写入，保持 registry 既有实例返回语义。
+    - 对非 dataclass 第三方 `ModulePass` 保持原属性写入行为。
     - 仅供 registry 在解析通用 `fold` 选项后设置实例状态。
 
     使用示例:
@@ -125,7 +130,11 @@ def _set_pass_fold_option(pass_obj: XdslModulePass, fold: bool) -> None:
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
-    pass_obj.fold = bool(fold)
+    fold_value = bool(fold)
+    try:
+        pass_obj.fold = fold_value
+    except FrozenInstanceError:
+        object.__setattr__(pass_obj, "fold", fold_value)
 
 
 def _parse_bool_option(name: str, value: str) -> bool:

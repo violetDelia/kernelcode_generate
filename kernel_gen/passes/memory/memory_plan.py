@@ -121,6 +121,7 @@ class _ReuseInterval:
     free_record: _UseRecord
 
 
+@dataclass(frozen=True)
 class MemoryPlanPass(Pass):
     """memory-plan pass 公开入口。
 
@@ -136,6 +137,10 @@ class MemoryPlanPass(Pass):
     """
 
     name = "memory-plan"
+    insert_free: bool = False
+    fold: bool = True
+    reuse: bool = False
+    auto_pad: bool = False
 
     def __init__(
         self: "MemoryPlanPass",
@@ -154,10 +159,10 @@ class MemoryPlanPass(Pass):
         - MemoryPlanPass(insert_free=True, fold=False, reuse=True, auto_pad=True)
         """
 
-        super().__init__(fold=fold)
-        self.insert_free = bool(insert_free)
-        self.reuse = bool(reuse)
-        self.auto_pad = bool(auto_pad)
+        object.__setattr__(self, "insert_free", bool(insert_free))
+        object.__setattr__(self, "fold", bool(fold))
+        object.__setattr__(self, "reuse", bool(reuse))
+        object.__setattr__(self, "auto_pad", bool(auto_pad))
 
     @classmethod
     def from_options(cls: type["MemoryPlanPass"], options: dict[str, str]) -> "MemoryPlanPass":

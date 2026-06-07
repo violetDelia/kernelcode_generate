@@ -12,7 +12,7 @@ API 列表:
 - `class OutlineDeviceKernelFuncPattern(candidates: dict[str, tuple[int, int, int, int]])`
 - `OutlineDeviceKernelFuncPattern.match_and_rewrite(op: func.FuncOp, rewriter: PatternRewriter) -> None`
 - `get_outline_device_kernel_pass_patterns(candidates: dict[str, tuple[int, int, int, int]]) -> list[RewritePattern]`
-- `class OutlineDeviceKernelPass()`
+- `class OutlineDeviceKernelPass(fold: bool = True)`
 - `OutlineDeviceKernelPass.apply(ctx: Context, module: ModuleOp) -> None`
 
 使用示例:
@@ -20,7 +20,7 @@ API 列表:
 - from xdsl.dialects.builtin import ModuleOp
 - from kernel_gen.passes.tuning.outline_device_kernel import OutlineDeviceKernelPass
 - module = ModuleOp([])
-- OutlineDeviceKernelPass().apply(Context(), module)
+- OutlineDeviceKernelPass(fold=True).apply(Context(), module)
 
 关联文件:
 - spec: [spec/pass/tuning/outline_device_kernel.md](spec/pass/tuning/outline_device_kernel.md)
@@ -29,6 +29,8 @@ API 列表:
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
+
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.context import Context
@@ -191,6 +193,7 @@ def get_outline_device_kernel_pass_patterns(
     return [OutlineDeviceKernelFuncPattern(candidates)]
 
 
+@dataclass(frozen=True)
 class OutlineDeviceKernelPass(ModulePass):
     """outline-device-kernel pass。
 
@@ -204,7 +207,7 @@ class OutlineDeviceKernelPass(ModulePass):
     - from xdsl.context import Context
     - from xdsl.dialects.builtin import ModuleOp
     - module = ModuleOp([])
-    - OutlineDeviceKernelPass().apply(Context(), module)
+    - OutlineDeviceKernelPass(fold=True).apply(Context(), module)
 
     关联文件:
     - spec: [spec/pass/tuning/outline_device_kernel.md](spec/pass/tuning/outline_device_kernel.md)
@@ -213,6 +216,7 @@ class OutlineDeviceKernelPass(ModulePass):
     """
 
     name = "outline-device-kernel"
+    fold: bool = True
 
     def __init__(self: "OutlineDeviceKernelPass", fold: bool = True) -> None:
         """初始化 outline-device-kernel pass 公共选项。
@@ -222,7 +226,7 @@ class OutlineDeviceKernelPass(ModulePass):
         - 记录 `fold` 开关，默认允许 pass 内 pattern walker 执行 folding。
 
         使用示例:
-        - pass_obj = OutlineDeviceKernelPass()
+        - pass_obj = OutlineDeviceKernelPass(fold=True)
         - pass_obj = OutlineDeviceKernelPass(fold=False)
 
         关联文件:
@@ -231,7 +235,7 @@ class OutlineDeviceKernelPass(ModulePass):
         - 功能实现: [kernel_gen/passes/tuning/outline_device_kernel.py](kernel_gen/passes/tuning/outline_device_kernel.py)
         """
 
-        self.fold = bool(fold)
+        object.__setattr__(self, "fold", bool(fold))
 
     def _make_device_func(self, func_op: func.FuncOp) -> func.FuncOp:
         """把候选函数体移动到 `<name>_device` 函数。
@@ -362,7 +366,7 @@ class OutlineDeviceKernelPass(ModulePass):
         - from xdsl.context import Context
         - from xdsl.dialects.builtin import ModuleOp
         - module = ModuleOp([])
-        - OutlineDeviceKernelPass().apply(Context(), module)
+        - OutlineDeviceKernelPass(fold=True).apply(Context(), module)
 
         关联文件:
         - spec: [spec/pass/tuning/outline_device_kernel.md](spec/pass/tuning/outline_device_kernel.md)

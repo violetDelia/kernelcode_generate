@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import contextlib
+from dataclasses import dataclass
 import sys
 from pathlib import Path
 
@@ -214,6 +215,40 @@ builtin.module {
     assert "builtin.module" in pass_ir
     assert "#S_N = #symbol.expr<N>" in pass_ir
     assert "#symbol.expr<" not in pass_ir.split("builtin.module", 1)[1]
+
+
+# TC-PASS-003A2
+# 功能说明: 验证 PassManager dump_dir 使用 xDSL pass spec 记录默认 option 和 None 裸 key。
+# 使用示例: pytest -q test/passes/test_pass_manager.py -k test_pass_manager_dump_dir_writes_xdsl_pass_spec_marker
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/passes/test_pass_manager.py
+def test_pass_manager_dump_dir_writes_xdsl_pass_spec_marker(tmp_path: Path) -> None:
+    @dataclass(frozen=True)
+    class OptionPass(Pass):
+        name = "option-pass"
+        fold: bool = True
+        target: str | None = None
+
+        def apply(self: "OptionPass", ctx: Context, target: ModuleOp) -> None:
+            _ = ctx
+            assert isinstance(target, ModuleOp)
+
+    pm = PassManager(name="dump-pipeline")
+    pm.add_pass(OptionPass(fold=False, target=None))
+    module = ModuleOp([])
+
+    try:
+        set_dump_dir(tmp_path)
+        assert pm.run(module) is module
+    finally:
+        reset_config()
+
+    pass_path = tmp_path / "02-option-pass.mlir"
+    assert pass_path.is_file()
+    assert not any("{" in path.name or "}" in path.name for path in tmp_path.glob("*.mlir"))
+    pass_text = pass_path.read_text(encoding="utf-8")
+    assert pass_text.splitlines()[0] == "option-pass{fold=false target}"
 
 
 # TC-PASS-003B

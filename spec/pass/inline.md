@@ -7,7 +7,7 @@
 
 ## API 列表
 
-- `class InlinePass()`
+- `class InlinePass(fold: bool = True)`
   - `name: str`
   - `apply(ctx: Context, module: ModuleOp) -> None`
 
@@ -56,17 +56,18 @@
 - `build_registered_pass("inline")` 属于 registry 的公开 API，不属于本文件的专题公开 API；本文件只要求该名字能稳定构造出 `InlinePass`。
 ## API详细说明
 
-### `class InlinePass()`
+### `class InlinePass(fold: bool = True)`
 
-- api：`class InlinePass()`
-- 参数：无。
+- api：`class InlinePass(fold: bool = True)`
+- 参数：
+  - `fold`：pass 后是否启用通用 folding + DCE 清理；类型 `bool`；默认值 `True`。
 - 返回值：`InlinePass` 实例。
 - 使用示例：
 
   ```python
   from kernel_gen.passes.inline import InlinePass
 
-  pass_obj = InlinePass()
+  pass_obj = InlinePass(fold=True)
   ```
 - 功能说明：构造 inline pass 对象，对 module 内可内联 helper 执行展平并清理失效的 private helper。
 - 注意事项：公开执行入口固定为 xDSL `ModulePass.apply(ctx, module)`；不提供返回式 `run(module)` 执行入口；helper 展平、候选收集、private helper 清理都属于内部实现细节。
@@ -100,7 +101,7 @@
 
   from kernel_gen.passes.inline import InlinePass
 
-  InlinePass().apply(Context(), module)
+  InlinePass(fold=True).apply(Context(), module)
   ```
 - 功能说明：对输入 `ModuleOp` 执行 inline，逐轮把本地 `func.call` 展平到调用点，并在 inline 完成后清理失效的 private helper。
 - 注意事项：`apply(...)` 原地改写输入 `module` 并返回 `None`；`ctx` 仅作为 `ModulePass` 标准签名的一部分，该 pass 不额外定义 context 侧状态协议；当 module 内没有 `func.func` 或没有可内联的本地 `func.call` 时必须表现为 no-op；若 helper 不满足单 block / `func.return` 结尾 / 参数结果 arity 一致等条件，必须以 `KernelCodeError` 报出 `InlineError:` 前缀错误；不得恢复 `run(module)` 或引入第二套 inline 语义。

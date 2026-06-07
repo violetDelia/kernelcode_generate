@@ -23,6 +23,8 @@ API 列表:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from xdsl.context import Context
 from xdsl.dialects.builtin import (
     ArrayAttr,
@@ -514,6 +516,7 @@ def _rewrite_matmul_if_pair(
     return True
 
 
+@dataclass(frozen=True)
 class MultiBufferPass(Pass):
     """multi-buffer pass。
 
@@ -532,6 +535,9 @@ class MultiBufferPass(Pass):
     """
 
     name = "multi-buffer"
+    memory_stage: int = 2
+    fold: bool = True
+    target: str | None = None
 
     def __init__(self, memory_stage: int = 2, fold: bool = True, target: str | None = None) -> None:
         """初始化 multi-buffer pass。
@@ -554,9 +560,9 @@ class MultiBufferPass(Pass):
             raise_pass_contract_error("MultiBufferOptionError", "memory_stage must be positive")
         if target is not None and (not isinstance(target, str) or not target.strip()):
             raise_pass_contract_error("MultiBufferOptionError", "target must be non-empty")
-        super().__init__(fold=fold)
-        self.memory_stage = memory_stage
-        self.target = target.strip() if isinstance(target, str) else None
+        object.__setattr__(self, "memory_stage", memory_stage)
+        object.__setattr__(self, "fold", bool(fold))
+        object.__setattr__(self, "target", target.strip() if isinstance(target, str) else None)
 
     @classmethod
     def from_options(cls, options: dict[str, str]) -> "MultiBufferPass":

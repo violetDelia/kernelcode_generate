@@ -363,6 +363,10 @@ def test_build_registered_dma_memory_hierarchy_apply_op_pass() -> None:
     assert pass_obj.name == "lower-dma-memory-hierarchy"
     assert isinstance(pass_obj, ModulePass)
     assert pass_obj.fold is False
+    assert (
+        str(pass_obj.pipeline_pass_spec(include_default=True))
+        == 'lower-dma-memory-hierarchy{fold=false apply_op="matmul{["", "tlm1", "tlm2"]}"}'
+    )
     assert len([op for op in module.walk() if isinstance(op, DmaCopyOp)]) == 2
     assert _registry_memory_space(matmul.operands[1].type) == "tlm1"
     assert _registry_memory_space(matmul.operands[2].type) == "tlm2"
@@ -1025,15 +1029,21 @@ def test_build_registered_inline_pass() -> None:
 def test_build_registered_pass_accepts_universal_fold_option() -> None:
     load_builtin_passes()
 
+    for name in list_registered_passes():
+        universal_pass = build_registered_pass(name, {"fold": "false"})
+        assert getattr(universal_pass, "fold") is False
+
     pass_obj = build_registered_pass("inline", {"fold": "false"})
     module_pass_obj = build_registered_pass("decompass", {"fold": "false"})
 
     assert isinstance(pass_obj, ModulePass)
     assert pass_obj.name == "inline"
     assert pass_obj.fold is False
+    assert str(pass_obj.pipeline_pass_spec(include_default=True)) == "inline{fold=false}"
     assert isinstance(module_pass_obj, ModulePass)
     assert module_pass_obj.name == "decompass"
     assert module_pass_obj.fold is False
+    assert str(module_pass_obj.pipeline_pass_spec(include_default=True)) == "decompass{fold=false}"
 
 
 # TC-REGISTRY-007H2
@@ -1111,6 +1121,10 @@ def test_build_registered_memory_plan_insert_free_options() -> None:
     assert pass_obj.reuse is True
     assert pass_obj.auto_pad is True
     assert pass_obj.fold is False
+    assert (
+        str(pass_obj.pipeline_pass_spec(include_default=True))
+        == "memory-plan{insert_free=true fold=false reuse=true auto_pad=true}"
+    )
 
 
 # TC-REGISTRY-007H6
@@ -1170,11 +1184,16 @@ def test_build_registered_multi_buffer_options() -> None:
     assert isinstance(default_pass, multi_buffer_module.MultiBufferPass)
     assert default_pass.memory_stage == 2
     assert default_pass.target is None
+    assert str(default_pass.pipeline_pass_spec(include_default=True)) == "multi-buffer{memory_stage=2 fold=true target}"
     assert isinstance(pass_obj, multi_buffer_module.MultiBufferPass)
     assert pass_obj.name == "multi-buffer"
     assert pass_obj.memory_stage == 4
     assert pass_obj.target == "npu_demo"
     assert pass_obj.fold is False
+    assert (
+        str(pass_obj.pipeline_pass_spec(include_default=True))
+        == 'multi-buffer{memory_stage=4 fold=false target="npu_demo"}'
+    )
     assert isinstance(single_stage_pass, multi_buffer_module.MultiBufferPass)
     assert single_stage_pass.memory_stage == 1
     assert single_stage_pass.target is None

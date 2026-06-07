@@ -1371,6 +1371,7 @@ def get_symbol_buffer_hoist_patterns() -> list[RewritePattern]:
     ]
 
 
+@dataclass(frozen=True)
 class SymbolBufferHoistPass(Pass):
     """`symbol-buffer-hoist` pass。
 
@@ -1394,6 +1395,7 @@ class SymbolBufferHoistPass(Pass):
     """
 
     name = "symbol-buffer-hoist"
+    fold: bool = True
 
     def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行 `symbol-buffer-hoist` ModulePass。
