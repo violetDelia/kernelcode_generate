@@ -2501,9 +2501,9 @@ def test_build_registered_symbol_buffer_hoist_pass() -> None:
 # TC-MPLAN-002G
 # 功能说明: 验证 memory-plan auto-pad 后接 symbol-buffer-hoist 时 padded backing 外提且 matmul 使用 logical alias。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_after_memory_plan_auto_pad_keeps_logical_matmul
-# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应功能实现文件路径: kernel_gen/passes/memory/memory_plan.py
 # 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应 spec 文件路径: spec/pass/memory/memory_plan.md
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_after_memory_plan_auto_pad_keeps_logical_matmul() -> None:
@@ -2546,9 +2546,9 @@ builtin.module {
 # TC-MPLAN-002G2
 # 功能说明: 验证 auto-pad 后动态 acc matmul 的 padded backing 可外提且 matmul 继续消费 logical alias。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_after_memory_plan_auto_pad_hoists_dynamic_acc_matmul
-# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应功能实现文件路径: kernel_gen/passes/memory/memory_plan.py
 # 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
-# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应 spec 文件路径: spec/pass/memory/memory_plan.md
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_after_memory_plan_auto_pad_hoists_dynamic_acc_matmul() -> None:

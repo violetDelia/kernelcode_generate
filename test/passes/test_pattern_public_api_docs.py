@@ -60,8 +60,8 @@ _PATTERN_MODULE_CASES = (
         ),
     ),
     _PatternModuleCase(
-        "kernel_gen.passes.outline_device_kernel",
-        "spec/pass/outline_device_kernel.md",
+        "kernel_gen.passes.tuning.outline_device_kernel",
+        "spec/pass/tuning/outline_device_kernel.md",
         ("OutlineDeviceKernelFuncPattern",),
         "get_outline_device_kernel_pass_patterns",
         "candidates",

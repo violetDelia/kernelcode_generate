@@ -35,7 +35,7 @@
   - [`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)
   - [`spec/pass/pipeline/npu_demo_lowering.md`](../../spec/pass/pipeline/npu_demo_lowering.md)
 - standalone arch pass：
-  - [`spec/pass/arch_parallelize.md`](../../spec/pass/arch_parallelize.md)
+  - [`spec/pass/arch/arch_parallelize.md`](../../spec/pass/arch/arch_parallelize.md)
 
 ## 术语
 
@@ -99,32 +99,32 @@
 
 ### 当前公开路径与迁移矩阵
 
-- 本节记录当前公开导入基线与消费者迁移矩阵；已完成收口的旧路径按失败边界处理，不再保留“继续可导入”的兼容表述。
+- 本节记录当前公开导入基线与消费者迁移矩阵；本轮 rehome 范围内旧 direct path 仅作为 compat shim 保留，不再作为新代码推荐 canonical path。
 - 对 registry / pass manager caller，当前 canonical public path 固定为：
   - `kernel_gen.passes.registry`
   - `kernel_gen.passes.pass_manager`
 - 对根路径 pass caller，当前 canonical public path 固定为：
   - `kernel_gen.passes.buffer_results_to_out_params`
   - `kernel_gen.passes.inline`
-  - `kernel_gen.passes.attach_arch_information`
-  - `kernel_gen.passes.arch_parallelize`
+  - `kernel_gen.passes.arch.attach_arch_information`
+  - `kernel_gen.passes.arch.arch_parallelize`
   - `kernel_gen.passes.decompass`
   - `kernel_gen.passes.tuning.dma_memory_hierarchy`
   - `kernel_gen.passes.tuning.kernel_pattern_attach`
   - `kernel_gen.passes.tuning.transform_apply`
-  - `kernel_gen.passes.memory_pool`
-  - `kernel_gen.passes.memory_plan`
+  - `kernel_gen.passes.memory.memory_pool`
+  - `kernel_gen.passes.memory.memory_plan`
   - `kernel_gen.passes.hoist.dma_alias_to_reinterpret`
   - `kernel_gen.passes.hoist.dma_alias_ops`
   - `kernel_gen.passes.hoist.symbol_hoist_pipeline`
-  - `kernel_gen.passes.multi_buffer`
-  - `kernel_gen.passes.outline_device_kernel`
+  - `kernel_gen.passes.memory.multi_buffer`
+  - `kernel_gen.passes.tuning.outline_device_kernel`
   - `kernel_gen.passes.hoist.symbol_buffer_hoist`
   - `kernel_gen.passes.hoist.symbol_loop_hoist`
   - `kernel_gen.passes.template_name.infer`
   - `kernel_gen.passes.producer_consumer_analysis`
-  - `kernel_gen.passes.kernel_aggregate`
-  - `kernel_gen.passes.kernel_decompose`
+  - `kernel_gen.passes.kernel.kernel_aggregate`
+  - `kernel_gen.passes.kernel.kernel_decompose`
 - 对公开 `RewritePattern` caller，canonical public path 固定为各 pattern 所属实现模块：
   - pattern class 必须列入所属模块 `__all__` 与对应 spec `API 列表`。
   - pass package 根 `kernel_gen.passes` 与 `kernel_gen.passes.lowering.nn_lowering` package root 只维护既有稳定 re-export，不全量重导出 pattern。
@@ -165,7 +165,17 @@
 - 旧 `kernel_gen.passes.template_name_constraints`、`kernel_gen.passes.template_name_default_constraints`、`kernel_gen.passes.template_name_graph` 与 `kernel_gen.passes.template_name_infer` 根模块必须稳定失败。
 - `kernel_gen/passes/template_name/` 是当前真实实现目录；外部 caller 只能使用该目录下的公开模块或 `kernel_gen.passes.TemplateNameInferPass` 包根 re-export。
 - pipeline builder 的 canonical public path 固定为 `kernel_gen.pipeline`；旧 `kernel_gen.passes.pipeline` 及其子模块必须稳定失败。
-- 当前 arch parallelize 专题的 canonical public path 固定为 `kernel_gen.passes.arch_parallelize`；`kernel_gen.passes.ArchParallelizePass` 作为包根 re-export 保持可用；registry 名称固定为 `arch-parallelize`。
+- 当前 arch parallelize 专题的 canonical public path 固定为 `kernel_gen.passes.arch.arch_parallelize`；`kernel_gen.passes.ArchParallelizePass` 作为包根 re-export 保持可用；registry 名称固定为 `arch-parallelize`。
+- 本轮 rehome 的旧 direct path 继续作为薄 compat shim 保持可导入，shim 只 re-export 公开对象，不承载 pass 业务逻辑：
+  - `kernel_gen.passes.arch_parallelize`
+  - `kernel_gen.passes.arch_parallelize.arch_parallelize`
+  - `kernel_gen.passes.attach_arch_information`
+  - `kernel_gen.passes.kernel_aggregate`
+  - `kernel_gen.passes.kernel_decompose`
+  - `kernel_gen.passes.memory_plan`
+  - `kernel_gen.passes.memory_pool`
+  - `kernel_gen.passes.multi_buffer`
+  - `kernel_gen.passes.outline_device_kernel`
 - 机械验收口径：
   - `test/passes/test_registry.py` 负责锁定 canonical public path、`symbol-buffer-hoist` 与 `symbol-hoist-pipeline` 的稳定注册名与包根 re-export、旧路径失败边界、`analyze-func-cost` 构造失败与 registry caller 的 `importlib` 消费者矩阵。
   - `test/passes/test_pass_manager.py` 负责锁定 pass manager / pipeline caller 的 `importlib` 消费者矩阵。

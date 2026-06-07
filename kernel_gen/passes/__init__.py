@@ -4,13 +4,13 @@
 功能说明:
 - 暴露 Pass 管理相关实现。
 - 暴露 `inline` 的公开入口。
-- 暴露 `attach-arch-information` 的公开入口。
-- 暴露 `arch-parallelize` 的公开入口。
+- 从 `kernel_gen.passes.arch` 暴露 `attach-arch-information` 的公开入口。
+- 从 `kernel_gen.passes.arch` 暴露 `arch-parallelize` 的公开入口。
 - 暴露 `buffer-results-to-out-params` 的公开入口。
 - 暴露 `decompass` 专题 pass 的根路径入口。
-- 暴露 `memory-plan` 的公开入口。
-- 暴露 `multi-buffer` 的公开入口。
-- 暴露 `outline-device-kernel` 的公开入口。
+- 从 `kernel_gen.passes.memory` 暴露 `memory-plan` 的公开入口。
+- 从 `kernel_gen.passes.memory` 暴露 `multi-buffer` 的公开入口。
+- 从 `kernel_gen.passes.tuning` 暴露 `outline-device-kernel` 的公开入口。
 - 从 `kernel_gen.passes.hoist` 暴露既有包根 `symbol-buffer-hoist` 入口与 pattern API。
 - 从 `kernel_gen.passes.hoist` 暴露既有包根 `symbol-loop-hoist` 专题 pass 入口。
 - 暴露 `template-name-infer` 的公开入口。
@@ -95,37 +95,36 @@ API 列表:
 - spec:
   - spec/pass/pass_manager.md
   - spec/pass/decompass.md
-  - spec/pass/memory_plan.md
+  - spec/pass/memory/memory_plan.md
   - spec/pass/buffer_results_to_out_params.md
   - spec/pass/inline.md
-  - spec/pass/attach_arch_information.md
-  - spec/pass/arch_parallelize.md
-  - spec/pass/outline_device_kernel.md
+  - spec/pass/arch/attach_arch_information.md
+  - spec/pass/arch/arch_parallelize.md
+  - spec/pass/tuning/outline_device_kernel.md
   - spec/pass/symbol_loop_hoist.md
 - test:
   - test/passes/test_pass_manager.py
   - test/passes/test_inline.py
-  - test/passes/test_attach_arch_information.py
-  - test/passes/test_arch_parallelize.py
+  - test/passes/arch/test_attach_arch_information.py
+  - test/passes/arch/test_arch_parallelize.py
   - test/passes/test_buffer_results_to_out_params.py
   - test/passes/decompass/test_softmax.py
-  - test/passes/test_outline_device_kernel.py
+  - test/passes/tuning/test_outline_device_kernel.py
 - test/passes/tile/test_analysis.py
 - test/passes/tile/test_elewise.py
 - test/passes/tile/test_reduce.py
 - test/passes/test_symbol_loop_hoist.py
-- test/passes/test_memory_plan.py
+- test/passes/memory/test_memory_plan.py
 - 功能实现:
   - kernel_gen/passes/pass_manager.py
   - kernel_gen/passes/common.py
   - kernel_gen/passes/inline.py
-  - kernel_gen/passes/attach_arch_information.py
-  - kernel_gen/passes/arch_parallelize/__init__.py
-  - kernel_gen/passes/arch_parallelize/arch_parallelize.py
+  - kernel_gen/passes/arch/attach_arch_information.py
+  - kernel_gen/passes/arch/arch_parallelize.py
   - kernel_gen/passes/buffer_results_to_out_params.py
   - kernel_gen/passes/decompass.py
-  - kernel_gen/passes/memory_plan.py
-- kernel_gen/passes/outline_device_kernel.py
+  - kernel_gen/passes/memory/memory_plan.py
+- kernel_gen/passes/tuning/outline_device_kernel.py
 - kernel_gen/passes/hoist/symbol_buffer_hoist.py
 - kernel_gen/passes/template_name/infer.py
   - kernel_gen/passes/tile/analysis.py
@@ -140,17 +139,15 @@ from .buffer_results_to_out_params import (
     BufferResultsToOutParamsFuncPattern,
     get_buffer_results_to_out_params_pass_patterns,
 )
-from .arch_parallelize import ArchParallelizePass
-from .attach_arch_information import AttachArchInformationPass
+from .arch import ArchParallelizePass, AttachArchInformationPass
 from .decompass import (
     DecompassPass,
     NnSoftmaxDecompPattern,
     get_decompass_pass_patterns,
 )
 from .inline import InlinePass
-from .memory_plan import MemoryPlanPass
-from .multi_buffer import MultiBufferPass
-from .outline_device_kernel import OutlineDeviceKernelPass
+from .memory import MemoryPlanPass, MultiBufferPass
+from .tuning import OutlineDeviceKernelPass
 from .hoist import (
     DmaAllocInSymbolForHoistPattern,
     SymbolBufferHoistPass,

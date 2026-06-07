@@ -1,8 +1,10 @@
-"""arch-parallelize package root.
+"""arch-parallelize compatibility package.
+
 
 功能说明:
-- 暴露 `arch-parallelize` pass 的 canonical public import path。
-- 只从 package root 公开 `ArchParallelizePass`；内部 pattern 不作为跨文件 API。
+- 保留旧公开 import path `kernel_gen.passes.arch_parallelize`。
+- 真实实现已迁移到 `kernel_gen.passes.arch.arch_parallelize`。
+- 本文件只 re-export 公开 class，不承载 pass 业务逻辑。
 
 API 列表:
 - `class ArchParallelizePass(target: str = "npu_demo", parallel_level: str = "block")`
@@ -14,13 +16,11 @@ API 列表:
 - pass_obj = ArchParallelizePass(target="npu_demo", parallel_level="block")
 
 关联文件:
-- spec: spec/pass/arch_parallelize.md
-- test: test/passes/test_arch_parallelize.py
-- 功能实现: kernel_gen/passes/arch_parallelize/arch_parallelize.py
+- spec: spec/pass/arch/arch_parallelize.md
+- test: test/passes/arch/test_arch_parallelize.py
+- 功能实现: kernel_gen/passes/arch/arch_parallelize.py
 """
 
-from .arch_parallelize import ArchParallelizePass
-
-ArchParallelizePass.__module__ = __name__
+from kernel_gen.passes.arch.arch_parallelize import ArchParallelizePass
 
 __all__ = ["ArchParallelizePass"]

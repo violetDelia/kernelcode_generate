@@ -15,8 +15,8 @@ API 列表:
 - TransformApplyPass().apply(Context(), module)
 
 关联文件:
-- spec: spec/pass/transform_apply.md
-- test: test/passes/test_transform_apply.py
+- spec: spec/pass/tuning/transform_apply.md
+- test: test/passes/tuning/test_transform_apply.py
 - 功能实现: kernel_gen/passes/tuning/transform_apply.py
 """
 
@@ -248,8 +248,8 @@ class TransformApplyPass(Pass):
     - TransformApplyPass().apply(Context(), module)
 
     关联文件:
-    - spec: spec/pass/transform_apply.md
-    - test: test/passes/test_transform_apply.py
+    - spec: spec/pass/tuning/transform_apply.md
+    - test: test/passes/tuning/test_transform_apply.py
     - 功能实现: kernel_gen/passes/tuning/transform_apply.py
     """
 

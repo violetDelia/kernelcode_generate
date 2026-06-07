@@ -550,9 +550,14 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
         ),
         ("kernel_gen.passes.inline", "InlinePass", importlib.import_module("kernel_gen.passes.inline").InlinePass),
         (
-            "kernel_gen.passes.attach_arch_information",
+            "kernel_gen.passes.arch.attach_arch_information",
             "AttachArchInformationPass",
-            importlib.import_module("kernel_gen.passes.attach_arch_information").AttachArchInformationPass,
+            importlib.import_module("kernel_gen.passes.arch.attach_arch_information").AttachArchInformationPass,
+        ),
+        (
+            "kernel_gen.passes.arch.arch_parallelize",
+            "ArchParallelizePass",
+            importlib.import_module("kernel_gen.passes.arch.arch_parallelize").ArchParallelizePass,
         ),
         (
             "kernel_gen.passes.decompass",
@@ -560,9 +565,9 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
             importlib.import_module("kernel_gen.passes.decompass").DecompassPass,
         ),
         (
-            "kernel_gen.passes.outline_device_kernel",
+            "kernel_gen.passes.tuning.outline_device_kernel",
             "OutlineDeviceKernelPass",
-            importlib.import_module("kernel_gen.passes.outline_device_kernel").OutlineDeviceKernelPass,
+            importlib.import_module("kernel_gen.passes.tuning.outline_device_kernel").OutlineDeviceKernelPass,
         ),
         (
             "kernel_gen.passes.hoist.symbol_loop_hoist",
@@ -635,19 +640,24 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
             importlib.import_module("kernel_gen.passes.tuning.kernel_pattern_attach").KernelPatternAttachPass,
         ),
         (
-            "kernel_gen.passes.memory_pool",
+            "kernel_gen.passes.memory.memory_pool",
             "MemoryPoolPass",
-            importlib.import_module("kernel_gen.passes.memory_pool").MemoryPoolPass,
+            importlib.import_module("kernel_gen.passes.memory.memory_pool").MemoryPoolPass,
         ),
         (
-            "kernel_gen.passes.multi_buffer",
+            "kernel_gen.passes.memory.memory_plan",
+            "MemoryPlanPass",
+            importlib.import_module("kernel_gen.passes.memory.memory_plan").MemoryPlanPass,
+        ),
+        (
+            "kernel_gen.passes.memory.multi_buffer",
             "MultiBufferPass",
-            importlib.import_module("kernel_gen.passes.multi_buffer").MultiBufferPass,
+            importlib.import_module("kernel_gen.passes.memory.multi_buffer").MultiBufferPass,
         ),
         (
             "kernel_gen.passes",
             "MultiBufferPass",
-            importlib.import_module("kernel_gen.passes.multi_buffer").MultiBufferPass,
+            importlib.import_module("kernel_gen.passes.memory.multi_buffer").MultiBufferPass,
         ),
         (
             "kernel_gen.passes.tile.analysis",
@@ -667,7 +677,7 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
         (
             "kernel_gen.passes.lowering.outline_device_kernel",
             "OutlineDeviceKernelPass",
-            importlib.import_module("kernel_gen.passes.outline_device_kernel").OutlineDeviceKernelPass,
+            importlib.import_module("kernel_gen.passes.tuning.outline_device_kernel").OutlineDeviceKernelPass,
         ),
         (
             "kernel_gen.passes.lowering.symbol_loop_hoist",
@@ -685,6 +695,32 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
     assert not hasattr(lowering_module, "LowerDmaMemoryHierarchyPass")
 
 
+# TC-REGISTRY-007A-2C
+# 功能说明: 验证本轮 pass family rehome 后旧 direct path shim 仍导出同一公开对象。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_pass_family_compat_shims_match_canonical_modules
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_pass_family_compat_shims_match_canonical_modules() -> None:
+    compat_pairs = (
+        ("kernel_gen.passes.arch.arch_parallelize", "kernel_gen.passes.arch_parallelize", "ArchParallelizePass"),
+        ("kernel_gen.passes.arch.arch_parallelize", "kernel_gen.passes.arch_parallelize.arch_parallelize", "ArchParallelizePass"),
+        ("kernel_gen.passes.arch.attach_arch_information", "kernel_gen.passes.attach_arch_information", "AttachArchInformationPass"),
+        ("kernel_gen.passes.kernel.kernel_aggregate", "kernel_gen.passes.kernel_aggregate", "KernelAggregatePass"),
+        ("kernel_gen.passes.kernel.kernel_decompose", "kernel_gen.passes.kernel_decompose", "KernelDecomposePass"),
+        ("kernel_gen.passes.memory.memory_plan", "kernel_gen.passes.memory_plan", "MemoryPlanPass"),
+        ("kernel_gen.passes.memory.memory_pool", "kernel_gen.passes.memory_pool", "MemoryPoolPass"),
+        ("kernel_gen.passes.memory.multi_buffer", "kernel_gen.passes.multi_buffer", "MultiBufferPass"),
+        ("kernel_gen.passes.tuning.outline_device_kernel", "kernel_gen.passes.outline_device_kernel", "OutlineDeviceKernelPass"),
+    )
+
+    for canonical_name, compat_name, attr_name in compat_pairs:
+        canonical_module = importlib.import_module(canonical_name)
+        compat_module = importlib.import_module(compat_name)
+        assert getattr(compat_module, attr_name) is getattr(canonical_module, attr_name)
+        assert getattr(compat_module, attr_name).__module__ == canonical_name
+
+
 # TC-REGISTRY-007A-2D
 # 功能说明: 验证 tuning pass 旧根模块路径已按用户确认删除。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_tuning_old_root_modules_are_removed
@@ -695,6 +731,7 @@ def test_tuning_old_root_modules_are_removed() -> None:
     removed_modules = (
         "kernel_gen.passes.dma_memory_hierarchy",
         "kernel_gen.passes.kernel_pattern_attach",
+        "kernel_gen.passes.transform_apply",
     )
 
     for module_name in removed_modules:
@@ -1020,7 +1057,7 @@ def test_build_registered_pass_rejects_invalid_fold_option() -> None:
 # 对应测试文件路径: test/passes/test_registry.py
 def test_build_registered_memory_pool_alignment_options() -> None:
     load_builtin_passes()
-    memory_pool_module = importlib.import_module("kernel_gen.passes.memory_pool")
+    memory_pool_module = importlib.import_module("kernel_gen.passes.memory.memory_pool")
 
     pass_obj = build_registered_pass(
         "memory-pool",
@@ -1061,7 +1098,7 @@ def test_build_registered_memory_pool_alignment_rejects_invalid_options() -> Non
 # 对应测试文件路径: test/passes/test_registry.py
 def test_build_registered_memory_plan_insert_free_options() -> None:
     load_builtin_passes()
-    memory_plan_module = importlib.import_module("kernel_gen.passes.memory_plan")
+    memory_plan_module = importlib.import_module("kernel_gen.passes.memory.memory_plan")
 
     pass_obj = build_registered_pass(
         "memory-plan",
@@ -1084,7 +1121,7 @@ def test_build_registered_memory_plan_insert_free_options() -> None:
 # 对应测试文件路径: test/passes/test_registry.py
 def test_build_registered_memory_plan_rejects_invalid_options() -> None:
     load_builtin_passes()
-    memory_plan_module = importlib.import_module("kernel_gen.passes.memory_plan")
+    memory_plan_module = importlib.import_module("kernel_gen.passes.memory.memory_plan")
 
     with pytest.raises(KernelCodeError, match=r"^MemoryPlanOptionError: unknown option 'unknown'$"):
         memory_plan_module.MemoryPlanPass.from_options({"unknown": "true"})
@@ -1124,7 +1161,7 @@ def test_build_registered_memory_plan_rejects_invalid_options() -> None:
 # 对应测试文件路径: test/passes/test_registry.py
 def test_build_registered_multi_buffer_options() -> None:
     load_builtin_passes()
-    multi_buffer_module = importlib.import_module("kernel_gen.passes.multi_buffer")
+    multi_buffer_module = importlib.import_module("kernel_gen.passes.memory.multi_buffer")
 
     default_pass = build_registered_pass("multi-buffer")
     pass_obj = build_registered_pass("multi-buffer", {"memory-stage": "4", "target": "npu_demo", "fold": "false"})
@@ -1151,7 +1188,7 @@ def test_build_registered_multi_buffer_options() -> None:
 # 对应测试文件路径: test/passes/test_registry.py
 def test_build_registered_multi_buffer_rejects_invalid_options() -> None:
     load_builtin_passes()
-    multi_buffer_module = importlib.import_module("kernel_gen.passes.multi_buffer")
+    multi_buffer_module = importlib.import_module("kernel_gen.passes.memory.multi_buffer")
 
     with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: unknown option: unknown$"):
         multi_buffer_module.MultiBufferPass.from_options({"unknown": "1"})
@@ -1260,7 +1297,7 @@ def test_build_registered_symbol_buffer_hoist_pass() -> None:
 # 对应测试文件路径: test/passes/test_registry.py
 def test_build_registered_arch_parallelize_pass() -> None:
     load_builtin_passes()
-    arch_module = importlib.import_module("kernel_gen.passes.arch_parallelize")
+    arch_module = importlib.import_module("kernel_gen.passes.arch.arch_parallelize")
 
     pass_obj = build_registered_pass(
         "arch-parallelize",
@@ -1271,7 +1308,7 @@ def test_build_registered_arch_parallelize_pass() -> None:
     assert isinstance(pass_obj, ModulePass)
     assert pass_obj.name == "arch-parallelize"
     assert type(pass_obj).__name__ == "ArchParallelizePass"
-    assert pass_obj.__class__.__module__ == "kernel_gen.passes.arch_parallelize"
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.arch.arch_parallelize"
     assert arch_module.__all__ == ["ArchParallelizePass"]
     assert "arch-parallelize" in list_registered_passes()
 
@@ -1326,10 +1363,10 @@ def test_build_registered_kernel_decompose_passes() -> None:
     assert aggregate_pass.name == "kernel-aggregate"
     assert aggregate_pass.matmul_acc is True
     assert aggregate_pass.fold is False
-    assert aggregate_pass.__class__.__module__ == "kernel_gen.passes.kernel_aggregate"
+    assert aggregate_pass.__class__.__module__ == "kernel_gen.passes.kernel.kernel_aggregate"
     assert decompose_pass.name == "kernel-decompose"
     assert decompose_pass.fold is False
-    assert decompose_pass.__class__.__module__ == "kernel_gen.passes.kernel_decompose"
+    assert decompose_pass.__class__.__module__ == "kernel_gen.passes.kernel.kernel_decompose"
     assert "kernel-aggregate" in list_registered_passes()
     assert "kernel-decompose" in list_registered_passes()
     assert "kernel-matmul-fusion-decompose" not in list_registered_passes()

@@ -501,8 +501,8 @@ def load_builtin_passes() -> None:
         register_pipeline("no-op-pipeline")(_build_no_op_pipeline)
 
     from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
-    from kernel_gen.passes.arch_parallelize import ArchParallelizePass
-    from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
+    from kernel_gen.passes.arch.arch_parallelize import ArchParallelizePass
+    from kernel_gen.passes.arch.attach_arch_information import AttachArchInformationPass
     from kernel_gen.passes.decompass import DecompassPass
     from kernel_gen.passes.hoist import (
         DmaAliasToReinterpretPass,
@@ -516,13 +516,13 @@ def load_builtin_passes() -> None:
         KernelPatternAttachPass,
         LowerDmaMemoryHierarchyPass,
     )
-    from kernel_gen.passes.kernel_aggregate import KernelAggregatePass
-    from kernel_gen.passes.kernel_decompose import KernelDecomposePass
-    from kernel_gen.passes.multi_buffer import MultiBufferPass
-    from kernel_gen.passes.memory_pool import MemoryPoolPass
-    from kernel_gen.passes.memory_plan import MemoryPlanPass
+    from kernel_gen.passes.kernel.kernel_aggregate import KernelAggregatePass
+    from kernel_gen.passes.kernel.kernel_decompose import KernelDecomposePass
+    from kernel_gen.passes.memory.multi_buffer import MultiBufferPass
+    from kernel_gen.passes.memory.memory_pool import MemoryPoolPass
+    from kernel_gen.passes.memory.memory_plan import MemoryPlanPass
     from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
-    from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
+    from kernel_gen.passes.tuning.outline_device_kernel import OutlineDeviceKernelPass
     from kernel_gen.passes.tile.analysis import TileAnalysisPass
     from kernel_gen.passes.tile.elewise import TileElewisePass
     from kernel_gen.passes.tile.reduce import TileReducePass

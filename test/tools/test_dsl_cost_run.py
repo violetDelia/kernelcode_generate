@@ -59,11 +59,11 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.core.config import reset_config, set_target
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.operation import store
-from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
+from kernel_gen.passes.arch.attach_arch_information import AttachArchInformationPass
 from kernel_gen.passes.decompass import DecompassPass
 from kernel_gen.passes.inline import InlinePass
 from kernel_gen.passes.lowering import NnLoweringPass
-from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
+from kernel_gen.passes.tuning.outline_device_kernel import OutlineDeviceKernelPass
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.hoist.symbol_buffer_hoist import SymbolBufferHoistPass
 from kernel_gen.passes.hoist.symbol_loop_hoist import SymbolLoopHoistPass

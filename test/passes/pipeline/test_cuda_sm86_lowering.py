@@ -33,16 +33,16 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.pipeline import build_cuda_sm86_lowering_pipeline
-from kernel_gen.passes.arch_parallelize import ArchParallelizePass
-from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
+from kernel_gen.passes.arch.arch_parallelize import ArchParallelizePass
+from kernel_gen.passes.arch.attach_arch_information import AttachArchInformationPass
 from kernel_gen.passes.decompass import DecompassPass
 from kernel_gen.passes.hoist import SymbolHoistPipelinePass
 from kernel_gen.passes.inline import InlinePass
-from kernel_gen.passes.kernel_aggregate import KernelAggregatePass
-from kernel_gen.passes.kernel_decompose import KernelDecomposePass
+from kernel_gen.passes.kernel.kernel_aggregate import KernelAggregatePass
+from kernel_gen.passes.kernel.kernel_decompose import KernelDecomposePass
 from kernel_gen.passes.lowering import NnLoweringPass
-from kernel_gen.passes.memory_plan import MemoryPlanPass
-from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
+from kernel_gen.passes.memory.memory_plan import MemoryPlanPass
+from kernel_gen.passes.tuning.outline_device_kernel import OutlineDeviceKernelPass
 from kernel_gen.passes.pass_manager import Pass
 from kernel_gen.passes.producer_consumer_analysis import ProducerConsumerAnalysisPass
 from kernel_gen.passes.registry import build_registered_pipeline, list_registered_pipelines, load_builtin_passes

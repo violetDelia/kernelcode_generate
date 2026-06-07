@@ -41,8 +41,14 @@ PROTOCOL_RAISES: dict[tuple[str, str, str], str] = {
 PRODUCTION_ALLOWLIST: dict[tuple[str, str, str], str] = {
     ("kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py", "_coerce_symbol_expr_operand", "ValueError"):
         "numeric parse fallback to SymbolDim; no public exception crosses boundary",
-    ("kernel_gen/passes/memory_pool.py", "_safe_simplify_expr", "Exception"):
+    ("kernel_gen/passes/memory/memory_pool.py", "_safe_simplify_expr", "Exception"):
         "SymPy conservative simplify fallback returns original expression",
+    ("kernel_gen/passes/kernel/kernel_decompose.py", "loop_body_before_fusion_blocks_initial_fill", "ValueError"):
+        "index lookup miss conservatively blocks fill deletion",
+    ("kernel_gen/passes/memory/memory_plan.py", "_apply_auto_pad", "TypeError"):
+        "auto-pad candidate construction failure skips unsupported rewrite",
+    ("kernel_gen/passes/memory/memory_plan.py", "_apply_auto_pad", "ValueError"):
+        "auto-pad candidate construction failure skips unsupported rewrite",
     ("kernel_gen/passes/registry.py", "_build_registered_pass_instance", "TypeError"):
         "constructor fold keyword fallback; no public TypeError crosses boundary",
     ("kernel_gen/tools/ircheck.py", "_normalize_symbol_expr_match", "Exception"):

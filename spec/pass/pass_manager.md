@@ -56,7 +56,7 @@
 
 - `PassManager` 与 `Pass` 的 canonical public path 固定为 `kernel_gen.passes.pass_manager`。
 - default / npu-demo pipeline builder 的 canonical public path 固定为 `kernel_gen.pipeline`。
-- `LowerDmaMemoryHierarchyPass`、`MemoryPoolPass` 与 `MemoryPlanPass` 的 canonical public path 固定为 `kernel_gen.passes.tuning.dma_memory_hierarchy`、`kernel_gen.passes.memory_pool` 与 `kernel_gen.passes.memory_plan`。
+- `LowerDmaMemoryHierarchyPass`、`MemoryPoolPass` 与 `MemoryPlanPass` 的 canonical public path 固定为 `kernel_gen.passes.tuning.dma_memory_hierarchy`、`kernel_gen.passes.memory.memory_pool` 与 `kernel_gen.passes.memory.memory_plan`。
 - tile family 的 canonical public path 固定为：
   - `kernel_gen.passes.tile.analysis`
   - `kernel_gen.passes.tile.elewise`

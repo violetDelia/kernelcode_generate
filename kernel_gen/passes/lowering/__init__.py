@@ -38,7 +38,7 @@ API 列表:
 - spec:
   - [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
   - [spec/pass/decompass.md](spec/pass/decompass.md)
-  - [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+  - [spec/pass/tuning/outline_device_kernel.md](spec/pass/tuning/outline_device_kernel.md)
   - [spec/pass/tile/analysis.md](spec/pass/tile/analysis.md)
   - [spec/pass/tile/elewise.md](spec/pass/tile/elewise.md)
   - [spec/pass/tile/reduce.md](spec/pass/tile/reduce.md)
@@ -48,7 +48,7 @@ API 列表:
   - [test/passes/lowering/nn_lowering/test_public_name.py](test/passes/lowering/nn_lowering/test_public_name.py)
   - [test/passes/lowering/nn_lowering/test_nn_lowering.py](test/passes/lowering/nn_lowering/test_nn_lowering.py)
   - [test/passes/decompass/test_softmax.py](test/passes/decompass/test_softmax.py)
-  - [test/passes/test_outline_device_kernel.py](test/passes/test_outline_device_kernel.py)
+  - [test/passes/tuning/test_outline_device_kernel.py](test/passes/tuning/test_outline_device_kernel.py)
   - [test/passes/tile/test_analysis.py](test/passes/tile/test_analysis.py)
   - [test/passes/tile/test_elewise.py](test/passes/tile/test_elewise.py)
   - [test/passes/tile/test_reduce.py](test/passes/tile/test_reduce.py)
@@ -56,7 +56,7 @@ API 列表:
 - 功能实现:
   - [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
   - [kernel_gen/passes/decompass.py](kernel_gen/passes/decompass.py)
-  - [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
+  - [kernel_gen/passes/tuning/outline_device_kernel.py](kernel_gen/passes/tuning/outline_device_kernel.py)
   - [kernel_gen/passes/tile/analysis.py](kernel_gen/passes/tile/analysis.py)
   - [kernel_gen/passes/tile/elewise.py](kernel_gen/passes/tile/elewise.py)
   - [kernel_gen/passes/tile/reduce.py](kernel_gen/passes/tile/reduce.py)
@@ -68,10 +68,10 @@ API 列表:
 import sys
 
 from .nn_lowering import NnLoweringPass
-from .. import outline_device_kernel as _outline_device_kernel_module
+from ..tuning import outline_device_kernel as _outline_device_kernel_module
 from ..hoist import symbol_loop_hoist as _symbol_loop_hoist_module
 from ..decompass import DecompassPass
-from ..outline_device_kernel import OutlineDeviceKernelPass
+from ..tuning.outline_device_kernel import OutlineDeviceKernelPass
 from ..hoist.symbol_loop_hoist import SymbolLoopHoistPass
 from ..tile.analysis import TileAnalysisPass
 from ..tile.elewise import TileElewisePass

@@ -93,7 +93,7 @@ from kernel_gen.operation.nn import matmul
 from kernel_gen.operation.scf import loop
 from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
-from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
+from kernel_gen.passes.tuning.outline_device_kernel import OutlineDeviceKernelPass
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType

@@ -29,16 +29,16 @@
 - `decompass` 公开入口：[`spec/pass/decompass.md`](../../../spec/pass/decompass.md)
 - `nn` lowering：[`spec/pass/lowering/nn_lowering/spec.md`](../../../spec/pass/lowering/nn_lowering/spec.md)
 - `symbol-hoist-pipeline`：[`spec/pass/symbol_hoist_pipeline.md`](../../../spec/pass/symbol_hoist_pipeline.md)
-- `memory-plan`：[`spec/pass/memory_plan.md`](../../../spec/pass/memory_plan.md)
+- `memory-plan`：[`spec/pass/memory/memory_plan.md`](../../../spec/pass/memory/memory_plan.md)
 - `tile-analysis`：[`spec/pass/tile/analysis.md`](../../../spec/pass/tile/analysis.md)
-- `kernel-pattern-attach`：[`spec/pass/kernel_pattern_attach.md`](../kernel_pattern_attach.md)
-- `transform-apply`：[`spec/pass/transform_apply.md`](../transform_apply.md)
-- `lower-dma-memory-hierarchy`：[`spec/pass/lowering/dma_memory_hierarchy/spec.md`](../../../spec/pass/lowering/dma_memory_hierarchy/spec.md)，只由 pattern 函数上的 `kernel.transform_pipeline` 间接触发，不作为本 pipeline 顶层 pass 阶段。
+- `kernel-pattern-attach`：[`spec/pass/tuning/kernel_pattern_attach.md`](../tuning/kernel_pattern_attach.md)
+- `transform-apply`：[`spec/pass/tuning/transform_apply.md`](../tuning/transform_apply.md)
+- `lower-dma-memory-hierarchy`：[`spec/pass/tuning/dma_memory_hierarchy.md`](../../../spec/pass/tuning/dma_memory_hierarchy.md)，只由 pattern 函数上的 `kernel.transform_pipeline` 间接触发，不作为本 pipeline 顶层 pass 阶段。
 - `symbol-buffer-hoist`：[`spec/pass/symbol_buffer_hoist.md`](../../../spec/pass/symbol_buffer_hoist.md)
-- `multi-buffer`：[`spec/pass/multi_buffer.md`](../multi_buffer.md)
-- `memory-pool`：[`spec/pass/lowering/memory_pool.md`](../../../spec/pass/lowering/memory_pool.md)
-- `attach-arch-information` 公开入口：[`spec/pass/attach_arch_information.md`](../../../spec/pass/attach_arch_information.md)
-- `outline-device-kernel` 公开入口：[`spec/pass/outline_device_kernel.md`](../../../spec/pass/outline_device_kernel.md)
+- `multi-buffer`：[`spec/pass/memory/multi_buffer.md`](../../../spec/pass/memory/multi_buffer.md)
+- `memory-pool`：[`spec/pass/memory/memory_pool.md`](../../../spec/pass/memory/memory_pool.md)
+- `attach-arch-information` 公开入口：[`spec/pass/arch/attach_arch_information.md`](../../../spec/pass/arch/attach_arch_information.md)
+- `outline-device-kernel` 公开入口：[`spec/pass/tuning/outline_device_kernel.md`](../../../spec/pass/tuning/outline_device_kernel.md)
 - `template-name-infer` 公开入口：[`spec/pass/template_name_infer.md`](../../../spec/pass/template_name_infer.md)
 
 ## 术语

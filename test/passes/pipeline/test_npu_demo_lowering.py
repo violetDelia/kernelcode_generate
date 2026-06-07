@@ -58,18 +58,18 @@ CommonSubexpressionElimination = importlib.import_module(
     "xdsl.transforms.common_subexpression_elimination"
 ).CommonSubexpressionElimination
 CanonicalizePass = importlib.import_module("xdsl.transforms.canonicalize").CanonicalizePass
-AttachArchInformationPass = importlib.import_module("kernel_gen.passes.attach_arch_information").AttachArchInformationPass
-ArchParallelizePass = importlib.import_module("kernel_gen.passes.arch_parallelize").ArchParallelizePass
+AttachArchInformationPass = importlib.import_module("kernel_gen.passes.arch.attach_arch_information").AttachArchInformationPass
+ArchParallelizePass = importlib.import_module("kernel_gen.passes.arch.arch_parallelize").ArchParallelizePass
 DecompassPass = importlib.import_module("kernel_gen.passes.decompass").DecompassPass
-KernelAggregatePass = importlib.import_module("kernel_gen.passes.kernel_aggregate").KernelAggregatePass
-KernelDecomposePass = importlib.import_module("kernel_gen.passes.kernel_decompose").KernelDecomposePass
+KernelAggregatePass = importlib.import_module("kernel_gen.passes.kernel.kernel_aggregate").KernelAggregatePass
+KernelDecomposePass = importlib.import_module("kernel_gen.passes.kernel.kernel_decompose").KernelDecomposePass
 KernelPatternAttachPass = importlib.import_module("kernel_gen.passes.tuning.kernel_pattern_attach").KernelPatternAttachPass
-MemoryPlanPass = importlib.import_module("kernel_gen.passes.memory_plan").MemoryPlanPass
-MemoryPoolPass = importlib.import_module("kernel_gen.passes.memory_pool").MemoryPoolPass
-MultiBufferPass = importlib.import_module("kernel_gen.passes.multi_buffer").MultiBufferPass
+MemoryPlanPass = importlib.import_module("kernel_gen.passes.memory.memory_plan").MemoryPlanPass
+MemoryPoolPass = importlib.import_module("kernel_gen.passes.memory.memory_pool").MemoryPoolPass
+MultiBufferPass = importlib.import_module("kernel_gen.passes.memory.multi_buffer").MultiBufferPass
 SymbolHoistPipelinePass = importlib.import_module("kernel_gen.passes.hoist").SymbolHoistPipelinePass
 NnLoweringPass = importlib.import_module("kernel_gen.passes.lowering").NnLoweringPass
-OutlineDeviceKernelPass = importlib.import_module("kernel_gen.passes.outline_device_kernel").OutlineDeviceKernelPass
+OutlineDeviceKernelPass = importlib.import_module("kernel_gen.passes.tuning.outline_device_kernel").OutlineDeviceKernelPass
 ProducerConsumerAnalysisPass = importlib.import_module(
     "kernel_gen.passes.producer_consumer_analysis"
 ).ProducerConsumerAnalysisPass

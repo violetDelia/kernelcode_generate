@@ -19,8 +19,8 @@ API 列表:
 - LowerDmaMemoryHierarchyPass().apply(Context(), module)
 
 关联文件:
-- spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-- test: test/passes/test_dma_memory_hierarchy.py
+- spec: spec/pass/tuning/dma_memory_hierarchy.md
+- test: test/passes/tuning/test_dma_memory_hierarchy.py
 - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
 """
 
@@ -63,8 +63,8 @@ def _symbol_expr_text(attr: SymbolExprAttr) -> str:
     - text = _symbol_expr_text(SymbolExprAttr.from_expr("M"))
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -82,8 +82,8 @@ def _static_int_from_symbol_expr(attr: SymbolExprAttr) -> int | None:
     - value = _static_int_from_symbol_expr(SymbolExprAttr.from_expr("4"))
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -111,8 +111,8 @@ def _require_sm_lm_support() -> None:
     - _require_sm_lm_support()
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -139,8 +139,8 @@ def _memory_space(value_type: NnMemoryType) -> str:
     - space = _memory_space(SSAValue.get(op.operands[0]).type)
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -159,8 +159,8 @@ def _parse_apply_op(apply_op: str | None) -> _ApplyOpRule | None:
     - rule = _parse_apply_op('matmul{["", "tlm1", "tlm2"]}')
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -224,8 +224,8 @@ def _with_space(value_type: NnMemoryType, space: str) -> NnMemoryType:
     - lm_type = _with_space(gm_type, "local")
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -251,8 +251,8 @@ def _const_symbol_int(value: int) -> tuple[arith.ConstantOp, UnrealizedConversio
     - one = cast.results[0]
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -282,8 +282,8 @@ def _build_full_window_operands(
     - ops, offsets, sizes, strides = _build_full_window_operands(gm, rank=2, zero=zero, one=one)
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -326,8 +326,8 @@ def _build_dynamic_shape_operands(
     - ops, dynamic_shape = _build_dynamic_shape_operands(lhs, lhs_type)
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -370,8 +370,8 @@ def _resolve_window_operands(
     - ops, base, offsets, sizes, strides = _resolve_window_operands(gm, rank=2, zero=zero, one=one)
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -399,8 +399,8 @@ def _ensure_static_rank(memory_type: NnMemoryType, context: str) -> int:
     - rank = _ensure_static_rank(mem_type, "kernel operand")
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -422,8 +422,8 @@ def _is_kernel_op(op: Operation) -> bool:
     - if _is_kernel_op(op): ...
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -453,8 +453,8 @@ def _lower_gm_operand_to_lm(
     - block.insert_ops_before(ops, kernel_op)
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -502,8 +502,8 @@ def _lower_gm_out_to_lm_with_writeback(
     - block.insert_ops_after(post_ops, kernel_op)
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -552,8 +552,8 @@ class LowerDmaMemoryHierarchyPass(Pass):
     - LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", "tlm2"]}').apply(Context(), module)
 
     关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/passes/test_dma_memory_hierarchy.py
+    - spec: spec/pass/tuning/dma_memory_hierarchy.md
+    - test: test/passes/tuning/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
@@ -572,8 +572,8 @@ class LowerDmaMemoryHierarchyPass(Pass):
         - LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", "tlm2"]}')
 
         关联文件:
-        - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-        - test: test/passes/test_dma_memory_hierarchy.py
+        - spec: spec/pass/tuning/dma_memory_hierarchy.md
+        - test: test/passes/tuning/test_dma_memory_hierarchy.py
         - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
         """
 
@@ -594,8 +594,8 @@ class LowerDmaMemoryHierarchyPass(Pass):
         - LowerDmaMemoryHierarchyPass.from_options({"apply_op": "matmul{[\\"\\", \\"tlm1\\", \\"tlm2\\"]}"})
 
         关联文件:
-        - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-        - test: test/passes/test_dma_memory_hierarchy.py
+        - spec: spec/pass/tuning/dma_memory_hierarchy.md
+        - test: test/passes/tuning/test_dma_memory_hierarchy.py
         - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
         """
 
@@ -623,8 +623,8 @@ class LowerDmaMemoryHierarchyPass(Pass):
         - LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", "tlm2"]}').apply(Context(), module)
 
         关联文件:
-        - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-        - test: test/passes/test_dma_memory_hierarchy.py
+        - spec: spec/pass/tuning/dma_memory_hierarchy.md
+        - test: test/passes/tuning/test_dma_memory_hierarchy.py
         - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
         """
 
@@ -652,8 +652,8 @@ class LowerDmaMemoryHierarchyPass(Pass):
         - self._apply_matmul_rule(module, rule)
 
         关联文件:
-        - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-        - test: test/passes/test_dma_memory_hierarchy.py
+        - spec: spec/pass/tuning/dma_memory_hierarchy.md
+        - test: test/passes/tuning/test_dma_memory_hierarchy.py
         - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
         """
 
@@ -725,8 +725,8 @@ class LowerDmaMemoryHierarchyPass(Pass):
         - self._apply_legacy_hierarchy(module)
 
         关联文件:
-        - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-        - test: test/passes/test_dma_memory_hierarchy.py
+        - spec: spec/pass/tuning/dma_memory_hierarchy.md
+        - test: test/passes/tuning/test_dma_memory_hierarchy.py
         - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
         """
 

@@ -17,6 +17,7 @@ API 列表:
 from __future__ import annotations
 
 import ast
+import difflib
 import re
 import subprocess
 from dataclasses import dataclass
@@ -128,6 +129,17 @@ class _PrivateApiBoundaryHelpers:
         )
         if untracked.strip():
             return set(range(1, len(path.read_text(encoding="utf-8").splitlines()) + 1))
+        copy_sources = _PrivateApiBoundaryHelpers.current_diff_copy_sources(root)
+        if relative_path in copy_sources:
+            old_text = subprocess.check_output(
+                ["git", "show", f"HEAD:{copy_sources[relative_path]}"],
+                cwd=root,
+                text=True,
+            )
+            return _PrivateApiBoundaryHelpers.changed_lines_between_texts(
+                old_text,
+                path.read_text(encoding="utf-8"),
+            )
         diff = subprocess.check_output(["git", "diff", "-U0", "HEAD", "--", relative_path], cwd=root, text=True)
         changed_lines: set[int] = set()
         for line in diff.splitlines():
@@ -140,6 +152,46 @@ class _PrivateApiBoundaryHelpers:
             count = int(count_text or "1")
             changed_lines.update(range(start, start + count))
         return changed_lines
+
+    @staticmethod
+    def current_diff_copy_sources(root: Path) -> dict[str, str]:
+        """Return destination->source paths for copied or renamed files."""
+
+        output = subprocess.check_output(
+            [
+                "git",
+                "diff",
+                "--find-copies-harder",
+                "--find-renames=20%",
+                "--name-status",
+                "HEAD",
+            ],
+            cwd=root,
+            text=True,
+        )
+        sources: dict[str, str] = {}
+        for line in output.splitlines():
+            parts = line.split("\t")
+            if len(parts) != 3:
+                continue
+            status, source, destination = parts
+            if status.startswith(("C", "R")) and destination.endswith(".py"):
+                sources[destination] = source
+        return sources
+
+    @staticmethod
+    def changed_lines_between_texts(old_text: str, new_text: str) -> set[int]:
+        """Return one-based changed lines in new_text compared with old_text."""
+
+        old_lines = [line.rstrip() for line in old_text.splitlines()]
+        new_lines = [line.rstrip() for line in new_text.splitlines()]
+        changed: set[int] = set()
+        matcher = difflib.SequenceMatcher(a=old_lines, b=new_lines, autojunk=False)
+        for tag, _old_start, _old_end, new_start, new_end in matcher.get_opcodes():
+            if tag == "equal":
+                continue
+            changed.update(range(new_start + 1, new_end + 1))
+        return changed
 
     @staticmethod
     def is_private_segment(segment: str) -> bool:
@@ -195,6 +247,7 @@ class _PrivateApiBoundaryHelpers:
     def changed_private_callables(
         tree: ast.AST,
         changed_lines: set[int],
+        source_lines: list[str],
     ) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
         """Return private callables whose definition overlaps current changed lines."""
 
@@ -204,10 +257,35 @@ class _PrivateApiBoundaryHelpers:
                 continue
             if not _PrivateApiBoundaryHelpers.is_private_callable_name(node.name):
                 continue
-            function_lines = set(range(node.lineno, getattr(node, "end_lineno", node.lineno) + 1))
+            function_lines = _PrivateApiBoundaryHelpers.function_effective_line_numbers(node, source_lines)
+            function_lines.add(node.lineno)
             if function_lines & changed_lines:
                 callables.append(node)
         return callables
+
+    @staticmethod
+    def function_effective_line_numbers(
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+        source_lines: list[str],
+    ) -> set[int]:
+        """Return physical effective code lines inside a function body."""
+
+        body = list(node.body)
+        if body and isinstance(body[0], ast.Expr) and isinstance(getattr(body[0], "value", None), ast.Constant):
+            if isinstance(body[0].value.value, str):
+                body = body[1:]
+        effective_lines: set[int] = set()
+        ignored_lines = {"(", ")", "[", "]", "{", "}", ","}
+        for statement in body:
+            start = getattr(statement, "lineno", 0)
+            end = getattr(statement, "end_lineno", start)
+            for line_number in range(start, end + 1):
+                if line_number < 1 or line_number > len(source_lines):
+                    continue
+                stripped = source_lines[line_number - 1].strip()
+                if stripped and not stripped.startswith("#") and stripped not in ignored_lines:
+                    effective_lines.add(line_number)
+        return effective_lines
 
     @staticmethod
     def scan_current_diff_private_callable_shapes(root: Path) -> list[PrivateCallableShapeViolation]:
@@ -220,7 +298,7 @@ class _PrivateApiBoundaryHelpers:
             tree = ast.parse(source, filename=path.as_posix())
             changed_lines = _PrivateApiBoundaryHelpers.changed_lines_for_path(root, path)
             source_lines = source.splitlines()
-            for node in _PrivateApiBoundaryHelpers.changed_private_callables(tree, changed_lines):
+            for node in _PrivateApiBoundaryHelpers.changed_private_callables(tree, changed_lines, source_lines):
                 effective_lines = _PrivateApiBoundaryHelpers.function_effective_code_lines(node, source_lines)
                 if effective_lines < 5:
                     reason = f"under 5 effective code lines ({effective_lines})"

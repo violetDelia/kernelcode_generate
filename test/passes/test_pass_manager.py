@@ -459,7 +459,7 @@ def test_pass_manager_surviving_import_matrix() -> None:
     tile_analysis_module = importlib.import_module("kernel_gen.passes.tile.analysis")
     tile_elewise_module = importlib.import_module("kernel_gen.passes.tile.elewise")
     tile_reduce_module = importlib.import_module("kernel_gen.passes.tile.reduce")
-    memory_plan_module = importlib.import_module("kernel_gen.passes.memory_plan")
+    memory_plan_module = importlib.import_module("kernel_gen.passes.memory.memory_plan")
     passes_package = importlib.import_module("kernel_gen.passes")
 
     assert pass_module.Pass is Pass

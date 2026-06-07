@@ -24,9 +24,9 @@
 - 注册表：[`spec/pass/registry.md`](../../../spec/pass/registry.md)
 - `nn -> kernel/dma` lowering：[`spec/pass/lowering/nn_lowering/spec.md`](../../../spec/pass/lowering/nn_lowering/spec.md)
 - memory-return ABI 改写：[`spec/pass/buffer_results_to_out_params.md`](../buffer_results_to_out_params.md)
-- DMA memory hierarchy lowering：[`spec/pass/lowering/dma_memory_hierarchy/spec.md`](../../../spec/pass/lowering/dma_memory_hierarchy/spec.md)
+- DMA memory hierarchy lowering：[`spec/pass/tuning/dma_memory_hierarchy.md`](../../../spec/pass/tuning/dma_memory_hierarchy.md)
 - `nn` 分解预处理：[`spec/pass/decompass.md`](../../../spec/pass/decompass.md)
-- host launch outline：[`spec/pass/outline_device_kernel.md`](../../../spec/pass/outline_device_kernel.md)
+- host launch outline：[`spec/pass/tuning/outline_device_kernel.md`](../../../spec/pass/tuning/outline_device_kernel.md)
 
 ## 术语
 
