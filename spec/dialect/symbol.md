@@ -86,8 +86,10 @@
 - `Memory`、`MemorySpace`、`LocalSpaceMeta` 这类高层内存容器或空间枚举不属于本方言；本方言只负责它们内部可能出现的单个整型符号值语义。
 - `symbol.get_dim` / `symbol.get_stride` 只读取 memory type 中已存在的单个维度或步幅分量，不引入新的 shape/stride 推导规则。
 - `symbol.get_dim` / `symbol.get_stride` 当前只接受 IR 层 memory SSA value；按当前方言体系，该 memory type 统一指向 `MemoryType`，其当前文本载体仍为 `!nn.memory<...>`。
-- `symbol.get_dim` / `symbol.get_stride` 查询到静态整数 shape/stride 条目时支持常量折叠，可在通用 folding 中物化为 `symbol.const`；符号表达与匿名动态值不得被折叠成常量。
-- 若目标维度或步幅条目为匿名动态值 `?`，结果类型必须为 `!symbol.int<#symbol.expr<?>>`，且 fold 必须保守返回 `None`；该语义只表示 unknown scalar symbol value，不恢复旧 bare `StringAttr("?")` memory shape/stride 入口。
+- `symbol.get_dim` / `symbol.get_stride` 查询到静态整数 shape/stride 条目时支持常量折叠，可在通用 folding 中物化为 `symbol.const`；非 direct `dma.reinterpret` source 的符号表达与匿名动态值不得被折叠成常量。
+- 若目标维度或步幅条目为匿名动态值 `?`，结果类型必须为 `!symbol.int<#symbol.expr<?>>`；非 direct `dma.reinterpret` source 的 fold 必须保守返回 `None`，该语义只表示 unknown scalar symbol value，不恢复旧 bare `StringAttr("?")` memory shape/stride 入口。
+- 当 `symbol.get_dim` / `symbol.get_stride` 的 source 是 direct `dma.reinterpret` result，且静态轴号在对应 operand 范围内、query result type 与 `dma.reinterpret.shape[index]` / `dma.reinterpret.stride[index]` operand type 完全一致时，fold 必须直接返回该已有 SSAValue，不生成新 op；该规则优先于静态常量折叠，并覆盖静态整数、具名动态符号和匿名动态 `?` operand。
+- direct `dma.reinterpret` 只读取当前 defining op 的公开 shape/stride operands；非 direct source、axis 非静态整数、axis 越界、selected operand type 不匹配或 source/result type 不满足公开合同的情况必须保守不 fold。
 - `symbol.get_dim` / `symbol.get_stride` 的轴号当前必须是静态整数索引；越界、负数或非整数轴号必须报错。
 - 本方言定义 `?` 作为 unknown symbol value，仅表示当前 `!symbol.int` 的值语义无法稳定命名或静态确定；`?` 不是具名符号，不参与符号化简，也不得扩展为 memory shape/stride 的匿名动态条目。
 - 当前 `!symbol.int<#symbol.expr<...>>` 只定义整数语义，不区分 `int/int8/int16/int32/int64` 等具体整型宽度，也不定义 `index`、浮点或其他非整型 symbol 类型；`symbol.const` 支持的浮点常量直接返回 `f16`、`f32` 或 `f64` builtin 浮点类型，不新增 `!symbol.float`。
@@ -786,7 +788,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
     value = SymbolGetDimOp(memory=memory, index=index)
     ```
 - 功能说明：构造或表示 `SymbolGetDimOp` 对应的 symbol dialect operation。
-- 注意事项：只能读取 memory type 中可表示为整数常量或符号表达的静态条目；负数、越界或匿名动态条目必须失败。
+- 注意事项：只能读取 memory type 中可表示为整数常量或符号表达的静态条目；direct `dma.reinterpret` source 可 fold 到对应 shape SSAValue，包括静态、具名动态和 `?` operand；非 direct source 的负数、越界或匿名动态条目必须失败或保守不 fold。
 
 ### `class SymbolGetStrideOp(memory: SSAValue, index: int | IntAttr)`
 
@@ -803,7 +805,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
     value = SymbolGetStrideOp(memory=memory, index=index)
     ```
 - 功能说明：构造或表示 `SymbolGetStrideOp` 对应的 symbol dialect operation。
-- 注意事项：只能读取 memory type 中可表示为整数常量或符号表达的静态条目；负数、越界或匿名动态条目必须失败。
+- 注意事项：只能读取 memory type 中可表示为整数常量或符号表达的静态条目；direct `dma.reinterpret` source 可 fold 到对应 stride SSAValue，包括静态、具名动态和 `?` operand；非 direct source 的负数、越界或匿名动态条目必须失败或保守不 fold。
 
 ### `class SymbolYieldOp(value: SSAValue | Operation)`
 
@@ -879,7 +881,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 - 验证 `symbol.to_float` 的整数符号到 `f32` 转换语义、类型约束与 parse/print 稳定性。
 - 验证 `SymbolPtrType` 的 `!symbol.ptr<dtype>` 文本语法、verifier 约束、parse/print 稳定性，以及拒绝 `!symbol.int<#symbol.expr<...>>` 作为 dtype 的错误路径。
 - 验证 `symbol.get_dim` / `symbol.get_stride` 能从 memory type 读取真实 dim/stride，并返回对应的 symbol value。
-- 验证 `symbol.get_dim` / `symbol.get_stride` 读取静态整数 dim/stride 时可折叠为 `symbol.const`，读取符号表达时不折叠。
+- 验证 `symbol.get_dim` / `symbol.get_stride` 读取静态整数 dim/stride 时可折叠为 `symbol.const`，读取非 direct source 的符号表达时不折叠，读取 direct `dma.reinterpret` result 时可 fold 到对应 shape/stride SSAValue。
 - 验证 `symbol.get_dim` / `symbol.get_stride` 的错误路径，包括非 memory type、轴号越界、匿名动态条目 `?` 与非法轴号。
 - 验证 `symbol.for` 的半开区间循环语义、`start/end/step` 的 `!symbol.int<#symbol.expr<...>>` 约束、`it` 的 `!symbol.iter<...>` 约束、parse/print 稳定性与 verifier 错误路径。
 - 验证 `symbol.for` 的迭代变量 `it` 必须为 `SymbolIterType`，不能是浮点、builtin 整数或其他非 `!symbol.iter<...>` 类型。
@@ -928,6 +930,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 | TC-SYM-028A | 内存/DMA | `symbol.get_stride` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_symbol_get_stride_folds_static_stride_to_const_attr`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`symbol.get_stride`”场景。 | `test_symbol_get_stride_folds_static_stride_to_const_attr` |
 | TC-SYM-029 | 内存/DMA | `symbol.get_stride` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_symbol_get_stride_reads_symbolic_stride_from_memory_type`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`symbol.get_stride`”场景。 | `test_symbol_get_stride_reads_symbolic_stride_from_memory_type` |
 | TC-SYM-029A | 内存/DMA | `symbol.get_dim/get_stride` 解析结构化 memory 条目 | 准备 `!nn.memory<[#symbol.expr<...>], [#symbol.expr<...>], ...>` 公开 IR。 | 运行 `test_symbol_memory_query_parses_symbol_expr_entries_from_public_ir`。 | `symbol.get_dim` 与 `symbol.get_stride` 可从结构化 shape/stride 条目推导 `!symbol.int<#symbol.expr<...>>` 结果类型。 | `test_symbol_memory_query_parses_symbol_expr_entries_from_public_ir` |
+| TC-SYM-029B | 内存/DMA | `symbol.get_dim/get_stride` direct reinterpret operand fold | 准备公开 `DmaReinterpretOp`，shape/stride operands 覆盖静态、具名动态和 `?`。 | 运行 `test_symbol_memory_query_folds_direct_reinterpret_operands_to_existing_values` 与 `test_symbol_memory_query_reinterpret_fold_rejects_operand_type_mismatch`。 | direct reinterpret query 复用原 shape/stride SSAValue 且不生成新 op；selected operand type 不匹配时不 fold。 | `test_symbol_memory_query_folds_direct_reinterpret_operands_to_existing_values`、`test_symbol_memory_query_reinterpret_fold_rejects_operand_type_mismatch` |
 | TC-SYM-030 | 边界/异常 | `symbol.get_dim/get_stride` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_get_dim_rejects_invalid_axis`、`test_symbol_get_stride_rejects_invalid_axis`。 | “`symbol.get_dim/get_stride`”场景按公开错误语义失败或被拒绝。 | `test_symbol_get_dim_rejects_invalid_axis`、`test_symbol_get_stride_rejects_invalid_axis` |
 | TC-SYM-031 | 边界/异常 | `symbol.get_dim/get_stride` | 准备非 memory source、`?` shape/stride 与非法参数组合。 | 运行 `test_symbol_get_dim_rejects_non_memory_type`、`test_symbol_get_stride_rejects_unknown_entry`。 | 非 memory source 按公开错误语义失败；`?` shape/stride 返回 `!symbol.int<#symbol.expr<?>>` 且不折叠。 | `test_symbol_get_dim_rejects_non_memory_type`、`test_symbol_get_stride_rejects_unknown_entry` |
 | TC-SYM-032 | 符号语义 | `symbol.for` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_for_accepts_symbol_int_bounds_and_iter_arg`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.for`”场景。 | `test_symbol_for_accepts_symbol_int_bounds_and_iter_arg` |

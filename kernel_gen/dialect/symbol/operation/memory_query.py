@@ -1,7 +1,7 @@
 """symbol memory query operations.
 
 功能说明:
-- 定义 symbol.get_dim 与 symbol.get_stride op。
+- 定义 symbol.get_dim 与 symbol.get_stride op，并提供静态 memory 条目与 direct dma.reinterpret operand folding。
 
 API 列表:
 - `class SymbolGetDimOp(memory: SSAValue, index: int | IntAttr)`
@@ -28,7 +28,7 @@ from kernel_gen.core.contracts import raise_verify_error
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerAttr, IntegerType, StringAttr, f32, f64, i1, i32
 from xdsl.dialect_interfaces.constant_materialization import ConstantMaterializationInterface
-from xdsl.ir import Attribute, Block, Dialect, Operation, ParametrizedAttribute, Region, SSAValue, TypeAttribute
+from xdsl.ir import Attribute, Block, Dialect, Operation, OpResult, ParametrizedAttribute, Region, SSAValue, TypeAttribute
 from xdsl.irdl import (
     IRDLOperation,
     attr_def,
@@ -246,13 +246,14 @@ class _BaseSymbolMemoryQueryOp(IRDLOperation, HasFolderInterface):
             raise_verify_error(_ERROR_SCENE, f"{self.name} result type must match source {self.FIELD_NAME} entry")
 
     def fold(self: "_BaseSymbolMemoryQueryOp") -> Sequence[SSAValue | Attribute] | None:
-        """折叠静态 memory 元信息查询 op。
+        """折叠 memory 元信息查询 op。
 
 
         功能说明:
-        - 当 `symbol.get_dim/get_stride` 读取到静态整数 shape/stride 条目时，返回 `IntAttr` 交给
+        - direct `dma.reinterpret` source 优先返回对应 shape/stride SSA operand，保留动态真源。
+        - 非 direct source 读取到静态整数 shape/stride 条目时，返回 `IntAttr` 交给
           `SymbolConstantMaterializationInterface` 物化为 `symbol.const`。
-        - 动态符号表达、未知 `?`、非法 source/axis 或 result type 不匹配时保守不折叠。
+        - 非 direct source 的动态符号表达、未知 `?`、非法 source/axis 或 result type 不匹配时保守不折叠。
 
         使用示例:
         - SymbolGetDimOp(source, 0).fold()
@@ -269,6 +270,19 @@ class _BaseSymbolMemoryQueryOp(IRDLOperation, HasFolderInterface):
         entries = source_type.shape.data if self.FIELD_NAME == "shape" else source_type.stride.data
         if not isinstance(self.axis, IntAttr) or self.axis.data < 0 or self.axis.data >= len(entries):
             return None
+        source_value = SSAValue.get(self.source)
+        if isinstance(source_value, OpResult):
+            from kernel_gen.dialect.dma import DmaReinterpretOp
+
+            source_owner = source_value.owner
+            if isinstance(source_owner, DmaReinterpretOp):
+                reinterpret_entries = source_owner.shape if self.FIELD_NAME == "shape" else source_owner.stride
+                if self.axis.data >= len(reinterpret_entries):
+                    return None
+                selected_operand = reinterpret_entries[self.axis.data]
+                if SSAValue.get(self.result).type != selected_operand.type:
+                    return None
+                return (selected_operand,)
         try:
             expected_type = SymbolValueType.from_expr(_entry_to_expr(entries[self.axis.data], self.name, self.FIELD_NAME))
         except KernelCodeError:

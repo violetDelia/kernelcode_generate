@@ -40,6 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.dialect.dma import DmaReinterpretOp
 from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     Symbol,
@@ -1615,6 +1616,86 @@ def test_symbol_get_stride_folds_static_stride_to_const_attr() -> None:
 
     assert static_op.fold() == (IntAttr(16),)
     assert dynamic_op.fold() is None
+
+
+# TC-SYM-029B
+# 测试目的: 验证 direct dma.reinterpret source 的 get_dim/get_stride fold 会复用原始 shape/stride SSAValue。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol/operation/memory_query.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_memory_query_folds_direct_reinterpret_operands_to_existing_values() -> None:
+    """验证 direct reinterpret memory query fold 到已有 SSAValue。
+
+    功能说明:
+    - static、具名动态与 `?` shape/stride operands 均应按 SSAValue 复用。
+    - 公开 Folder 接受 SSAValue fold，且不生成新 op。
+
+    使用示例:
+    - pytest -q test/dialect/symbol/test_symbol.py -k direct_reinterpret
+    """
+
+    source = _make_memory_value(_make_memory_type([128], [1]))
+    offset = _make_symbol_value("0")
+    shape_static = _make_symbol_value("4")
+    shape_dynamic = _make_symbol_value("N")
+    shape_unknown = _make_symbol_value("?")
+    stride_dynamic = _make_symbol_value("N + 1")
+    stride_unknown = _make_symbol_value("?")
+    stride_static = _make_symbol_value("1")
+    result_type = _make_memory_type([4, "N", "?"], ["N + 1", "?", 1])
+    reinterpret = DmaReinterpretOp(
+        source,
+        offset,
+        [shape_static, shape_dynamic, shape_unknown],
+        [stride_dynamic, stride_unknown, stride_static],
+        result_type,
+    )
+
+    reinterpret.verify()
+
+    assert SymbolGetDimOp(reinterpret.result, 0).fold() == (shape_static,)
+    assert SymbolGetDimOp(reinterpret.result, 1).fold() == (shape_dynamic,)
+    assert SymbolGetDimOp(reinterpret.result, 2).fold() == (shape_unknown,)
+    assert SymbolGetStrideOp(reinterpret.result, 0).fold() == (stride_dynamic,)
+    assert SymbolGetStrideOp(reinterpret.result, 1).fold() == (stride_unknown,)
+    assert SymbolGetStrideOp(reinterpret.result, 2).fold() == (stride_static,)
+
+    folded = Folder(_build_context()).try_fold(SymbolGetDimOp(reinterpret.result, 1))
+    assert folded is not None
+    values, new_ops = folded
+    assert values == [shape_dynamic]
+    assert new_ops == []
+
+
+# TC-SYM-029B
+# 测试目的: 验证 direct dma.reinterpret selected operand type 不匹配时 memory query 不 fold。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol/operation/memory_query.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_memory_query_reinterpret_fold_rejects_operand_type_mismatch() -> None:
+    """验证畸形 direct reinterpret IR 的保守 fold 边界。
+
+    功能说明:
+    - 通过公开构造生成 shape/stride operand type 与 result memory type 不一致的 IR。
+    - 不调用 `DmaReinterpretOp.verify()`，只锁定 memory query fold 的类型匹配保护。
+
+    使用示例:
+    - pytest -q test/dialect/symbol/test_symbol.py -k reinterpret_fold_rejects
+    """
+
+    source = _make_memory_value(_make_memory_type([128], [1]))
+    offset = _make_symbol_value("0")
+    mismatched_shape = _make_symbol_value("5")
+    mismatched_stride = _make_symbol_value("2")
+    result_type = _make_memory_type([4], [1])
+    reinterpret = DmaReinterpretOp(
+        source,
+        offset,
+        [mismatched_shape],
+        [mismatched_stride],
+        result_type,
+    )
+
+    assert SymbolGetDimOp(reinterpret.result, 0).fold() is None
+    assert SymbolGetStrideOp(reinterpret.result, 0).fold() is None
 
 
 # TC-SYM-062
