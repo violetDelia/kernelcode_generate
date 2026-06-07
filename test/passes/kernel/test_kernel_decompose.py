@@ -2,7 +2,7 @@
 
 功能说明:
 - 覆盖 `KernelDecomposePass` 的公开 registry 入口、动态 acc 分解和 no-op 边界。
-- 覆盖可证明安全的 initial `dma.fill(out, 0)` 删除。
+- 覆盖 `kernel-decompose` 保留 existing `dma.fill` 的职责边界。
 
 使用示例:
 - pytest -q test/passes/kernel/test_kernel_decompose.py
@@ -15,42 +15,11 @@
 
 from __future__ import annotations
 
-from xdsl.dialects.builtin import ModuleOp
-from xdsl.utils.exceptions import VerifyException
-
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
 from kernel_gen.tools.ircheck import run_ircheck_text
 
 _PASS = "--pass kernel-decompose"
-_ROLLBACK_VERIFY_STATE = {"original": None, "done": False}
-
-
-def _verify_module_with_fill_removed_failure(self: ModuleOp, verify_nested_ops: bool = True) -> None:
-    """模拟 fill 删除后 module verify 失败。
-
-    功能说明:
-    - 仅当 module 已无 fusion、已生成 matmul、且不再包含 `dma.fill` 时失败一次。
-    - 其它场景委托给测试保存的原始 `ModuleOp.verify`。
-    - 通过全局状态避免在测试函数内部定义嵌套函数。
-
-    使用示例:
-    - monkeypatch.setattr(ModuleOp, "verify", _verify_module_with_fill_removed_failure)
-    """
-
-    module_text = str(self)
-    should_fail = (
-        not _ROLLBACK_VERIFY_STATE["done"]
-        and '"kernel.matmul_fusion"' not in module_text
-        and '"kernel.matmul"' in module_text
-        and '"dma.fill"' not in module_text
-    )
-    if should_fail:
-        _ROLLBACK_VERIFY_STATE["done"] = True
-        raise VerifyException("forced kernel-decompose fill removal failure")
-    original = _ROLLBACK_VERIFY_STATE["original"]
-    assert original is not None
-    original(self, verify_nested_ops=verify_nested_ops)
 
 
 def _run_decompose_case(case_name: str, case_text: str) -> str:
@@ -227,16 +196,16 @@ builtin.module {{
     assert "scf.if" not in actual
 
 
-def test_kernel_decompose_removes_zero_fill_before_dynamic_acc_matmul() -> None:
-    """验证可证明安全的 initial zero fill 被删除。
+def test_kernel_decompose_keeps_zero_fill_before_dynamic_acc_matmul() -> None:
+    """验证 kernel-decompose 保留 initial zero fill。
 
     功能说明:
     - `dma.fill(out, 0)` 位于 K loop 前。
-    - fusion acc 是 `symbol.ne(k_iter, k_start)`，loop 静态可证明至少执行一次。
-    - 输出应删除 fill，并保留动态 acc matmul。
+    - fusion acc 是 `symbol.ne(k_iter, k_start)`。
+    - 输出只分解 fusion，并保留 fill 供后续 canonicalization 判断。
 
     使用示例:
-    - pytest -q test/passes/kernel/test_kernel_decompose.py -k removes_zero_fill
+    - pytest -q test/passes/kernel/test_kernel_decompose.py -k keeps_zero_fill
     """
 
     case_text = f"""// COMPILE_ARGS: {_PASS}
@@ -245,7 +214,7 @@ def test_kernel_decompose_removes_zero_fill_before_dynamic_acc_matmul() -> None:
 #C32 = #symbol.expr<32>
 #ItK = #symbol.iter<start = #C0, end = #C32, step = #C32>
 builtin.module {{
-  func.func @remove_initial_zero_fill_case(
+  func.func @keep_initial_zero_fill_case(
       %out : !nn.memory<[#symbol.expr<8>, #symbol.expr<16>], [#symbol.expr<16>, #symbol.expr<1>], f32, #nn.space<tsm>>,
       %lhs : !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], f32, #nn.space<tsm>>,
       %rhs : !nn.memory<[#symbol.expr<32>, #symbol.expr<16>], [#symbol.expr<16>, #symbol.expr<1>], f32, #nn.space<tsm>>) {{
@@ -260,19 +229,19 @@ builtin.module {{
     func.return
   }}
 }}"""
-    actual = _run_decompose_case("remove_initial_zero_fill", case_text)
-    assert '"dma.fill"' not in actual
+    actual = _run_decompose_case("keep_initial_zero_fill", case_text)
+    assert actual.count('"dma.fill"') == 1
     assert '"kernel.matmul_fusion"' not in actual
     assert "scf.if" not in actual
     assert actual.count('"kernel.matmul"') == 1
 
 
-def test_kernel_decompose_allows_pure_alias_setup_before_k_loop() -> None:
-    """验证 loop 前纯 alias setup 不阻断安全 fill 删除。
+def test_kernel_decompose_keeps_fill_with_pure_alias_setup_before_k_loop() -> None:
+    """验证 loop 前纯 alias setup 下仍保留 fill。
 
     功能说明:
     - `dma.reshape` 仅建立 out 的 alias result，不读写 memory。
-    - acc 与 trip count 仍满足首轮覆盖证明，initial fill 应被删除。
+    - `kernel-decompose` 只分解 fusion，不依据 alias 或 trip count 删除 fill。
 
     使用示例:
     - pytest -q test/passes/kernel/test_kernel_decompose.py -k pure_alias_setup
@@ -304,17 +273,17 @@ builtin.module {{
   }}
 }}"""
     actual = _run_decompose_case("allow_alias_setup", case_text)
-    assert '"dma.fill"' not in actual
+    assert actual.count('"dma.fill"') == 1
     assert '"kernel.matmul_fusion"' not in actual
     assert actual.count('"kernel.matmul"') == 1
 
 
 def test_kernel_decompose_keeps_fill_for_alias_write_before_k_loop() -> None:
-    """验证 loop 前 alias 写入会阻断 initial fill 删除。
+    """验证 loop 前 alias 写入场景仍只分解 fusion。
 
     功能说明:
     - `dma.reshape` 把 out 纳入 alias 闭包。
-    - loop 前对 alias 执行 `dma.fill`，属于首轮覆盖前写入，initial fill 必须保留。
+    - loop 前对 alias 执行 `dma.fill`，`kernel-decompose` 不删除任一 fill。
 
     使用示例:
     - pytest -q test/passes/kernel/test_kernel_decompose.py -k alias_write_before_k_loop
@@ -388,48 +357,6 @@ builtin.module {{
     actual = _run_decompose_case("keep_fill_loop_body_read", case_text)
     assert '"dma.fill"' in actual
     assert '"kernel.binary_elewise"' in actual
-    assert '"kernel.matmul_fusion"' not in actual
-    assert actual.count('"kernel.matmul"') == 1
-
-
-def test_kernel_decompose_rolls_back_fill_removal_when_verify_fails(monkeypatch) -> None:
-    """验证删除 fill 后 module verify 失败会回滚。
-
-    功能说明:
-    - 用公开 `ModuleOp.verify` monkeypatch 模拟删除 fill 后 verifier 失败。
-    - rollback 后 ircheck 仍通过，且输出保留 `dma.fill`。
-    - 该用例锁定删除动作必须有 module verify 和 no-op 回滚保护。
-
-    使用示例:
-    - pytest -q test/passes/kernel/test_kernel_decompose.py -k rolls_back_fill_removal
-    """
-
-    _ROLLBACK_VERIFY_STATE["original"] = ModuleOp.verify
-    _ROLLBACK_VERIFY_STATE["done"] = False
-    monkeypatch.setattr(ModuleOp, "verify", _verify_module_with_fill_removed_failure)
-    case_text = f"""// COMPILE_ARGS: {_PASS}
-#C0 = #symbol.expr<0>
-#C32 = #symbol.expr<32>
-#ItK = #symbol.iter<start = #C0, end = #C32, step = #C32>
-builtin.module {{
-  func.func @rollback_initial_zero_fill_case(
-      %out : !nn.memory<[#symbol.expr<8>, #symbol.expr<16>], [#symbol.expr<16>, #symbol.expr<1>], f32, #nn.space<tsm>>,
-      %lhs : !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], f32, #nn.space<tsm>>,
-      %rhs : !nn.memory<[#symbol.expr<32>, #symbol.expr<16>], [#symbol.expr<16>, #symbol.expr<1>], f32, #nn.space<tsm>>) {{
-    %c0 = symbol.const 0 : !symbol.int<#C0>
-    %c32 = symbol.const 32 : !symbol.int<#C32>
-    %zero = arith.constant 0.000000e+00 : f32
-    "dma.fill"(%out, %zero) : (!nn.memory<[#symbol.expr<8>, #symbol.expr<16>], [#symbol.expr<16>, #symbol.expr<1>], f32, #nn.space<tsm>>, f32) -> ()
-    symbol.for %k = %c0 to %c32 step %c32 {{iter = #ItK}} {{
-      %acc = symbol.ne %k, %c0 : !symbol.iter<start = #C0, end = #C32, step = #C32>, !symbol.int<#C0> -> i1
-      "kernel.matmul_fusion"(%out, %lhs, %rhs, %acc) {{fusion_list = "kernel.matmul,kernel.binary_elewise.add", space = #nn.space<tsm>}} : (!nn.memory<[#symbol.expr<8>, #symbol.expr<16>], [#symbol.expr<16>, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<32>, #symbol.expr<16>], [#symbol.expr<16>, #symbol.expr<1>], f32, #nn.space<tsm>>, i1) -> ()
-    }}
-    func.return
-  }}
-}}"""
-    actual = _run_decompose_case("rollback_initial_zero_fill", case_text)
-    assert _ROLLBACK_VERIFY_STATE["done"] is True
-    assert '"dma.fill"' in actual
     assert '"kernel.matmul_fusion"' not in actual
     assert actual.count('"kernel.matmul"') == 1
 

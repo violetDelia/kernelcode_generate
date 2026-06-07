@@ -70,7 +70,7 @@ def _assert_source_uses_accumulator(source: str, *, expect_initial_fill: bool = 
     - 当前测试文件内 helper，只服务公开 demo 输出的源码文本断言。
     - 默认要求 `fill -> matmul -> add -> output deslice`，避免 K loop partial 直接覆盖 output。
     - 输出 deslice 兼容旧 `deslice(arg0, ...)` 与 context-first `deslice(ctx, arg0, ...)` 生成源码形态。
-    - dynamic acc 形态要求无 `fill<`，但 `matmul(... acc)` 仍早于 bias add 与 output deslice。
+    - 当 `expect_initial_fill=False` 时要求无 `fill<`，但 `matmul(... acc)` 仍早于 bias add 与 output deslice。
 
     使用示例:
     - `_assert_source_uses_accumulator(source)`
@@ -433,7 +433,7 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
     assert "slice(" in source
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
-    _assert_source_uses_accumulator(source)
+    _assert_source_uses_accumulator(source, expect_initial_fill=False)
 
 
 def test_static_static_matmul_demo_keeps_static_memory_and_static_tile_reduce() -> None:

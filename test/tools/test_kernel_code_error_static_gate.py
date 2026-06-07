@@ -43,8 +43,6 @@ PRODUCTION_ALLOWLIST: dict[tuple[str, str, str], str] = {
         "numeric parse fallback to SymbolDim; no public exception crosses boundary",
     ("kernel_gen/passes/memory/memory_pool.py", "_safe_simplify_expr", "Exception"):
         "SymPy conservative simplify fallback returns original expression",
-    ("kernel_gen/passes/kernel/kernel_decompose.py", "loop_body_before_fusion_blocks_initial_fill", "ValueError"):
-        "index lookup miss conservatively blocks fill deletion",
     ("kernel_gen/passes/memory/memory_plan.py", "_apply_auto_pad", "TypeError"):
         "auto-pad candidate construction failure skips unsupported rewrite",
     ("kernel_gen/passes/memory/memory_plan.py", "_apply_auto_pad", "ValueError"):

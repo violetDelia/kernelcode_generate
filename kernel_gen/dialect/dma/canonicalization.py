@@ -2,7 +2,7 @@
 
 功能说明:
 - 提供 dma.fill dead-fill、dma.view identity-view 与 dma.reshape identity/composition 的 canonicalization trait。
-- pattern 内只按当前公开 dma op 语义做同 block 局部改写。
+- pattern 内按当前公开 dma/kernel/symbol/scf op 语义做保守局部改写。
 
 API 列表:
 - `class DmaFillCanonicalizationTrait(HasCanonicalizationPatternsTrait)`
@@ -24,7 +24,8 @@ from kernel_gen .core .error import ErrorKind ,ErrorModule ,kernel_code_error
 
 from collections .abc import Sequence
 
-from xdsl .dialects .builtin import ArrayAttr
+from xdsl .dialects import arith
+from xdsl .dialects .builtin import ArrayAttr, FloatAttr, IntAttr, IntegerAttr
 from xdsl .ir import Attribute ,Operation ,OpResult ,SSAValue
 from xdsl .pattern_rewriter import PatternRewriter ,RewritePattern
 from xdsl .traits import EffectInstance ,HasCanonicalizationPatternsTrait ,MemoryEffectKind ,get_effects
@@ -483,6 +484,315 @@ class _DmaCanonicalizationRules:
         return False
 
     @staticmethod
+    def has_later_matmul_or_private_alloc_dead_path (op :Operation )->bool :
+        """查找 dynamic acc matmul 或 local alloc safe-if dead-fill 删除路径。
+
+        功能说明:
+        - 作为 `dma.fill` canonicalization 的计划内补充规则。
+        - dynamic acc matmul 只接受 loop 至少执行一次、acc 为 `symbol.ne(iter,start)` 且 value 为精确 0。
+        - local alloc 路径允许受控 `scf.if` 分支内 full `dma.deslice` 支配 target/alias read，并继续扫描 if 后 sibling。
+        - 只追踪 fill target/root 的一跳 DMA alias；多跳 alias、unknown effect、nested region 或 escape 均失败。
+
+        使用示例:
+        - if _DmaCanonicalizationRules.has_later_matmul_or_private_alloc_dead_path(fill): ...
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/dma/
+        - 功能实现: kernel_gen/dialect/dma/
+        """
+
+        if op .name !="dma.fill":
+            return False
+        block =op .parent_block ()
+        if block is None:
+            return False
+        target =SSAValue .get (op .target )
+        root =target
+        root_probe =target .owner
+        root_hops =0
+        while isinstance (root_probe ,Operation )and root_hops <2:
+            if root_probe .name in ("dma.view","dma.reshape","dma.reinterpret"):
+                root =SSAValue .get (root_probe .source )
+                root_probe =root .owner
+                root_hops +=1
+                continue
+            if root_probe .name =="dma.subview" and len (root_probe .source )==1:
+                root =SSAValue .get (root_probe .source [0 ])
+                root_probe =root .owner
+                root_hops +=1
+                continue
+            break
+        aliases :set [SSAValue ]={target ,root }
+        alias_roots :set [SSAValue ]={target ,root }
+        full_aliases :set [SSAValue ]={target ,root }
+        value =SSAValue .get (op .value )
+        zero_fill =False
+        if isinstance (value .type ,SymbolValueType ):
+            zero_fill =value .type .expr .expr .data .strip ()=="0"
+        value_owner =value .owner
+        if isinstance (value_owner ,arith .ConstantOp ):
+            attr =value_owner .value
+            if isinstance (attr ,IntegerAttr ):
+                zero_fill =int (attr .value .data )==0
+            elif isinstance (attr ,IntAttr ):
+                zero_fill =int (attr .data )==0
+            elif isinstance (attr ,FloatAttr ):
+                zero_fill =float (attr .value .data )==0.0
+        candidate =op .next_op
+        while candidate is not None:
+            alias_sources :list [SSAValue ]=[]
+            if candidate .name in ("dma.view","dma.reshape","dma.reinterpret"):
+                alias_sources =[SSAValue .get (candidate .source )]
+            elif candidate .name =="dma.subview":
+                alias_sources =[SSAValue .get (source )for source in candidate .source ]
+            if alias_sources:
+                if len (alias_sources )==1 and alias_sources [0 ]in alias_roots:
+                    for result in candidate .results:
+                        result_value =SSAValue .get (result )
+                        aliases .add (result_value )
+                        if candidate .name =="dma.reshape" and alias_sources [0 ]in full_aliases:
+                            full_aliases .add (result_value )
+                    candidate =candidate .next_op
+                    continue
+                if any (source in aliases for source in alias_sources ):
+                    return False
+
+            root_owner =root .owner
+            root_is_local_alloc =isinstance (root_owner ,Operation )and root_owner .name =="dma.alloc"
+            if candidate .name =="symbol.for" and zero_fill:
+                loop_references_alias =False
+                for nested in candidate .walk ():
+                    for operand in nested .operands:
+                        if SSAValue .get (operand )in aliases:
+                            loop_references_alias =True
+                            break
+                    if loop_references_alias:
+                        break
+                if not loop_references_alias and root_is_local_alloc:
+                    candidate =candidate .next_op
+                    continue
+                start_expr =candidate .iter_attr .start .expr .data .strip ()
+                end_expr =candidate .iter_attr .end .expr .data .strip ()
+                step_expr =candidate .iter_attr .step .expr .data .strip ()
+                start_signless =start_expr [1 :]if start_expr .startswith ("-")else start_expr
+                end_signless =end_expr [1 :]if end_expr .startswith ("-")else end_expr
+                step_signless =step_expr [1 :]if step_expr .startswith ("-")else step_expr
+                if not start_signless .isdecimal ()or not end_signless .isdecimal ():
+                    return False
+                start_value =int (start_expr )
+                end_value =int (end_expr )
+                positive_trip =False
+                if step_signless .isdecimal ():
+                    positive_trip =int (step_expr )>0 and end_value >start_value
+                elif step_expr .startswith ("TILE_"):
+                    positive_trip =end_value >start_value
+                if not positive_trip:
+                    return False
+                body_ops =list (candidate .body .block .ops )
+                body_aliases =set (aliases )
+                body_alias_roots =set (alias_roots )
+                body_full_aliases =set (full_aliases )
+                for body_op in body_ops:
+                    body_alias_sources :list [SSAValue ]=[]
+                    if body_op .name in ("dma.view","dma.reshape","dma.reinterpret"):
+                        body_alias_sources =[SSAValue .get (body_op .source )]
+                    elif body_op .name =="dma.subview":
+                        body_alias_sources =[SSAValue .get (source )for source in body_op .source ]
+                    if body_alias_sources:
+                        if len (body_alias_sources )==1 and body_alias_sources [0 ]in body_alias_roots:
+                            for result in body_op .results:
+                                result_value =SSAValue .get (result )
+                                body_aliases .add (result_value )
+                                if body_op .name =="dma.reshape" and body_alias_sources [0 ]in body_full_aliases:
+                                    body_full_aliases .add (result_value )
+                            continue
+                        if any (source in body_aliases for source in body_alias_sources ):
+                            return False
+                    if body_op .name =="kernel.matmul" and len (body_op .operands )==4:
+                        matmul_out =SSAValue .get (body_op .operands [0 ])
+                        acc_value =SSAValue .get (body_op .operands [3 ])
+                        acc_owner =acc_value .owner
+                        if matmul_out in body_full_aliases and isinstance (acc_owner ,Operation )and acc_owner .name =="symbol.ne":
+                            if SSAValue .get (acc_owner .lhs )is candidate .body .block .args [0 ]:
+                                if SSAValue .get (acc_owner .rhs )is SSAValue .get (candidate .start ):
+                                    return True
+                        return False
+                    if len (body_op .regions )!=0:
+                        return False
+                    body_operands_hit =any (SSAValue .get (operand )in body_aliases for operand in body_op .operands )
+                    body_effects =get_effects (body_op )
+                    if body_effects is None:
+                        if body_operands_hit:
+                            return False
+                        continue
+                    for effect in body_effects:
+                        effect_value =effect .value
+                        if effect_value is None:
+                            return False
+                        if isinstance (effect_value ,SSAValue )and effect_value in body_aliases:
+                            return False
+                    if body_operands_hit:
+                        return False
+                return False
+
+            if root_is_local_alloc and candidate .name =="scf.if" and len (candidate .results )==0:
+                if len (candidate .regions )!=2:
+                    return False
+                for region in candidate .regions:
+                    region_blocks =list (region .blocks )
+                    if len (region_blocks )==0:
+                        continue
+                    if len (region_blocks )!=1:
+                        return False
+                    branch_aliases =set (aliases )
+                    branch_alias_roots =set (alias_roots )
+                    branch_full_aliases =set (full_aliases )
+                    covered =False
+                    for branch_op in region_blocks [0 ].ops:
+                        branch_alias_sources :list [SSAValue ]=[]
+                        if branch_op .name in ("dma.view","dma.reshape","dma.reinterpret"):
+                            branch_alias_sources =[SSAValue .get (branch_op .source )]
+                        elif branch_op .name =="dma.subview":
+                            branch_alias_sources =[SSAValue .get (source )for source in branch_op .source ]
+                        if branch_alias_sources:
+                            if len (branch_alias_sources )==1 and branch_alias_sources [0 ]in branch_alias_roots:
+                                for result in branch_op .results:
+                                    result_value =SSAValue .get (result )
+                                    branch_aliases .add (result_value )
+                                    if branch_op .name =="dma.reshape" and branch_alias_sources [0 ]in branch_full_aliases:
+                                        branch_full_aliases .add (result_value )
+                                continue
+                            if any (source in branch_aliases for source in branch_alias_sources ):
+                                return False
+                        if branch_op .name =="scf.yield":
+                            if any (SSAValue .get (operand )in branch_aliases for operand in branch_op .operands ):
+                                return False
+                            continue
+                        if len (branch_op .regions )!=0:
+                            return False
+                        if branch_op .name =="dma.deslice" and SSAValue .get (branch_op .target )in branch_aliases:
+                            if SSAValue .get (branch_op .target )not in branch_full_aliases:
+                                return False
+                            if SSAValue .get (branch_op .source )in branch_aliases:
+                                return False
+                            branch_target_type =branch_op .target .type
+                            if not isinstance (branch_target_type ,NnMemoryType ):
+                                return False
+                            full_offsets =all (
+                            isinstance (offset .type ,SymbolValueType )
+                            and offset .type .expr .expr .data .strip ()=="0"
+                            for offset in branch_op .offsets
+                            )
+                            full_sizes =len (branch_op .sizes )==len (branch_target_type .shape .data )
+                            if full_sizes:
+                                for size ,dim in zip (branch_op .sizes ,branch_target_type .shape .data ,strict =True ):
+                                    if not isinstance (size .type ,SymbolValueType ):
+                                        full_sizes =False
+                                        break
+                                    if not isinstance (dim ,SymbolExprAttr ):
+                                        full_sizes =False
+                                        break
+                                    if size .type .expr .expr .data .strip ()!=dim .expr .data .strip ():
+                                        full_sizes =False
+                                        break
+                            full_strides =all (
+                            isinstance (stride .type ,SymbolValueType )
+                            and stride .type .expr .expr .data .strip ()=="1"
+                            for stride in branch_op .strides
+                            )
+                            if full_offsets and full_sizes and full_strides:
+                                covered =True
+                                continue
+                            return False
+                        branch_operands_hit =any (SSAValue .get (operand )in branch_aliases for operand in branch_op .operands )
+                        branch_effects =get_effects (branch_op )
+                        if branch_effects is None:
+                            if branch_operands_hit:
+                                return False
+                            return False
+                        branch_alias_effect_seen =False
+                        for effect in branch_effects:
+                            effect_value =effect .value
+                            if effect_value is None:
+                                return False
+                            if not isinstance (effect_value ,SSAValue )or effect_value not in branch_aliases:
+                                continue
+                            branch_alias_effect_seen =True
+                            if effect .kind ==MemoryEffectKind .READ and covered:
+                                continue
+                            return False
+                        if branch_operands_hit and not branch_alias_effect_seen:
+                            return False
+                candidate =candidate .next_op
+                continue
+
+            if candidate .name =="dma.fill" and SSAValue .get (candidate .target )in full_aliases:
+                return True
+            if candidate .name =="dma.copy" and SSAValue .get (candidate .target )in full_aliases:
+                if SSAValue .get (candidate .source )in aliases:
+                    return False
+                return True
+            if candidate .name =="dma.broadcast" and SSAValue .get (candidate .target )in full_aliases:
+                if isinstance (candidate .source .type ,NnMemoryType ):
+                    if SSAValue .get (candidate .source )in aliases:
+                        return False
+                    return False
+                return True
+            if candidate .name =="dma.deslice" and SSAValue .get (candidate .target )in full_aliases:
+                if SSAValue .get (candidate .source )in aliases:
+                    return False
+                candidate_target_type =candidate .target .type
+                if not isinstance (candidate_target_type ,NnMemoryType ):
+                    return False
+                candidate_offsets =all (
+                isinstance (offset .type ,SymbolValueType )
+                and offset .type .expr .expr .data .strip ()=="0"
+                for offset in candidate .offsets
+                )
+                candidate_sizes =len (candidate .sizes )==len (candidate_target_type .shape .data )
+                if candidate_sizes:
+                    for size ,dim in zip (candidate .sizes ,candidate_target_type .shape .data ,strict =True ):
+                        if not isinstance (size .type ,SymbolValueType ):
+                            candidate_sizes =False
+                            break
+                        if not isinstance (dim ,SymbolExprAttr ):
+                            candidate_sizes =False
+                            break
+                        if size .type .expr .expr .data .strip ()!=dim .expr .data .strip ():
+                            candidate_sizes =False
+                            break
+                candidate_strides =all (
+                isinstance (stride .type ,SymbolValueType )
+                and stride .type .expr .expr .data .strip ()=="1"
+                for stride in candidate .strides
+                )
+                if candidate_offsets and candidate_sizes and candidate_strides:
+                    return True
+                return False
+            if len (candidate .regions )!=0:
+                return False
+            operands_hit =any (SSAValue .get (operand )in aliases for operand in candidate .operands )
+            effects =get_effects (candidate )
+            if effects is None:
+                if operands_hit:
+                    return False
+                return False
+            for effect in effects:
+                effect_value =effect .value
+                if effect_value is None:
+                    return False
+                if not isinstance (effect_value ,SSAValue )or effect_value not in aliases:
+                    continue
+                if root_is_local_alloc and effect .kind ==MemoryEffectKind .FREE:
+                    return True
+                return False
+            if operands_hit:
+                return False
+            candidate =candidate .next_op
+        return isinstance (root .owner ,Operation )and root .owner .name =="dma.alloc"
+
+    @staticmethod
     def symbol_operands_match_layout (values :Sequence [SSAValue ],layout :ArrayAttr [Attribute ])->bool :
         """判断 symbol operand 列表是否与 layout 逐维一致。
 
@@ -677,7 +987,7 @@ class DmaDeadFillCanonicalizationPattern (RewritePattern ):
 
         if op .name !="dma.fill":
             return
-        if _DmaCanonicalizationRules.has_later_full_overwrite(op ):
+        if _DmaCanonicalizationRules.has_later_full_overwrite(op ) or _DmaCanonicalizationRules.has_later_matmul_or_private_alloc_dead_path(op ):
             rewriter .erase_op (op )
 
 

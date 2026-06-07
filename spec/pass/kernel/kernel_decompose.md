@@ -4,7 +4,7 @@
 
 - 定义 `kernel-decompose` pass 的公开合同。
 - 该 pass 在 source/emit 前把 `kernel.matmul_fusion` 分解为带动态 acc operand 的单条 `kernel.matmul`。
-- 该 pass 只在可机械证明安全时删除对应的初始 `dma.fill(out, 0)`。
+- 该 pass 不删除 `dma.fill`；所有 fill 删除由后续 canonicalization 按 `dma.fill` 合同判断。
 
 ## API 列表
 
@@ -42,13 +42,13 @@
   kernel_decompose = KernelDecomposePass()
   ```
 
-- 功能说明：`KernelDecomposePass` 是公开 pass 入口，registry name 固定为 `kernel-decompose`；第一版负责把 `kernel.matmul_fusion(out,lhs,rhs,acc)` 规整为单条带动态 acc operand 的 `kernel.matmul(out,lhs,rhs,acc)`，并在同次分解中尝试删除可证明安全的初始 `dma.fill(out, 0)`。
+- 功能说明：`KernelDecomposePass` 是公开 pass 入口，registry name 固定为 `kernel-decompose`；第一版负责把 `kernel.matmul_fusion(out,lhs,rhs,acc)` 规整为单条带动态 acc operand 的 `kernel.matmul(out,lhs,rhs,acc)`，并保留已有 `dma.fill`。
 - 注意事项：
   - 本 pass 只处理 `kernel.matmul_fusion`，不处理其它 kernel 聚合 op。
   - 分解后不得残留 `kernel.matmul_fusion`，不得生成旧 `scf.if` 双分支，且不得写静态 `acc=true/false` attr。
   - `kernel.matmul_fusion.fusion_list` 是 metadata；非空字符串不得改变输出 IR，不得复制到普通 `kernel.matmul`。
   - 本 pass 不新增 include helper；source/emit 由 `kernel.matmul` 动态 acc 直接承接现有 `npu_demo::matmul(..., bool acc)` 参数。
-  - 本 pass 不是通用 `dma.fill` canonicalization；fill 删除只允许在 `apply(...)` 处理 fusion 时按本文安全规则伴随执行。
+  - 本 pass 不是 `dma.fill` canonicalization；不得在 `apply(...)` 处理 fusion 时删除任何 `dma.fill`。
 
 ### `KernelDecomposePass.from_options(options: dict[str, str]) -> KernelDecomposePass`
 
@@ -92,18 +92,11 @@
   kernel.matmul(%out, %lhs, %rhs, %acc)
   ```
 
-  分解后不得保留 `kernel.matmul_fusion`；局部生成的动态 acc matmul verifier 失败时必须 fail-fast，稳定错误短语包含 `kernel-decompose matmul acc`。
+  分解后不得保留 `kernel.matmul_fusion`；局部生成的动态 acc matmul verifier 失败时必须 fail-fast，稳定错误短语包含 `kernel-decompose matmul acc`。已有 `dma.fill` 必须保留，等待后续 `CanonicalizePass` 按 `dma.fill` 合同判断是否删除。
 - 注意事项：
-  - 对可证明安全的 initial `dma.fill(out, 0)`，本方法可在同次 decomposition 中删除；无法证明时必须保留。
-  - 只处理 `kernel.matmul_fusion` 所在 `symbol.for` 的直接外层初始化 fill。
-  - fill target 必须与 fusion out 是同一 SSA value。
-  - fill value 必须是精确 zero 常量。
-  - loop 必须可通过 `iter` attr 静态证明至少执行一次。
-  - fusion acc 必须通过 SSA 身份证明为 `symbol.ne(k_iter, k_start)`。
-  - fill 与 loop 之间允许存在 `dma.view`、`dma.subview`、`dma.reshape`、`dma.reinterpret` 这类公开 NoMemoryEffect alias setup。
-  - fill 与 loop 之间不得存在对 out 或其 alias/use-def 闭包中 memory value 的读、写、逃逸或未知 effect；无法证明时必须保留 fill。
-  - fusion 所在 `symbol.for` body 内，从 body 起点到当前 fusion 之前，也不得存在对 out 或其 alias/use-def 闭包中 memory value 的读、写、逃逸、region capture 或未知 effect；命中时必须保留 fill。
-  - 删除 fill 后必须执行 module verify；verify 失败必须回滚为保留 fill 的 no-op，不得留下部分删除状态。
+  - 不根据 loop trip count、acc 形态、zero 常量或 out alias live-read 情况删除 fill。
+  - `kernel.matmul_fusion.fusion_list` 只作为 metadata 被丢弃，不影响 fill 是否保留。
+  - 旧 `expectation.pass.kernel_decompose` initial fill 删除 case 已按用户确认降为历史只读来源，不列为本 spec 当前必过合同验收。
 
 ## 测试
 
@@ -113,11 +106,11 @@
 - 执行命令：`pytest -q test/passes/kernel/test_kernel_decompose.py`
 - 执行命令：`pytest -q test/passes/test_registry.py -k 'kernel_aggregate or kernel_decompose'`
 - 执行命令：`pytest -q test/passes/pipeline/test_npu_demo_lowering.py`
-- 合同验收资产：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=<任务worktree>:/home/lfr/kernelcode_generate python3 -m expectation.pass.kernel_decompose`
+- 历史只读合同来源：旧 `expectation.pass.kernel_decompose` initial fill 删除 case；按用户确认，该 case 不列为当前必过合同验收。
 
 ### 测试目标
 
-- 验证 `kernel-decompose` registry 入口、option 失败语义、fusion 分解、dynamic acc matmul verifier 失败语义、fill 删除安全证明、fill 删除 rollback、旧 pass 名称退场和 pipeline 顺序。
+- 验证 `kernel-decompose` registry 入口、option 失败语义、fusion 分解、dynamic acc matmul verifier 失败语义、fill 保留职责边界、旧 pass 名称退场和 pipeline 顺序。
 
 ### 功能与用例清单
 
@@ -128,10 +121,9 @@
 | TC-PASS-KERNEL-DECOMPOSE-003 | no-op | 无 fusion | IR 不含 `kernel.matmul_fusion` | 执行 `pytest -q test/passes/kernel/test_kernel_decompose.py` | module 保持 no-op | `test_kernel_decompose_no_fusion_no_op` |
 | TC-PASS-KERNEL-DECOMPOSE-004 | option 失败 | unknown option | registry 传入非空 option | 执行 `pytest -q test/passes/kernel/test_kernel_decompose.py` | fail-fast，错误短语包含 `kernel-decompose options` | `test_kernel_decompose_rejects_options` |
 | TC-PASS-KERNEL-DECOMPOSE-005 | metadata 丢弃 | 非空 `fusion_list` | IR fusion 带非空 `fusion_list` | 执行 `pytest -q test/passes/kernel/test_kernel_decompose.py` | 输出不残留 `fusion_list` metadata | `test_kernel_decompose_ignores_fusion_list_metadata` |
-| TC-PASS-KERNEL-DECOMPOSE-006 | fill 删除 | 安全 initial zero fill | loop 可证明至少执行一次，acc 为 `symbol.ne(k_iter,k_start)` | 执行 `pytest -q test/passes/kernel/test_kernel_decompose.py` | 删除 `dma.fill(out, 0)` 并保留动态 acc matmul | `test_kernel_decompose_removes_zero_fill_before_dynamic_acc_matmul` |
-| TC-PASS-KERNEL-DECOMPOSE-007 | fill 删除 | loop 前纯 alias setup | fill 与 loop 之间仅有 NoMemoryEffect alias setup | 执行 `pytest -q test/passes/kernel/test_kernel_decompose.py` | 不阻断安全 fill 删除 | `test_kernel_decompose_allows_pure_alias_setup_before_k_loop` |
-| TC-PASS-KERNEL-DECOMPOSE-008 | fill 保留 | loop 前 alias 写入 | fill 与 loop 之间存在 out alias 写入 | 执行 `pytest -q test/passes/kernel/test_kernel_decompose.py` | 保留 initial fill，只分解 fusion | `test_kernel_decompose_keeps_fill_for_alias_write_before_k_loop` |
+| TC-PASS-KERNEL-DECOMPOSE-006 | fill 保留 | initial zero fill | loop 中 acc 为 `symbol.ne(k_iter,k_start)` | 执行 `pytest -q test/passes/kernel/test_kernel_decompose.py` | 保留 `dma.fill(out, 0)`，并分解 fusion 为动态 acc matmul | `test_kernel_decompose_keeps_zero_fill_before_dynamic_acc_matmul` |
+| TC-PASS-KERNEL-DECOMPOSE-007 | fill 保留 | loop 前纯 alias setup | fill 与 loop 之间仅有 NoMemoryEffect alias setup | 执行 `pytest -q test/passes/kernel/test_kernel_decompose.py` | 保留 initial fill，只分解 fusion | `test_kernel_decompose_keeps_fill_with_pure_alias_setup_before_k_loop` |
+| TC-PASS-KERNEL-DECOMPOSE-008 | fill 保留 | loop 前 alias 写入 | fill 与 loop 之间存在 out alias 写入 | 执行 `pytest -q test/passes/kernel/test_kernel_decompose.py` | 保留所有 fill，只分解 fusion | `test_kernel_decompose_keeps_fill_for_alias_write_before_k_loop` |
 | TC-PASS-KERNEL-DECOMPOSE-009 | fill 保留 | acc 无法证明首轮覆盖 | fusion acc 不是 `symbol.ne(k_iter,k_start)` | 执行 `pytest -q test/passes/kernel/test_kernel_decompose.py` | 保留 `dma.fill`，只分解 fusion | `test_kernel_decompose_keeps_fill_for_noncanonical_acc` |
 | TC-PASS-KERNEL-DECOMPOSE-010 | fill 保留 | 同一 loop body 内 fusion 前读取 out | fusion 前存在 out 读或 alias 闭包使用 | 执行 `pytest -q test/passes/kernel/test_kernel_decompose.py` | 保留 initial fill，只分解 fusion | `test_kernel_decompose_keeps_fill_when_loop_body_reads_out_before_fusion` |
-| TC-PASS-KERNEL-DECOMPOSE-011 | rollback | 删除 fill 后 module verify 失败 | 删除 fill 会导致 module verify 失败 | 执行 `pytest -q test/passes/kernel/test_kernel_decompose.py` | 回滚为保留 `dma.fill` 的 no-op | `test_kernel_decompose_rolls_back_fill_removal_when_verify_fails` |
 | TC-PASS-KERNEL-DECOMPOSE-012 | 稳定错误 | fusion acc 非 i1 导致动态 matmul局部 verifier 失败 | fusion acc 类型为非 i1 | 执行 `pytest -q test/passes/kernel/test_kernel_decompose.py` | fail-fast `kernel-decompose matmul acc`，不得泄漏 `NameError` | `test_kernel_decompose_reports_stable_error_for_invalid_fusion_acc` |

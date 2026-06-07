@@ -191,7 +191,8 @@ def _assert_accumulator_source(source: str) -> None:
 
 
     功能说明:
-    - 只检查公开生成源码的关键顺序：`fill -> matmul -> add -> output deslice`。
+    - 只检查公开生成源码的关键顺序：`matmul -> add -> output deslice`。
+    - static input / dynamic tile 下 acc initial fill 应由 canonicalization 删除。
     - 支持 context-first 生成源码中的 `deslice(ctx, arg0, ...)` 调用形态。
     - 防止 K loop partial 直接覆盖 output tile 的回退。
 
@@ -199,14 +200,19 @@ def _assert_accumulator_source(source: str) -> None:
     - `_assert_accumulator_source(source)`
     """
 
-    fill_index = source.index("fill<")
     matmul_index = source.index("matmul<")
-    add_index = source.index("add<")
-    output_deslice_index = source.find("deslice(arg0", add_index)
+    output_deslice_index = source.find("deslice(arg0", matmul_index)
     if output_deslice_index == -1:
-        output_deslice_index = source.index("deslice(ctx, arg0", add_index)
-    if not (fill_index < matmul_index < add_index < output_deslice_index):
-        raise AssertionError("matmul accumulator source order must be fill -> matmul -> add -> output deslice")
+        output_deslice_index = source.index("deslice(ctx, arg0", matmul_index)
+    add_index = source.find("add<", matmul_index, output_deslice_index)
+    if "fill<" in source:
+        raise AssertionError("static dynamic matmul source must not retain acc initial fill")
+    if "/*acc*/" not in source:
+        raise AssertionError("static dynamic matmul source must pass dynamic acc to matmul")
+    if add_index != -1 and not (matmul_index < add_index < output_deslice_index):
+        raise AssertionError("matmul accumulator source order must be matmul -> add -> output deslice")
+    if not (matmul_index < output_deslice_index):
+        raise AssertionError("matmul accumulator source order must be matmul -> output deslice")
 
 
 def _assert_source_dump_matches(source: str) -> None:

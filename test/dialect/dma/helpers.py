@@ -48,6 +48,7 @@ from xdsl.dialects.builtin import (
     i32,
 )
 from xdsl.dialects.builtin import ModuleOp
+from xdsl.dialects.scf import Scf
 from xdsl.dialects.test import Test, TestOp as _TestOp, TestTermOp as _TestTermOp
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.parser import Parser
@@ -83,6 +84,7 @@ from kernel_gen.dialect.dma import (
     DmaSubviewOp,
     DmaViewOp,
 )
+from kernel_gen.dialect.kernel import Kernel
 from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolIterType, SymbolValueType
 from kernel_gen.passes.pass_manager import Pass, PassManager
@@ -130,6 +132,8 @@ def _build_context() -> Context:
     ctx.load_dialect(Symbol)
     ctx.load_dialect(Nn)
     ctx.load_dialect(Dma)
+    ctx.load_dialect(Kernel)
+    ctx.load_dialect(Scf)
     return ctx
 
 

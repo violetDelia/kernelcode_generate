@@ -11,6 +11,11 @@
 - 测试文件: test/dialect/dma/test_canonicalization.py
 """
 
+from xdsl.dialects import scf
+
+from kernel_gen.dialect.kernel import KernelMatmulFusionOp, KernelMatmulOp
+from kernel_gen.dialect.symbol import SymbolForOp, SymbolNeOp
+
 from test.dialect.dma.helpers import *  # noqa: F401,F403
 
 def test_dma_fill_canonicalization_removes_safe_full_overwrites() -> None:
@@ -438,6 +443,442 @@ def test_dma_fill_canonicalization_keeps_subview_and_memory_broadcast_aliases() 
     )
     assert _count_ops(broadcast_subview_alias, DmaFillOp) == 1
     assert _count_ops(broadcast_subview_alias, DmaSubviewOp) == 1
+
+def test_dma_fill_canonicalization_keeps_root_fill_before_partial_alias_writer_and_root_read() -> None:
+    """验证 partial alias writer 不能当作 root fill 的完整覆盖。
+
+    功能说明:
+    - `fill(root) -> subview(root partial) -> fill(subview) -> read(root)` 必须保留 root fill。
+    - 锁定 partial alias writer 不会跳过后续 root read。
+
+    使用示例:
+    - pytest -q test/dialect/dma/test_canonicalization.py -k partial_alias_writer
+    """
+
+    root_type = _make_memory_type(shape=_dim_array([8]), stride=_dim_array([1]), element_type=i8)
+    subview_type = _make_memory_type(shape=_dim_array([4]), stride=_dim_array([1]), element_type=i8)
+    root_op = _TestOp(result_types=[root_type])
+    reader_op = _TestOp(result_types=[root_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c4_op = _make_symbol_value_op(4)
+    subview = DmaSubviewOp(root_op.results[0], c0_op.results[0], c4_op.results[0], c1_op.results[0], subview_type)
+    module = _canonicalized_module(
+        [
+            root_op,
+            reader_op,
+            c0_op,
+            c1_op,
+            c4_op,
+            DmaFillOp(root_op.results[0], c0_op.results[0]),
+            subview,
+            DmaFillOp(subview.result, c1_op.results[0]),
+            DmaCopyOp(reader_op.results[0], root_op.results[0]),
+        ]
+    )
+    assert _count_ops(module, DmaFillOp) == 2
+    assert _count_ops(module, DmaSubviewOp) == 1
+
+def test_dma_fill_canonicalization_removes_zero_fill_before_static_trip_dynamic_acc_matmul() -> None:
+    """验证静态正 trip count 下 dynamic acc matmul 可删除 acc zero fill。
+
+    功能说明:
+    - 覆盖 `start/end/step` 全静态且 `end > start`、`step > 0` 的正例。
+    - 通过公开 `CanonicalizePass` 删除 loop 前 `dma.fill`，不依赖 `kernel-decompose`。
+
+    使用示例:
+    - pytest -q test/dialect/dma/test_canonicalization.py -k static_trip_dynamic_acc_matmul
+    """
+
+    out_type = _make_memory_type(shape=_dim_array([2, 4]), stride=_dim_array([4, 1]), space="tsm")
+    lhs_type = _make_memory_type(shape=_dim_array([2, 8]), stride=_dim_array([8, 1]), space="tsm")
+    rhs_type = _make_memory_type(shape=_dim_array([8, 4]), stride=_dim_array([4, 1]), space="tsm")
+    out_op = _TestOp(result_types=[out_type])
+    lhs_op = _TestOp(result_types=[lhs_type])
+    rhs_op = _TestOp(result_types=[rhs_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c8_op = _make_symbol_value_op(8)
+    static_body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "1")])
+    static_acc = SymbolNeOp(static_body.args[0], c0_op.results[0])
+    static_matmul = KernelMatmulOp(out_op.results[0], lhs_op.results[0], rhs_op.results[0], _make_space("tsm"), acc=static_acc.result)
+    static_body.add_ops([static_acc, static_matmul])
+    static_loop = SymbolForOp(c0_op.results[0], c8_op.results[0], c1_op.results[0], static_body)
+    static_module = _canonicalized_module(
+        [
+            out_op,
+            lhs_op,
+            rhs_op,
+            c0_op,
+            c1_op,
+            c8_op,
+            DmaFillOp(out_op.results[0], c0_op.results[0]),
+            static_loop,
+        ]
+    )
+    assert _count_ops(static_module, DmaFillOp) == 0
+
+def test_dma_fill_canonicalization_removes_zero_fill_with_positive_symbol_step() -> None:
+    """验证 DU1-A positive runtime tile step 下删除 acc zero fill。
+
+    功能说明:
+    - 覆盖 `start/end` 静态正区间、`step = TILE_K` 的 runtime tile 参数场景。
+    - 通过公开 `CanonicalizePass` 删除 loop 前 `dma.fill`，不假设 dynamic end 为正。
+
+    使用示例:
+    - pytest -q test/dialect/dma/test_canonicalization.py -k positive_symbol_step
+    """
+
+    out_type = _make_memory_type(shape=_dim_array([2, 4]), stride=_dim_array([4, 1]), space="tsm")
+    lhs_type = _make_memory_type(shape=_dim_array([2, 8]), stride=_dim_array([8, 1]), space="tsm")
+    rhs_type = _make_memory_type(shape=_dim_array([8, 4]), stride=_dim_array([4, 1]), space="tsm")
+    out_op = _TestOp(result_types=[out_type])
+    lhs_op = _TestOp(result_types=[lhs_type])
+    rhs_op = _TestOp(result_types=[rhs_type])
+    c0_op = _make_symbol_value_op(0)
+    c8_op = _make_symbol_value_op(8)
+    tile_k_op = _make_symbol_value_op("TILE_K")
+    symbol_step_body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "TILE_K")])
+    symbol_step_acc = SymbolNeOp(symbol_step_body.args[0], c0_op.results[0])
+    symbol_step_matmul = KernelMatmulOp(
+        out_op.results[0],
+        lhs_op.results[0],
+        rhs_op.results[0],
+        _make_space("tsm"),
+        acc=symbol_step_acc.result,
+    )
+    symbol_step_body.add_ops([symbol_step_acc, symbol_step_matmul])
+    symbol_step_loop = SymbolForOp(c0_op.results[0], c8_op.results[0], tile_k_op.results[0], symbol_step_body)
+    symbol_step_module = _canonicalized_module(
+        [
+            out_op,
+            lhs_op,
+            rhs_op,
+            c0_op,
+            c8_op,
+            tile_k_op,
+            DmaFillOp(out_op.results[0], c0_op.results[0]),
+            symbol_step_loop,
+        ]
+    )
+    assert _count_ops(symbol_step_module, DmaFillOp) == 0
+
+def test_dma_fill_canonicalization_keeps_dynamic_acc_matmul_boundaries() -> None:
+    """验证 dynamic acc matmul dead-fill 的保守反例边界。
+
+    功能说明:
+    - `kernel.matmul_fusion`、非零 fill、非 canonical acc、dynamic end 与 loop 前 target read 均保留 fill。
+    - 这些反例锁定 canonicalization 不回退到 fusion 语义或 dynamic shape 正数假设。
+
+    使用示例:
+    - pytest -q test/dialect/dma/test_canonicalization.py -k dynamic_acc_matmul_boundaries
+    """
+
+    out_type = _make_memory_type(shape=_dim_array([2, 4]), stride=_dim_array([4, 1]), space="tsm")
+    lhs_type = _make_memory_type(shape=_dim_array([2, 8]), stride=_dim_array([8, 1]), space="tsm")
+    rhs_type = _make_memory_type(shape=_dim_array([8, 4]), stride=_dim_array([4, 1]), space="tsm")
+
+    out_op = _TestOp(result_types=[out_type])
+    lhs_op = _TestOp(result_types=[lhs_type])
+    rhs_op = _TestOp(result_types=[rhs_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c8_op = _make_symbol_value_op(8)
+    fusion_body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "1")])
+    fusion_acc = SymbolNeOp(fusion_body.args[0], c0_op.results[0])
+    fusion = KernelMatmulFusionOp(
+        out_op.results[0],
+        lhs_op.results[0],
+        rhs_op.results[0],
+        fusion_acc.result,
+        space=_make_space("tsm"),
+        fusion_list="kernel.matmul,kernel.binary_elewise.add",
+    )
+    fusion_body.add_ops([fusion_acc, fusion])
+    fusion_loop = SymbolForOp(c0_op.results[0], c8_op.results[0], c1_op.results[0], fusion_body)
+    fusion_module = _canonicalized_module(
+        [out_op, lhs_op, rhs_op, c0_op, c1_op, c8_op, DmaFillOp(out_op.results[0], c0_op.results[0]), fusion_loop]
+    )
+    assert _count_ops(fusion_module, DmaFillOp) == 1
+
+    out_op = _TestOp(result_types=[out_type])
+    lhs_op = _TestOp(result_types=[lhs_type])
+    rhs_op = _TestOp(result_types=[rhs_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c8_op = _make_symbol_value_op(8)
+    nonzero_body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "1")])
+    nonzero_acc = SymbolNeOp(nonzero_body.args[0], c0_op.results[0])
+    nonzero_matmul = KernelMatmulOp(out_op.results[0], lhs_op.results[0], rhs_op.results[0], _make_space("tsm"), acc=nonzero_acc.result)
+    nonzero_body.add_ops([nonzero_acc, nonzero_matmul])
+    nonzero_loop = SymbolForOp(c0_op.results[0], c8_op.results[0], c1_op.results[0], nonzero_body)
+    nonzero_module = _canonicalized_module(
+        [out_op, lhs_op, rhs_op, c0_op, c1_op, c8_op, DmaFillOp(out_op.results[0], c1_op.results[0]), nonzero_loop]
+    )
+    assert _count_ops(nonzero_module, DmaFillOp) == 1
+
+    out_op = _TestOp(result_types=[out_type])
+    lhs_op = _TestOp(result_types=[lhs_type])
+    rhs_op = _TestOp(result_types=[rhs_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c8_op = _make_symbol_value_op(8)
+    dynamic_end_op = _make_symbol_value_op("K")
+    dynamic_end_body = Block(arg_types=[SymbolIterType.from_bounds("0", "K", "1")])
+    dynamic_end_acc = SymbolNeOp(dynamic_end_body.args[0], c0_op.results[0])
+    dynamic_end_matmul = KernelMatmulOp(
+        out_op.results[0],
+        lhs_op.results[0],
+        rhs_op.results[0],
+        _make_space("tsm"),
+        acc=dynamic_end_acc.result,
+    )
+    dynamic_end_body.add_ops([dynamic_end_acc, dynamic_end_matmul])
+    dynamic_end_loop = SymbolForOp(c0_op.results[0], dynamic_end_op.results[0], c1_op.results[0], dynamic_end_body)
+    dynamic_end_module = _canonicalized_module(
+        [
+            out_op,
+            lhs_op,
+            rhs_op,
+            c0_op,
+            c1_op,
+            c8_op,
+            dynamic_end_op,
+            DmaFillOp(out_op.results[0], c0_op.results[0]),
+            dynamic_end_loop,
+        ]
+    )
+    assert _count_ops(dynamic_end_module, DmaFillOp) == 1
+
+    out_op = _TestOp(result_types=[out_type])
+    lhs_op = _TestOp(result_types=[lhs_type])
+    rhs_op = _TestOp(result_types=[rhs_type])
+    other_op = _TestOp(result_types=[out_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c8_op = _make_symbol_value_op(8)
+    read_body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "1")])
+    read_acc = SymbolNeOp(read_body.args[0], c0_op.results[0])
+    read_matmul = KernelMatmulOp(out_op.results[0], lhs_op.results[0], rhs_op.results[0], _make_space("tsm"), acc=read_acc.result)
+    read_body.add_ops([read_acc, read_matmul])
+    read_loop = SymbolForOp(c0_op.results[0], c8_op.results[0], c1_op.results[0], read_body)
+    read_before_loop_module = _canonicalized_module(
+        [
+            out_op,
+            lhs_op,
+            rhs_op,
+            other_op,
+            c0_op,
+            c1_op,
+            c8_op,
+            DmaFillOp(out_op.results[0], c0_op.results[0]),
+            DmaCopyOp(other_op.results[0], out_op.results[0]),
+            read_loop,
+        ]
+    )
+    assert _count_ops(read_before_loop_module, DmaFillOp) == 1
+
+    out_op = _TestOp(result_types=[out_type])
+    lhs_op = _TestOp(result_types=[lhs_type])
+    rhs_op = _TestOp(result_types=[rhs_type])
+    other_op = _TestOp(result_types=[out_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c8_op = _make_symbol_value_op(8)
+    body_read_body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "1")])
+    body_read_acc = SymbolNeOp(body_read_body.args[0], c0_op.results[0])
+    body_read_matmul = KernelMatmulOp(
+        out_op.results[0],
+        lhs_op.results[0],
+        rhs_op.results[0],
+        _make_space("tsm"),
+        acc=body_read_acc.result,
+    )
+    body_read_body.add_ops([DmaCopyOp(other_op.results[0], out_op.results[0]), body_read_acc, body_read_matmul])
+    body_read_loop = SymbolForOp(c0_op.results[0], c8_op.results[0], c1_op.results[0], body_read_body)
+    body_read_module = _canonicalized_module(
+        [out_op, lhs_op, rhs_op, other_op, c0_op, c1_op, c8_op, DmaFillOp(out_op.results[0], c0_op.results[0]), body_read_loop]
+    )
+    assert _count_ops(body_read_module, DmaFillOp) == 1
+
+def test_dma_fill_canonicalization_removes_fill_for_if_full_deslice_before_alias_read() -> None:
+    """验证 local alloc safe-if 中 full deslice 支配 alias read 时删除 fill。
+
+    功能说明:
+    - fill target 由本地 `dma.alloc` 产生。
+    - then 分支先 full `dma.deslice` 覆盖 target，再读取 reshape alias；else 为空。
+    - if 后继续扫描到 block 结束，没有读取旧 fill 值。
+
+    使用示例:
+    - pytest -q test/dialect/dma/test_canonicalization.py -k if_full_deslice
+    """
+
+    memory_type = _make_memory_type()
+    alloc = DmaAllocOp([], memory_type)
+    source_op = _TestOp(result_types=[memory_type])
+    other_op = _TestOp(result_types=[memory_type])
+    cond_op = _TestOp(result_types=[i1])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    alias = DmaReshapeOp(alloc.result, [c2_op.results[0], c4_op.results[0]], memory_type)
+    if_op = scf.IfOp(
+        cond_op.results[0],
+        [],
+        [
+            DmaDesliceOp(
+                alloc.result,
+                source_op.results[0],
+                [c0_op.results[0], c0_op.results[0]],
+                [c2_op.results[0], c4_op.results[0]],
+                [c1_op.results[0], c1_op.results[0]],
+            ),
+            DmaCopyOp(other_op.results[0], alias.result),
+            scf.YieldOp(),
+        ],
+        None,
+    )
+    module = _canonicalized_module(
+        [
+            alloc,
+            source_op,
+            other_op,
+            cond_op,
+            c0_op,
+            c1_op,
+            c2_op,
+            c4_op,
+            DmaFillOp(alloc.result, c0_op.results[0]),
+            alias,
+            if_op,
+        ]
+    )
+    assert _count_ops(module, DmaFillOp) == 0
+
+def test_dma_fill_canonicalization_keeps_unsafe_if_dead_fill_boundaries() -> None:
+    """验证 safe-if dead-fill 的反例边界。
+
+    功能说明:
+    - else 分支未覆盖即读取 alias、partial deslice、nested region、函数参数 target 均保留 fill。
+    - 这些反例锁定该规则不扩展为通用 CFG DSE。
+
+    使用示例:
+    - pytest -q test/dialect/dma/test_canonicalization.py -k unsafe_if_dead_fill
+    """
+
+    memory_type = _make_memory_type()
+    alloc = DmaAllocOp([], memory_type)
+    source_op = _TestOp(result_types=[memory_type])
+    other_op = _TestOp(result_types=[memory_type])
+    cond_op = _TestOp(result_types=[i1])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    alias = DmaReshapeOp(alloc.result, [c2_op.results[0], c4_op.results[0]], memory_type)
+    else_read_if = scf.IfOp(
+        cond_op.results[0],
+        [],
+        [
+            DmaDesliceOp(
+                alloc.result,
+                source_op.results[0],
+                [c0_op.results[0], c0_op.results[0]],
+                [c2_op.results[0], c4_op.results[0]],
+                [c1_op.results[0], c1_op.results[0]],
+            ),
+            scf.YieldOp(),
+        ],
+        [DmaCopyOp(other_op.results[0], alias.result), scf.YieldOp()],
+    )
+    else_read_module = _canonicalized_module(
+        [
+            alloc,
+            source_op,
+            other_op,
+            cond_op,
+            c0_op,
+            c1_op,
+            c2_op,
+            c4_op,
+            DmaFillOp(alloc.result, c0_op.results[0]),
+            alias,
+            else_read_if,
+        ]
+    )
+    assert _count_ops(else_read_module, DmaFillOp) == 1
+
+    alloc = DmaAllocOp([], memory_type)
+    source_op = _TestOp(result_types=[_make_memory_type(shape=_dim_array([1, 4]), stride=_dim_array([4, 1]))])
+    cond_op = _TestOp(result_types=[i1])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    partial_if = scf.IfOp(
+        cond_op.results[0],
+        [],
+        [
+            DmaDesliceOp(
+                alloc.result,
+                source_op.results[0],
+                [c0_op.results[0], c0_op.results[0]],
+                [c1_op.results[0], c4_op.results[0]],
+                [c1_op.results[0], c1_op.results[0]],
+            ),
+            scf.YieldOp(),
+        ],
+        None,
+    )
+    partial_module = _canonicalized_module(
+        [alloc, source_op, cond_op, c0_op, c1_op, c2_op, c4_op, DmaFillOp(alloc.result, c0_op.results[0]), partial_if]
+    )
+    assert _count_ops(partial_module, DmaFillOp) == 1
+
+    alloc = DmaAllocOp([], memory_type)
+    cond_op = _TestOp(result_types=[i1])
+    c0_op = _make_symbol_value_op(0)
+    nested_if = scf.IfOp(cond_op.results[0], [], [_make_region_side_effect_op(), scf.YieldOp()], None)
+    nested_module = _canonicalized_module([alloc, cond_op, c0_op, DmaFillOp(alloc.result, c0_op.results[0]), nested_if])
+    assert _count_ops(nested_module, DmaFillOp) == 1
+
+    target_op = _TestOp(result_types=[memory_type])
+    source_op = _TestOp(result_types=[memory_type])
+    cond_op = _TestOp(result_types=[i1])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    function_arg_if = scf.IfOp(
+        cond_op.results[0],
+        [],
+        [
+            DmaDesliceOp(
+                target_op.results[0],
+                source_op.results[0],
+                [c0_op.results[0], c0_op.results[0]],
+                [c2_op.results[0], c4_op.results[0]],
+                [c1_op.results[0], c1_op.results[0]],
+            ),
+            scf.YieldOp(),
+        ],
+        None,
+    )
+    function_arg_module = _canonicalized_module(
+        [
+            target_op,
+            source_op,
+            cond_op,
+            c0_op,
+            c1_op,
+            c2_op,
+            c4_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            function_arg_if,
+        ]
+    )
+    assert _count_ops(function_arg_module, DmaFillOp) == 1
 
 def test_dma_view_reshape_canonicalization_only_removes_identity_aliases() -> None:
     memory_type = _make_memory_type()

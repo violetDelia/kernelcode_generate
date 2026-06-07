@@ -1133,8 +1133,8 @@ def test_npu_demo_lowering_pipeline_static_dump_runs_multi_buffer_before_pool(tm
 
 
 # TC-PASS-PIPELINE-NPU-DEMO-LOWERING-008
-# 功能说明: 验证 static/static、static/dynamic、dynamic/dynamic matmul demo 的 alloc/free 在 final hoist 后位于 pattern 函数首层。
-# 测试目的: 通过公开 demo kernel 与 dump marker 锁定 `memory-plan(auto_pad=true) -> symbol-hoist-pipeline` 的 lifecycle 外提合同。
+# 功能说明: 验证 static/static、static/dynamic、dynamic/dynamic matmul demo 的 alloc/free 在 final hoist 后位于 pattern 函数首层，并锁定 fill 完成态。
+# 测试目的: 通过公开 demo kernel 与 dump marker 锁定 `memory-plan(auto_pad=true) -> symbol-hoist-pipeline -> cse -> canonicalize` 的 lifecycle 外提与 dead-fill 合同。
 # 使用示例: pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k matmul_demo_allocs_hoist
 # 对应功能实现文件路径: kernel_gen/pipeline/npu_demo_lowering.py
 # 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
@@ -1147,8 +1147,10 @@ def test_npu_demo_lowering_pipeline_matmul_demo_allocs_hoist_for_static_and_dyna
     功能说明:
     - 使用公开 matmul demo kernel 与公开 `set_dump_dir(...)` 生成真实 pipeline dump。
     - 覆盖 static/static、static/dynamic、dynamic/dynamic 三类计划场景。
-    - 断言第三段 `symbol-hoist-pipeline` 后 pattern 函数中 `dma.alloc/free` 均位于首层，
-      且三类 demo 中 `kernel.matmul` 继续消费 logical `dma.reinterpret` alias。
+    - 断言第三段 `symbol-hoist-pipeline` 后 pattern 函数中 `dma.alloc/free` 均位于首层。
+    - 断言后续 canonicalize 中 static/static 与 static/dynamic 不残留 dead fill，
+      dynamic/dynamic 只允许保留 DU2-A 下非必删的 acc fill。
+    - 断言三类 demo 中 `kernel.matmul` 继续消费 logical `dma.reinterpret` alias。
 
     使用示例:
     - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k matmul_demo_allocs_hoist
@@ -1169,6 +1171,7 @@ def test_npu_demo_lowering_pipeline_matmul_demo_allocs_hoist_for_static_and_dyna
             ),
             "matmul_inputs_static_tile_static_kernel_pattern0",
             True,
+            0,
         ),
         (
             "static_dynamic",
@@ -1184,6 +1187,7 @@ def test_npu_demo_lowering_pipeline_matmul_demo_allocs_hoist_for_static_and_dyna
             ),
             "matmul_inputs_static_tile_dynamic_kernel_pattern0",
             True,
+            0,
         ),
         (
             "dynamic_dynamic",
@@ -1199,10 +1203,11 @@ def test_npu_demo_lowering_pipeline_matmul_demo_allocs_hoist_for_static_and_dyna
             ),
             "matmul_inputs_dynamic_tile_dynamic_kernel_pattern0",
             True,
+            1,
         ),
     )
 
-    for case_name, kernel_func, args, pattern_name, requires_logical_matmul in cases:
+    for case_name, kernel_func, args, pattern_name, requires_logical_matmul, expected_fill_count in cases:
         case_dump_dir = tmp_path / case_name
         case_dump_dir.mkdir()
         module = mlir_gen(kernel_func, *args)
@@ -1215,14 +1220,21 @@ def test_npu_demo_lowering_pipeline_matmul_demo_allocs_hoist_for_static_and_dyna
             reset_config()
 
         final_hoist_text = _dump_stage_text_by_marker(case_dump_dir, "symbol-hoist-pipeline", occurrence=3)
+        post_decompose_canonicalize_text = _dump_stage_text_by_marker(case_dump_dir, "canonicalize", occurrence=4)
         memory_pool_text = _dump_stage_text_by_marker(case_dump_dir, "memory-pool")
         pattern_text = _pattern_function_text(final_hoist_text, pattern_name)
+        canonical_pattern_text = _pattern_function_text(post_decompose_canonicalize_text, pattern_name)
         _assert_alloc_free_at_pattern_function_scope(pattern_text)
         assert '"kernel.matmul"' in pattern_text
+        assert canonical_pattern_text.count('"dma.fill"') == expected_fill_count
+        if expected_fill_count == 1:
+            fill_targets = re.findall(r'"dma\.fill"\((%\w+),', canonical_pattern_text)
+            matmul_outs = re.findall(r'"kernel\.matmul"\((%\w+),', canonical_pattern_text)
+            assert fill_targets == matmul_outs[:1]
         assert '"dma.alloc"' not in memory_pool_text
         assert '"dma.free"' not in memory_pool_text
         if requires_logical_matmul:
-            _assert_kernel_matmul_consumes_logical_reinterpret(pattern_text)
+            _assert_kernel_matmul_consumes_logical_reinterpret(canonical_pattern_text)
 
 
 # TC-PIPELINE-115
@@ -1242,7 +1254,7 @@ def test_npu_demo_lowering_pipeline_symbol_hoist_pipeline_pattern_dump(
     - 通过公开 `set_dump_dir(...)` 与 `build_npu_demo_lowering_pipeline(...)` 生成真实 dump。
     - 不绑定固定 dump 编号，只按首行 marker 定位 `symbol-hoist-pipeline` stage。
     - 断言旧 `symbol-loop-hoist` 与 `hoist-dma-alias-ops` 的可观察结果在组合 pass stage 中出现。
-    - 断言 kernel-decompose 后的最终 symbol hoist stage 不再保留 acc 初始化 fill。
+    - 断言 kernel-decompose 后的后续 canonicalize 不再保留 acc 初始化 fill。
 
     使用示例:
     - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k symbol_hoist_pipeline_pattern
@@ -1269,6 +1281,7 @@ def test_npu_demo_lowering_pipeline_symbol_hoist_pipeline_pattern_dump(
 
     first_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-hoist-pipeline")
     final_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-hoist-pipeline", occurrence=3)
+    post_decompose_canonicalize_text = _dump_stage_text_by_marker(tmp_path, "canonicalize", occurrence=4)
     final_pattern_text = _pattern_function_text(
         final_hoist_text,
         "matmul_inputs_static_tile_static_kernel_pattern0",
@@ -1291,7 +1304,7 @@ def test_npu_demo_lowering_pipeline_symbol_hoist_pipeline_pattern_dump(
     assert guard_index < cast_index < cond_index < first_loop_index
     assert first_hoist_text.index("arith.constant") < first_stage_loop_index
     assert '"dma.fill"' in first_hoist_text
-    assert '"dma.fill"' not in final_hoist_text
+    assert '"dma.fill"' not in post_decompose_canonicalize_text
     assert output_deslice is not None
     assert output_deslice.group("source") in reinterpret_results
     assert broadcast is not None
