@@ -279,8 +279,8 @@ def test_gen_kernel_emits_template_header_for_npu_demo_memory_template_field() -
     set_target("npu_demo")
     source = gen_kernel(func_op, EmitCContext())
     assert "using __kernel_gen_template_instance_seed_copy_kernel__T1 = Memory<MemorySpace::GM, int32_t>;" in source
-    assert "template <typename T1>\nvoid copy_kernel(Memory<GM, T1>& arg0, Memory<GM, T1>& arg1)" in source
-    assert "slice(arg0 /*dst*/, arg1 /*source*/" in source
+    assert "template <typename T1, typename Context>\nvoid copy_kernel(Context& ctx, Memory<GM, T1>& arg0, Memory<GM, T1>& arg1)" in source
+    assert "slice(ctx, arg0 /*dst*/, arg1 /*source*/" in source
 
 
 def test_gen_kernel_npu_demo_dma_view_result_does_not_alias_out_param() -> None:
@@ -1047,19 +1047,21 @@ static void slow_barrier_probe(
     npu_demo::KernelContext& ctx,
     std::atomic<long long>* entered,
     long long* after_values) {
-    const long long bid = ctx.block_id();
+    (void)ctx;
+    const long long bid = npu_demo::block_id();
     if (bid == 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     entered->fetch_add(1);
-    ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
+    npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
     after_values[bid] = entered->load();
 }
 """
         barrier_assert = r"""
     std::atomic<long long> entered(0);
     long long after_values[2] = {-1, -1};
-    if (npu_demo::launch<2, 1, 1, 0>(slow_barrier_probe, &entered, after_values) != StatusCode::kOk) {
+    npu_demo::KernelContext probe_ctx;
+    if (npu_demo::launch<2, 1, 1, 0, slow_barrier_probe>(probe_ctx, &entered, after_values) != StatusCode::kOk) {
         return fail(4);
     }
     for (long long i = 0; i < 2; ++i) {
@@ -1083,16 +1085,14 @@ int main() {{
     float lhs_data[64];
     float rhs_data[64];
     float out_data[64] = {{0}};
-    long long shape[1] = {{64}};
-    long long stride[1] = {{1}};
     for (int i = 0; i < 64; ++i) {{
         lhs_data[i] = static_cast<float>(i + 1);
         rhs_data[i] = static_cast<float>(100 + i);
     }}
 
-    Memory<MemorySpace::GM, float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm);
-    Memory<MemorySpace::GM, float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm);
-    Memory<MemorySpace::GM, float> out(out_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> lhs(lhs_data, {{64}}, {{1}}, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> rhs(rhs_data, {{64}}, {{1}}, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> out(out_data, {{64}}, {{1}}, MemoryFormat::Norm);
     auto generated_entry = &add_barrier;
     auto generated_body = &add_barrier_body;
     if (generated_entry == nullptr || generated_body == nullptr) {{
@@ -1135,10 +1135,34 @@ int main() {{
             str(binary_path),
         ]
 
-        compile_result = _run_local_compile_command(compile_cmd)
+        compile_result = subprocess.run(
+            compile_cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if compile_result.returncode != 0 and "internal compiler error:" in compile_result.stderr:
+            compile_result = subprocess.run(
+                compile_cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
         if compile_result.returncode != 0:
             fallback_cmd = [*compile_cmd, "-latomic"]
-            fallback_result = _run_local_compile_command(fallback_cmd)
+            fallback_result = subprocess.run(
+                fallback_cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if fallback_result.returncode != 0 and "internal compiler error:" in fallback_result.stderr:
+                fallback_result = subprocess.run(
+                    fallback_cmd,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
             if fallback_result.returncode != 0:
                 raise AssertionError(
                     "g++ compile failed:\n"
@@ -2028,8 +2052,8 @@ class Test_buffer_results_to_out_params_gen_kernel:
 
 
 # GK-017
-# 功能说明: 验证 npu_demo target 可生成无显式 KernelContext 参数的 body-level kernel 骨架。
-# 测试目的: 锁定生成源码不再暴露 `npu_demo::KernelContext& ctx`，并且查询文本显式限定为 `npu_demo::thread_id()` / `npu_demo::thread_num()`。
+# 功能说明: 验证 npu_demo target 可生成 context-first body-level kernel 骨架。
+# 测试目的: 锁定生成源码通过 `npu_demo::KernelContext& ctx` 首参传递上下文，并且查询文本显式限定为 `npu_demo::thread_id()` / `npu_demo::thread_num()`。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_body_level_kernel
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
@@ -2043,12 +2067,13 @@ def test_gen_kernel_emits_npu_demo_body_level_kernel() -> None:
 
     assert source.startswith('#include "include/npu_demo/npu_demo.h"\nusing namespace npu_demo;\n\n')
     assert (
-        "void demo_kernel(Memory<MemorySpace::GM, float>& source, Memory<MemorySpace::GM, float>& out)"
+        "void demo_kernel(npu_demo::KernelContext& ctx, Memory<MemorySpace::GM, float>& source, "
+        "Memory<MemorySpace::GM, float>& out)"
         in source
     )
     assert "S_INT tid = npu_demo::thread_id();" in source
     assert "S_INT tnum = npu_demo::thread_num();" in source
-    assert "npu_demo::KernelContext& ctx" not in source
+    assert "template <typename Context>" not in source
     assert "launch" not in source
     assert "barrier" not in source
     assert "arch.launch_kernel" not in source
@@ -2133,16 +2158,16 @@ def test_gen_kernel_emits_npu_demo_kernel_binary_signature_out_first() -> None:
     source = gen_kernel(func_op, _npu_ctx())
 
     assert (
-        "void kernel_binary_add_case(Memory<TLM1, double>& arg0, Memory<TLM1, int32_t>& arg1, Memory<TLM1, int32_t>& arg2)"
+        "void kernel_binary_add_case(Context& ctx, Memory<TLM1, double>& arg0, Memory<TLM1, int32_t>& arg1, Memory<TLM1, int32_t>& arg2)"
         in source
     )
     assert "const Memory<TLM1" not in source
-    assert "add<TLM1, int32_t, double>(arg0 /*out*/, arg1 /*lhs*/, arg2 /*rhs*/);" in source
+    assert "add<TLM1, int32_t, double>(ctx, arg0 /*out*/, arg1 /*lhs*/, arg2 /*rhs*/);" in source
 
 
 # GK-017A
 # 功能说明: 验证 target=npu_demo 下单函数 `dma.alloc` module 可生成 helper 形式源码。
-# 测试目的: 锁定 `builtin.module -> func.func(dma.alloc)` 这条 `npu_demo` 子集会发射 `alloc<Space, T>(shape, stride)`，不再被 launch module 约束误拒绝。
+# 测试目的: 锁定 `builtin.module -> func.func(dma.alloc)` 这条 `npu_demo` 子集会发射 `alloc<Space, T>(ctx, shape, stride)`，不再被 launch module 约束误拒绝。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_dma_alloc_module
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
@@ -2162,8 +2187,13 @@ def test_gen_kernel_emits_npu_demo_dma_alloc_module() -> None:
     static_source = gen_kernel(static_module, _npu_ctx())
 
     assert '#include "include/npu_demo/npu_demo.h"' in static_source
-    assert "void dma_alloc_case()" in static_source
-    assert "Memory<TSM, float> v0 = alloc<TSM, float>({2, 3} /*shape*/, {3, 1} /*stride*/);" in static_source
+    assert "void dma_alloc_case(Context& ctx)" in static_source
+    assert (
+        "Memory<TSM, float> v0 = alloc<TSM, float>(ctx, "
+        "{2, 3} /*shape*/, "
+        "{3, 1} /*stride*/);"
+        in static_source
+    )
 
     dyn_m = SymbolValueType.from_expr("M")
     dyn_n = SymbolValueType.from_expr("N")
@@ -2185,8 +2215,13 @@ def test_gen_kernel_emits_npu_demo_dma_alloc_module() -> None:
 
     dynamic_source = gen_kernel(dynamic_module, _npu_ctx())
 
-    assert "void dma_alloc_dynamic_case(S_INT arg0, S_INT arg1)" in dynamic_source
-    assert "Memory<TSM, float> v0 = alloc<TSM, float>({arg0, arg1} /*shape*/, {arg1, 1} /*stride*/);" in dynamic_source
+    assert "void dma_alloc_dynamic_case(Context& ctx, S_INT arg0, S_INT arg1)" in dynamic_source
+    assert (
+        "Memory<TSM, float> v0 = alloc<TSM, float>(ctx, "
+        "{arg0, arg1} /*shape*/, "
+        "{arg1, 1} /*stride*/);"
+        in dynamic_source
+    )
     _compile_only(dynamic_source)
 
 
@@ -2199,7 +2234,7 @@ def test_gen_kernel_emits_npu_demo_dma_alloc_module() -> None:
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 def test_gen_kernel_handles_npu_demo_plain_module_public_boundaries() -> None:
     plain_return_source = gen_kernel(ModuleOp([_make_npu_demo_helper_func("plain_return")]), _npu_ctx())
-    assert "void plain_return()" in plain_return_source
+    assert "void plain_return(Context& ctx)" in plain_return_source
 
     helper_only_block = Block()
     helper_only_block.add_op(FakeSymbolValueOp("1"))
@@ -2299,7 +2334,7 @@ def test_gen_kernel_compiles_npu_demo_tiled_matmul_source() -> None:
 
 # GK-018
 # 功能说明: 验证 npu_demo target 可生成固定的 dynamic memory/view/slice/deslice/add 管线。
-# 测试目的: 锁定 `TSM/TLM`、brace-list `view/slice/deslice/add` 固定顺序，并防止回退到旧标量 layout 风格。
+# 测试目的: 锁定 `TSM/TLM`、brace layout `view/slice/deslice/add` 固定顺序，并防止回退到旧标量 layout 风格。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_memory_pipeline
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
@@ -2318,17 +2353,26 @@ def test_gen_kernel_emits_npu_demo_memory_pipeline() -> None:
         "Memory<MemorySpace::TLM1, float> tlm = npu_demo::get_dynamic_memory<MemorySpace::TLM1>();"
     )
     src_view_idx = source.index(
-        "auto src_view = source.view<float>({tid * 16} /*offset*/, {16} /*size*/, {1} /*stride*/);"
+        "auto src_view = source.view<float>({tid * 16} /*offset*/, "
+        "{16} /*size*/, {1} /*stride*/);"
     )
     work_view_idx = source.index(
-        "auto work_tile = tsm.view<float>({0} /*offset*/, {16} /*size*/, {1} /*stride*/);"
+        "auto work_tile = tsm.view<float>({0} /*offset*/, "
+        "{16} /*size*/, {1} /*stride*/);"
     )
     out_view_idx = source.index(
-        "auto out_tile = tsm.view<float>({0} /*offset*/, {16} /*size*/, {1} /*stride*/);"
+        "auto out_tile = tsm.view<float>({0} /*offset*/, "
+        "{16} /*size*/, {1} /*stride*/);"
     )
-    slice_idx = source.index("slice(work_tile, src_view, {0} /*offset*/, {16} /*size*/, {1} /*stride*/);")
-    add_idx = source.index("add<MemorySpace::TSM, float, float>(out_tile, work_tile, work_tile);")
-    deslice_idx = source.index("deslice(out, out_tile, {tid * 16} /*offset*/, {16} /*size*/, {1} /*stride*/);")
+    slice_idx = source.index(
+        "slice(ctx, work_tile, src_view, {0} /*offset*/, "
+        "{16} /*size*/, {1} /*stride*/);"
+    )
+    add_idx = source.index("add<MemorySpace::TSM, float, float>(ctx, out_tile, work_tile, work_tile);")
+    deslice_idx = source.index(
+        "deslice(ctx, out, out_tile, {tid * 16} /*offset*/, "
+        "{16} /*size*/, {1} /*stride*/);"
+    )
 
     assert tsm_idx < tlm_idx < src_view_idx < work_view_idx < out_view_idx < slice_idx < add_idx < deslice_idx
     assert "view(source" not in source
@@ -2399,7 +2443,11 @@ def test_gen_kernel_black_box_lowered_add_and_npu_demo_contracts() -> None:
     npu_source = gen_kernel(npu_func, _npu_ctx())
     assert "npu_demo::thread_id()" in npu_source
     assert "npu_demo::get_dynamic_memory<MemorySpace::TSM>()" in npu_source
-    assert "deslice(out, out_tile, {tid * 16} /*offset*/, {16} /*size*/, {1} /*stride*/);" in npu_source
+    assert (
+        "deslice(ctx, out, out_tile, {tid * 16} /*offset*/, "
+        "{16} /*size*/, {1} /*stride*/);"
+        in npu_source
+    )
 
 
 # GK-I2-001
@@ -2720,9 +2768,9 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
     source = gen_kernel(module, _npu_ctx())
 
     assert source.startswith('#include "include/npu_demo/npu_demo.h"\nusing namespace npu_demo;\n\n')
-    assert source.index("static void add_barrier_body(") < source.index("void add_barrier(") < source.index("void npu_demo_helper()")
+    assert source.index("static void add_barrier_body(") < source.index("void add_barrier(") < source.index("void npu_demo_helper(Context& ctx)")
     assert (
-        "static void add_barrier_body(Memory<GM, float>& lhs, "
+        "static void add_barrier_body(npu_demo::KernelContext& ctx, Memory<GM, float>& lhs, "
         "Memory<GM, float>& rhs, Memory<GM, float>& out)"
         in source
     )
@@ -2735,20 +2783,23 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
     assert "constexpr S_INT c_1 = 1;" in source
     assert "constexpr S_INT c_2 = 1;" in source
     assert "constexpr S_INT c_3 = 0;" in source
-    assert "npu_demo::launch<2, 1, 1, 0>(add_barrier_body, lhs, rhs, out);" in source
+    assert "npu_demo::KernelContext ctx;" in source
+    assert "npu_demo::launch<2, 1, 1, 0, add_barrier_body>(ctx, lhs, rhs, out);" in source
+    assert "add_barrier_body<npu_demo::KernelContext>" not in source
     assert source.count("npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);") == 2
-    assert "npu_demo::KernelContext& ctx" not in source
     assert source.index("S_INT v0 = npu_demo::thread_id();") < source.index(
         "Memory<TSM, float> v2 = npu_demo::get_dynamic_memory<TSM>();"
     )
     assert f"Memory<{space_enum}, float> v3 = npu_demo::get_dynamic_memory<{space_enum}>();" in source
     assert "16*npu_demo::thread_id()" in source
     assert source.index(
-        "slice(v2_1 /*dst*/, lhs_1 /*source*/, {0} /*offset*/, {16} /*size*/, {1} /*stride*/);"
+        "slice(ctx, v2_1 /*dst*/, lhs_1 /*source*/, {0} /*offset*/, "
+        "{16} /*size*/, {1} /*stride*/);"
     ) < source.index(
-        "add<TSM, float, float>(v2_3 /*out*/, v2_1 /*lhs*/, v2_2 /*rhs*/);"
+        "add<TSM, float, float>(ctx, v2_3 /*out*/, v2_1 /*lhs*/, v2_2 /*rhs*/);"
     ) < source.index(
-        "deslice(out /*target*/, v2_3 /*source*/, {16*npu_demo::thread_id()} /*offset*/, {16} /*size*/, {1} /*stride*/);"
+        "deslice(ctx, out /*target*/, v2_3 /*source*/, {16*npu_demo::thread_id()} /*offset*/, "
+        "{16} /*size*/, {1} /*stride*/);"
     )
     assert "arch.launch_kernel" not in source
     assert "ctx.sync_threads" not in source
@@ -2771,9 +2822,13 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_with_symbol_args() -> None:
 
     source = gen_kernel(module, _npu_ctx())
 
-    assert "static void sig_body(Memory<GM, float>& lhs, Memory<GM, float>& rhs, Memory<GM, float>& out, S_INT tile);" in source
+    assert (
+        "static void sig_body(npu_demo::KernelContext& ctx, Memory<GM, float>& lhs, "
+        "Memory<GM, float>& rhs, Memory<GM, float>& out, S_INT tile);"
+        in source
+    )
     assert "void sig_wrapper(Memory<MemorySpace::GM, float>& lhs, Memory<MemorySpace::GM, float>& rhs, Memory<MemorySpace::GM, float>& out, long long tile)" in source
-    assert "npu_demo::launch<2, 1, 1, 0>(sig_body, lhs, rhs, out, tile);" in source
+    assert "npu_demo::launch<2, 1, 1, 0, sig_body>(ctx, lhs, rhs, out, tile);" in source
 
 
 def test_gen_kernel_emits_npu_demo_tuner_select_default_value() -> None:
@@ -2784,7 +2839,7 @@ def test_gen_kernel_emits_npu_demo_tuner_select_default_value() -> None:
 
     source = gen_kernel(func_op, _npu_ctx())
 
-    assert "void select_kernel()" in source
+    assert "void select_kernel(Context& ctx)" in source
     assert "S_INT" in source
     assert "= 0;" in source
 
@@ -2834,10 +2889,10 @@ def test_gen_kernel_emits_npu_demo_entry_dispatcher_after_device_functions() -> 
 
     source = gen_kernel(module, _npu_ctx())
 
-    assert source.index("void entry_pattern0_device()") < source.index("void entry()")
-    assert source.index("void entry_pattern1_device()") < source.index("void entry()")
-    assert "npu_demo::launch<2, 1, 1, 0>(entry_pattern0_device);" in source
-    assert "npu_demo::launch<2, 1, 1, 0>(entry_pattern1_device);" in source
+    assert source.index("void entry_pattern0_device(npu_demo::KernelContext& ctx)") < source.index("void entry()")
+    assert source.index("void entry_pattern1_device(npu_demo::KernelContext& ctx)") < source.index("void entry()")
+    assert "npu_demo::launch<2, 1, 1, 0, entry_pattern0_device>(ctx);" in source
+    assert "npu_demo::launch<2, 1, 1, 0, entry_pattern1_device>(ctx);" in source
 
 
 def test_gen_kernel_emits_npu_demo_entry_dispatcher_generic_symbol_guard() -> None:
@@ -2884,15 +2939,15 @@ def test_gen_kernel_emits_npu_demo_entry_dispatcher_generic_symbol_guard() -> No
 
     source = gen_kernel(module, _npu_ctx())
 
-    assert source.index("void entry_pattern0_device()") < source.index("void entry()")
-    assert source.index("void entry_pattern1_device()") < source.index("void entry()")
+    assert source.index("void entry_pattern0_device(npu_demo::KernelContext& ctx)") < source.index("void entry()")
+    assert source.index("void entry_pattern1_device(npu_demo::KernelContext& ctx)") < source.index("void entry()")
     assert "S_INT" in source
     assert " = 0;" in source
     assert "bool" in source
     assert " == " in source
     assert "if (" in source
-    assert "npu_demo::launch<2, 1, 1, 0>(entry_pattern0_device);" in source
-    assert "npu_demo::launch<2, 1, 1, 0>(entry_pattern1_device);" in source
+    assert "npu_demo::launch<2, 1, 1, 0, entry_pattern0_device>(ctx);" in source
+    assert "npu_demo::launch<2, 1, 1, 0, entry_pattern1_device>(ctx);" in source
     assert "builtin.unregistered" not in source
 
 
@@ -2935,47 +2990,31 @@ def test_gen_kernel_compiles_npu_demo_launch_wrapper_and_barrier_body() -> None:
 
 
 # GK-018A
-# 功能说明: 验证 `target="npu_demo"` 的完整 module 可继续输出普通 kernel 与 `VECTOR1/MAC` sibling cost functions。
-# 测试目的: 锁定 `gen_kernel` 会为 `_cost_VECTOR1_*` / `_cost_MAC_*` 生成 `S_INT` 返回签名、对应 Kind 的 `cost::add` helper 调用，以及稳定的 `return total;`。
-# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_cost_functions_for_vector1_and_mac
+# 功能说明: 验证 `target="npu_demo"` 不再为旧 `tuner.cost` sibling cost function 生成源码。
+# 测试目的: 锁定 generated source 主链路下线 `_cost_*` / `cost::` / `tuner.cost` 旧发射路径。
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_npu_demo_cost_functions_for_vector1_and_mac
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
-def test_gen_kernel_emits_npu_demo_cost_functions_for_vector1_and_mac() -> None:
+def test_gen_kernel_rejects_npu_demo_cost_functions_for_vector1_and_mac() -> None:
     module = _make_npu_demo_cost_function_module()
 
-    source = gen_kernel(module, _npu_ctx())
-
-    assert source.startswith('#include "include/npu_demo/npu_demo.h"\nusing namespace npu_demo;\n\n')
-    assert source.index("static void add_barrier_body(") < source.index("void add_barrier(")
-    assert source.index("void add_barrier(") < source.index("S_INT _cost_VECTOR1_add_barrier_body(")
-    assert source.index("S_INT _cost_VECTOR1_add_barrier_body(") < source.index("S_INT _cost_MAC_add_barrier_body(")
-    assert "S_INT _cost_VECTOR1_add_barrier_body(" in source
-    assert "S_INT _cost_MAC_add_barrier_body(" in source
-    assert "S_INT cost0 = cost::add<GM, float, float, VECTOR1>(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);" in source
-    assert "S_INT cost1 = cost::add<GM, float, float, MAC>(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);" in source
-    assert "S_INT total = (cost0 + cost0);" in source
-    assert "S_INT total = (cost1 + cost1);" in source
-    assert source.count("return total;") == 2
-    assert "using namespace npu_demo::cost;" not in source
+    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
+        gen_kernel(module, _npu_ctx())
 
 
 # GK-018B
-# 功能说明: 验证包含 sibling cost functions 的 `npu_demo` module 只依赖 `include/npu_demo/npu_demo.h` 即可编译。
-# 测试目的: 锁定 `wrapper/body + _cost_VECTOR1_* + _cost_MAC_*` 共存时，`S_INT` 返回签名、`return total;` 和单入口 include 合同不会回退。
-# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_compiles_npu_demo_cost_function_module
+# 功能说明: 验证包含旧 sibling cost functions 的 `npu_demo` module 不再进入可编译源码路径。
+# 测试目的: 防止 `LaunchKernelCostFuncPass` 下线后旧 `_cost_*` module 继续被当作成功源码。
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_npu_demo_cost_function_module
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
-def test_gen_kernel_compiles_npu_demo_cost_function_module() -> None:
+def test_gen_kernel_rejects_npu_demo_cost_function_module() -> None:
     module = _make_npu_demo_cost_function_module()
 
-    source = gen_kernel(module, _npu_ctx())
-
-    include_lines = [line for line in source.splitlines() if line.startswith("#include ")]
-    assert include_lines == ['#include "include/npu_demo/npu_demo.h"']
-    assert source.count("return total;") == 2
-    _compile_only(source)
+    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
+        gen_kernel(module, _npu_ctx())
 
 
 # GK-S4-002A
@@ -3012,7 +3051,7 @@ builtin.module {
 
     assert source.index("static void kernel_device(") < source.index("void kernel(")
     assert source.count("static void kernel_device(") == 2
-    assert "npu_demo::launch<2, 1, 1, 0>(kernel_device" in source
+    assert "npu_demo::launch<2, 1, 1, 0, kernel_device" in source
     _compile_only(source)
 
 

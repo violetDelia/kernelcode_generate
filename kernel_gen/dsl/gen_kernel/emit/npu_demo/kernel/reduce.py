@@ -51,7 +51,7 @@ def _emit_npu_demo_kernel_reduce(op: KernelReduceOp, ctx) -> str:
 
     功能说明:
     - 校验 input/out 为 memory。
-    - 按 `kind` 选择公开 reduce helper 名称。
+    - 按 `kind` 选择公开 reduce helper 名称，并生成 context-first 调用。
 
     使用示例:
     - stmt = _emit_npu_demo_kernel_reduce(op, ctx)
@@ -79,10 +79,13 @@ def _emit_npu_demo_kernel_reduce(op: KernelReduceOp, ctx) -> str:
     }.get(op.kind.data)
     if helper_name is None:
         raise ctx.emit_error(op.name, f"unsupported kind={op.kind.data}")
+    input_value.type.verify()
+    input_type = input_value.type.template_name.data or ctx.dispatch_type(input_value.type.element_type)
+    out_value.type.verify()
+    output_type = out_value.type.template_name.data or ctx.dispatch_type(out_value.type.element_type)
     return (
-        f"{ctx.current_indent}{helper_name}<{ctx.dispatch_attr(out_value.type)}, {_memory_element_cpp_type(input_value.type, ctx)}, "
-        f"{_memory_element_cpp_type(out_value.type, ctx)}>"
-        f"({emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(input_value, ctx)} /*input*/, {op.axis.value.data} /*axis*/);"
+        f"{ctx.current_indent}{helper_name}<{ctx.dispatch_attr(out_value.type)}, {input_type}, {output_type}>"
+        f"(ctx, {emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(input_value, ctx)} /*input*/, {op.axis.value.data} /*axis*/);"
     )
 
 
@@ -113,8 +116,11 @@ def _emit_npu_demo_kernel_reduce_min(op: KernelReduceMinOp, ctx) -> str:
         out_value, input_value = input_value, out_value
     if not isinstance(input_value.type, NnMemoryType) or not isinstance(out_value.type, NnMemoryType):
         raise ctx.emit_error(op.name, "unsupported op")
+    input_value.type.verify()
+    input_type = input_value.type.template_name.data or ctx.dispatch_type(input_value.type.element_type)
+    out_value.type.verify()
+    output_type = out_value.type.template_name.data or ctx.dispatch_type(out_value.type.element_type)
     return (
-        f"{ctx.current_indent}reduce_min<{ctx.dispatch_attr(out_value.type)}, {_memory_element_cpp_type(input_value.type, ctx)}, "
-        f"{_memory_element_cpp_type(out_value.type, ctx)}>"
-        f"({emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(input_value, ctx)} /*input*/, {op.axis.value.data} /*axis*/);"
+        f"{ctx.current_indent}reduce_min<{ctx.dispatch_attr(out_value.type)}, {input_type}, {output_type}>"
+        f"(ctx, {emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(input_value, ctx)} /*input*/, {op.axis.value.data} /*axis*/);"
     )

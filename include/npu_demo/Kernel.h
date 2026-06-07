@@ -4,32 +4,33 @@
 - 当前实现覆盖 same-shape 逐元素、reduce、matmul 与 img2col 的真实运行路径。
 
 API 列表:
-- `npu_demo::add<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
-- `npu_demo::sub<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
-- `npu_demo::mul<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
-- `npu_demo::truediv<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
-- `npu_demo::min<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
-- `npu_demo::max<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::le(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::gt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `npu_demo::exp<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& input) -> Status`
-- `npu_demo::select<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
-- `npu_demo::reduce_sum<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) -> Status`
-- `npu_demo::reduce_min<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) -> Status`
-- `npu_demo::reduce_max<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) -> Status`
-- `npu_demo::matmul<LhsSpace, RhsSpace, OutSpace, LhsType, RhsType, OutType>(Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs, bool acc = false) -> Status`
-- `npu_demo::img2col1d<InputSpace, OutputSpace, InType, OutType>(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right) -> Status`
-- `npu_demo::img2col2d<InputSpace, OutputSpace, InType, OutType>(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr) -> Status`
+- `npu_demo::add<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::sub<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::mul<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::truediv<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::min<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::max<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::eq<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::ne<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::lt<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::le<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::gt<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::ge<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::exp<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input) -> Status`
+- `npu_demo::select<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::reduce_sum<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) -> Status`
+- `npu_demo::reduce_min<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) -> Status`
+- `npu_demo::reduce_max<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) -> Status`
+- `npu_demo::matmul<LhsSpace, RhsSpace, OutSpace, LhsType, RhsType, OutType, Context>(Context& ctx, Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs, bool acc = false) -> Status`
+- `npu_demo::img2col1d<InputSpace, OutputSpace, InType, OutType, Context>(Context& ctx, Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right) -> Status`
+- `npu_demo::img2col2d<InputSpace, OutputSpace, InType, OutType, Context>(Context& ctx, Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr) -> Status`
 
 使用示例:
 - #include "include/npu_demo/Kernel.h"
-- Status st = npu_demo::add<GM, float, float>(out, lhs, rhs);
-- Status st2 = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs);
-- Status st3 = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs, true);
+- npu_demo::KernelContext ctx;
+- Status st = npu_demo::add<GM, float, float>(ctx, out, lhs, rhs);
+- Status st2 = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(ctx, out, lhs, rhs);
+- Status st3 = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(ctx, out, lhs, rhs, true);
 
 
 关联文件:
@@ -206,7 +207,7 @@ inline Status compare_same_shape(
 - 执行 same-shape 多维逐元素加法并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::add<GM, float, float>(out, lhs, rhs);
+- Status st = npu_demo::add<GM, float, float>(ctx, out, lhs, rhs);
 
 
 关联文件:
@@ -214,8 +215,9 @@ inline Status compare_same_shape(
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status add(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status add(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    (void)ctx;
     return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a + b; });
 }
 
@@ -224,7 +226,7 @@ inline Status add(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 - 执行 same-shape 多维逐元素减法并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::sub<GM, float, float>(out, lhs, rhs);
+- Status st = npu_demo::sub<GM, float, float>(ctx, out, lhs, rhs);
 
 
 关联文件:
@@ -232,8 +234,9 @@ inline Status add(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status sub(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status sub(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    (void)ctx;
     return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a - b; });
 }
 
@@ -242,7 +245,7 @@ inline Status sub(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 - 执行 same-shape 多维逐元素乘法并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::mul<GM, float, float>(out, lhs, rhs);
+- Status st = npu_demo::mul<GM, float, float>(ctx, out, lhs, rhs);
 
 
 关联文件:
@@ -250,8 +253,9 @@ inline Status sub(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status mul(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    (void)ctx;
     return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a * b; });
 }
 
@@ -260,7 +264,7 @@ inline Status mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 - 执行 same-shape 多维逐元素真除法并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::truediv<GM, float, float>(out, lhs, rhs);
+- Status st = npu_demo::truediv<GM, float, float>(ctx, out, lhs, rhs);
 
 
 关联文件:
@@ -268,8 +272,9 @@ inline Status mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status truediv(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    (void)ctx;
     return detail::elementwise_binary_same_shape(
         out,
         lhs,
@@ -284,7 +289,7 @@ inline Status truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& 
 - 执行 same-shape 多维逐元素最小值并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::min<GM, float, float>(out, lhs, rhs);
+- Status st = npu_demo::min<GM, float, float>(ctx, out, lhs, rhs);
 
 
 关联文件:
@@ -292,8 +297,9 @@ inline Status truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& 
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status min(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status min(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    (void)ctx;
     return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) {
         return a < b ? a : b;
     });
@@ -304,7 +310,7 @@ inline Status min(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 - 执行 same-shape 多维逐元素最大值并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::max<GM, float, float>(out, lhs, rhs);
+- Status st = npu_demo::max<GM, float, float>(ctx, out, lhs, rhs);
 
 
 关联文件:
@@ -312,8 +318,9 @@ inline Status min(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status max(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    (void)ctx;
     return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) {
         return a > b ? a : b;
     });
@@ -324,7 +331,7 @@ inline Status max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 - 执行 same-shape 多维逐元素相等比较并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::eq<GM, float, bool>(out, lhs, rhs);
+- Status st = npu_demo::eq<GM, float, bool>(ctx, out, lhs, rhs);
 
 
 关联文件:
@@ -332,8 +339,9 @@ inline Status max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status eq(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    (void)ctx;
     return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a == b; });
 }
 
@@ -342,7 +350,7 @@ inline Status eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 - 执行 same-shape 多维逐元素不等比较并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::ne<GM, float, bool>(out, lhs, rhs);
+- Status st = npu_demo::ne<GM, float, bool>(ctx, out, lhs, rhs);
 
 
 关联文件:
@@ -350,8 +358,9 @@ inline Status eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status ne(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    (void)ctx;
     return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a != b; });
 }
 
@@ -360,7 +369,7 @@ inline Status ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 - 执行 same-shape 多维逐元素小于比较并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::lt<GM, float, bool>(out, lhs, rhs);
+- Status st = npu_demo::lt<GM, float, bool>(ctx, out, lhs, rhs);
 
 
 关联文件:
@@ -368,8 +377,9 @@ inline Status ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status lt(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    (void)ctx;
     return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a < b; });
 }
 
@@ -378,7 +388,7 @@ inline Status lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 - 执行 same-shape 多维逐元素小于等于比较并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::le<GM, float, bool>(out, lhs, rhs);
+- Status st = npu_demo::le<GM, float, bool>(ctx, out, lhs, rhs);
 
 
 关联文件:
@@ -386,8 +396,9 @@ inline Status lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status le(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status le(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    (void)ctx;
     return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a <= b; });
 }
 
@@ -396,7 +407,7 @@ inline Status le(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 - 执行 same-shape 多维逐元素大于比较并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::gt<GM, float, bool>(out, lhs, rhs);
+- Status st = npu_demo::gt<GM, float, bool>(ctx, out, lhs, rhs);
 
 
 关联文件:
@@ -404,8 +415,9 @@ inline Status le(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status gt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status gt(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    (void)ctx;
     return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a > b; });
 }
 
@@ -414,7 +426,7 @@ inline Status gt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 - 执行 same-shape 多维逐元素大于等于比较并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::ge<GM, float, bool>(out, lhs, rhs);
+- Status st = npu_demo::ge<GM, float, bool>(ctx, out, lhs, rhs);
 
 
 关联文件:
@@ -422,8 +434,9 @@ inline Status gt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status ge(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    (void)ctx;
     return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a >= b; });
 }
 
@@ -432,7 +445,7 @@ inline Status ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 - 执行 same-shape 多维逐元素指数计算并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::exp<GM, float, float>(out, input);
+- Status st = npu_demo::exp<GM, float, float>(ctx, out, input);
 
 
 关联文件:
@@ -440,8 +453,9 @@ inline Status ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status exp(Memory<Space, OutType>& out, const Memory<Space, InType>& input) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status exp(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input) {
+    (void)ctx;
     return detail::elementwise_unary_same_shape(out, input, [](const InType& value) {
         return static_cast<OutType>(std::exp(static_cast<double>(value)));
     });
@@ -452,7 +466,7 @@ inline Status exp(Memory<Space, OutType>& out, const Memory<Space, InType>& inpu
 - 按 `cond` 执行一维逐元素条件选择，并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::select<GM, float, float>(out, cond, lhs, rhs);
+- Status st = npu_demo::select<GM, float, float>(ctx, out, cond, lhs, rhs);
 
 
 关联文件:
@@ -460,12 +474,14 @@ inline Status exp(Memory<Space, OutType>& out, const Memory<Space, InType>& inpu
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
 inline Status select(
+    Context& ctx,
     Memory<Space, OutType>& out,
     const Memory<Space, bool>& cond,
     const Memory<Space, InType>& lhs,
     const Memory<Space, InType>& rhs) {
+    (void)ctx;
     if (cond.rank() != 1 || lhs.rank() != 1 || rhs.rank() != 1 || out.rank() != 1) {
         return StatusCode::kError;
     }
@@ -492,7 +508,7 @@ inline Status select(
 - 对二维输入在指定 `axis` 上执行 `reduce_sum`，并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::reduce_sum<GM, float, float>(out, input, 1);
+- Status st = npu_demo::reduce_sum<GM, float, float>(ctx, out, input, 1);
 
 
 关联文件:
@@ -500,8 +516,9 @@ inline Status select(
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status reduce_sum(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status reduce_sum(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) {
+    (void)ctx;
     if (input.rank() != 2 || out.rank() != 2) {
         return StatusCode::kError;
     }
@@ -546,7 +563,7 @@ inline Status reduce_sum(Memory<Space, OutType>& out, const Memory<Space, InType
 - 对二维输入在指定 `axis` 上执行 `reduce_min`，并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::reduce_min<GM, float, float>(out, input, 1);
+- Status st = npu_demo::reduce_min<GM, float, float>(ctx, out, input, 1);
 
 
 关联文件:
@@ -554,8 +571,9 @@ inline Status reduce_sum(Memory<Space, OutType>& out, const Memory<Space, InType
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status reduce_min(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) {
+    (void)ctx;
     if (input.rank() != 2 || out.rank() != 2) {
         return StatusCode::kError;
     }
@@ -604,7 +622,7 @@ inline Status reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType
 - 对二维输入在指定 `axis` 上执行 `reduce_max`，并把结果写入 `out`。
 
 使用示例:
-- Status st = npu_demo::reduce_max<GM, float, float>(out, input, 1);
+- Status st = npu_demo::reduce_max<GM, float, float>(ctx, out, input, 1);
 
 
 关联文件:
@@ -612,8 +630,9 @@ inline Status reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace Space, typename InType, typename OutType>
-inline Status reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) {
+template <MemorySpace Space, typename InType, typename OutType, typename Context>
+inline Status reduce_max(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) {
+    (void)ctx;
     if (input.rank() != 2 || out.rank() != 2) {
         return StatusCode::kError;
     }
@@ -663,8 +682,8 @@ inline Status reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType
 - `acc=true` 时读取 `out` 旧值并累加，`acc=false` 时覆盖写。
 
 使用示例:
-- Status st = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs);
-- Status st_acc = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs, true);
+- Status st = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(ctx, out, lhs, rhs);
+- Status st_acc = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(ctx, out, lhs, rhs, true);
 
 
 关联文件:
@@ -672,12 +691,14 @@ inline Status reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType>
+template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType, typename Context>
 inline Status matmul(
+    Context& ctx,
     Memory<OutSpace, OutType>& out,
     const Memory<LhsSpace, LhsType>& lhs,
     const Memory<RhsSpace, RhsType>& rhs,
     bool acc) {
+    (void)ctx;
     if (lhs.rank() != 2 || rhs.rank() != 2 || out.rank() != 2) {
         return StatusCode::kError;
     }
@@ -721,7 +742,7 @@ inline Status matmul(
 - 提供 `img2col1d` 的公开承接实现，按 `[N, C, W] -> [N, C, K, Wo]` 物化展开窗口。
 
 使用示例:
-- Status st = npu_demo::img2col1d<GM, TSM, float, float>(out, input, 3, 2, 1, 1, 1);
+- Status st = npu_demo::img2col1d<GM, TSM, float, float>(ctx, out, input, 3, 2, 1, 1, 1);
 
 
 关联文件:
@@ -729,8 +750,9 @@ inline Status matmul(
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType>
+template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType, typename Context>
 inline Status img2col1d(
+    Context& ctx,
     Memory<OutputSpace, OutType>& out,
     const Memory<InputSpace, InType>& input,
     long long k,
@@ -738,6 +760,7 @@ inline Status img2col1d(
     long long d,
     long long p_left,
     long long p_right) {
+    (void)ctx;
     if (input.rank() != 3 || out.rank() != 4) {
         return StatusCode::kError;
     }
@@ -793,7 +816,7 @@ inline Status img2col1d(
 - 提供 `img2col2d` 的公开承接实现，按 `[N, C, H, W] -> [N, C, KH, KW, Ho, Wo]` 物化展开窗口。
 
 使用示例:
-- Status st = npu_demo::img2col2d<GM, TSM, float, float>(out, input, 3, 2, 1, 2, 1, 1, 1, 0, 0, 1);
+- Status st = npu_demo::img2col2d<GM, TSM, float, float>(ctx, out, input, 3, 2, 1, 2, 1, 1, 1, 0, 0, 1);
 
 
 关联文件:
@@ -801,8 +824,9 @@ inline Status img2col1d(
 - test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
-template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType>
+template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType, typename Context>
 inline Status img2col2d(
+    Context& ctx,
     Memory<OutputSpace, OutType>& out,
     const Memory<InputSpace, InType>& input,
     long long kh,
@@ -815,6 +839,7 @@ inline Status img2col2d(
     long long pw,
     long long pl,
     long long pr) {
+    (void)ctx;
     if (input.rank() != 4 || out.rank() != 6) {
         return StatusCode::kError;
     }
@@ -880,49 +905,5 @@ inline Status img2col2d(
 }
 
 }  // namespace npu_demo
-
-/*
-功能说明:
-- 为 `gen_kernel(target="npu_demo")` 的 `add_barrier` 骨架提供跨 MemorySpace 的私有 `add(lhs, rhs, out)` 承接。
-- 仅用于单入口源码中 `TSM + TSM -> TLMx` 这类受控路径；不改变 `include/api/Kernel.h` 的公开 `out-first` 合同。
-
-使用示例:
-- Status st = add(lhs_tsm, rhs_tsm, out_tlm);
-
-
-关联文件:
-- spec: spec/include/npu_demo/npu_demo.md
-- test: test/dsl/gen_kernel/gen_kernel.py
-- 功能实现: include/npu_demo/Kernel.h
-*/
-template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename T>
-inline Status add(const Memory<LhsSpace, T>& lhs, const Memory<RhsSpace, T>& rhs, Memory<OutSpace, T>& out) {
-    if (lhs.rank() != 1 || rhs.rank() != 1 || out.rank() != 1) {
-        return StatusCode::kError;
-    }
-    if (!npu_demo::detail::is_non_null(lhs.data()) || !npu_demo::detail::is_non_null(rhs.data())
-        || !npu_demo::detail::is_non_null(out.data())) {
-        return StatusCode::kError;
-    }
-    const long long lhs_size = lhs.get_shape(0);
-    const long long rhs_size = rhs.get_shape(0);
-    const long long out_size = out.get_shape(0);
-    if (lhs_size <= 0 || rhs_size <= 0 || out_size <= 0) {
-        return StatusCode::kError;
-    }
-    if (lhs_size != rhs_size || lhs_size != out_size) {
-        return StatusCode::kError;
-    }
-    const long long lhs_stride = lhs.get_stride(0);
-    const long long rhs_stride = rhs.get_stride(0);
-    const long long out_stride = out.get_stride(0);
-    if (lhs_stride <= 0 || rhs_stride <= 0 || out_stride <= 0) {
-        return StatusCode::kError;
-    }
-    for (long long i = 0; i < lhs_size; ++i) {
-        out.data()[i * out_stride] = lhs.data()[i * lhs_stride] + rhs.data()[i * rhs_stride];
-    }
-    return StatusCode::kOk;
-}
 
 #endif  // KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_KERNEL_H_

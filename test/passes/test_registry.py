@@ -847,51 +847,20 @@ def test_build_registered_nn_lowering_pass_is_module_pass() -> None:
 
 
 # TC-REGISTRY-007B
-# 功能说明: 验证内置 pass 加载后可通过稳定名称构造 launch-kernel-cost-func，并透传公开 cost_kind 选项。
-# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_launch_kernel_cost_func_pass
+# 功能说明: 验证 LaunchKernelCostFuncPass 下线后不再注册旧 pass 名称。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_launch_kernel_cost_func_is_removed
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
 # 对应测试文件路径: test/passes/test_registry.py
-def test_build_registered_launch_kernel_cost_func_pass() -> None:
+def test_build_registered_launch_kernel_cost_func_is_removed() -> None:
     load_builtin_passes()
 
-    pass_obj = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "DMA1|MAC|VECTOR1"})
-
-    assert pass_obj.name == "launch-kernel-cost-func"
-    assert type(pass_obj).__name__ == "LaunchKernelCostFuncPass"
-    assert getattr(pass_obj, "cost_kind") == "DMA1|MAC|VECTOR1"
-
-
-# TC-REGISTRY-007BA
-# 功能说明: 验证 registry 无参构造 launch-kernel-cost-func 时使用公开默认七类成本 kind。
-# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_launch_kernel_cost_func_default_kind
-# 对应功能实现文件路径: kernel_gen/passes/registry.py
-# 对应 spec 文件路径: spec/pass/registry.md
-# 对应测试文件路径: test/passes/test_registry.py
-def test_build_registered_launch_kernel_cost_func_default_kind() -> None:
-    load_builtin_passes()
-
-    pass_obj = build_registered_pass("launch-kernel-cost-func")
-
-    assert pass_obj.name == "launch-kernel-cost-func"
-    assert type(pass_obj).__name__ == "LaunchKernelCostFuncPass"
-    assert getattr(pass_obj, "cost_kind") == "DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2"
-
-
-# TC-REGISTRY-007C
-# 功能说明: 验证 registry 构造 launch-kernel-cost-func 时不会把非法 `cost_kind` 改写成通用 option error。
-# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_launch_kernel_cost_func_rejects_invalid_kind
-# 对应功能实现文件路径: kernel_gen/passes/registry.py
-# 对应 spec 文件路径: spec/pass/registry.md
-# 对应测试文件路径: test/passes/test_registry.py
-def test_build_registered_launch_kernel_cost_func_rejects_invalid_kind() -> None:
-    load_builtin_passes()
-
+    assert "launch-kernel-cost-func" not in list_registered_passes()
     with pytest.raises(
         KernelCodeError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be '\|' separated names from \[DMA,compute,memory,latency,DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2\]$",
+        match=r"^PassRegistryError: unknown pass 'launch-kernel-cost-func'$",
     ):
-        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "DMA1|VECTOR1|DMA1"})
+        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "DMA1|VECTOR1"})
 
 
 # TC-REGISTRY-007D

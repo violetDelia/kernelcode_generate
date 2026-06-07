@@ -49,8 +49,8 @@ def _emit_npu_demo_dma_transpose(op: DmaTransposeOp, ctx) -> str:
     """发射 npu_demo `dma.transpose` C++ 语句。
 
     功能说明:
-    - 根据 `DmaTransposeOp` 的 target/source/perm 生成 `transpose<...>(...)` 语句。
-    - memory dtype 模板参数由当前文件内 helper 读取 template name 或真实 dtype。
+    - 根据 `DmaTransposeOp` 的 target/source/perm 生成 `transpose<...>(ctx, ...)` 语句。
+    - rank 1..8 的 perm 发射为 `{...}`，由 include/api `Vector` 参数承接。
 
     使用示例:
     - stmt = _emit_npu_demo_dma_transpose(op, ctx)
@@ -60,11 +60,18 @@ def _emit_npu_demo_dma_transpose(op: DmaTransposeOp, ctx) -> str:
 
     target_expr = emit_c_value(op.target, ctx)
     source_expr = emit_c_value(op.source, ctx)
-    perm_values = ", ".join(
-        str(value.data if isinstance(value, IntAttr) else value.value.data) for value in op.perm.data
-    )
+    perm_parts = [str(value.data if isinstance(value, IntAttr) else value.value.data) for value in op.perm.data]
+    if len(perm_parts) == 0:
+        raise ctx.emit_error("dma.transpose", "layout rank mismatch")
+    if len(perm_parts) > 8:
+        raise ctx.emit_error("dma.transpose", "layout rank exceeds Vector brace-list capacity")
+    perm_values = ", ".join(perm_parts)
+    op.target.type.verify()
+    target_type = op.target.type.template_name.data or ctx.dispatch_type(op.target.type.element_type)
+    op.source.type.verify()
+    source_type = op.source.type.template_name.data or ctx.dispatch_type(op.source.type.element_type)
     return (
         f"{ctx.current_indent}transpose<{ctx.dispatch_attr(op.target.type)}, {ctx.dispatch_attr(op.source.type)}, "
-        f"{_memory_element_cpp_type(op.target.type, ctx)}, {_memory_element_cpp_type(op.source.type, ctx)}>"
-        f"({target_expr} /*dst*/, {source_expr} /*source*/, {{{perm_values}}} /*perm*/);"
+        f"{target_type}, {source_type}>"
+        f"(ctx, {target_expr} /*dst*/, {source_expr} /*source*/, {{{perm_values}}} /*perm*/);"
     )

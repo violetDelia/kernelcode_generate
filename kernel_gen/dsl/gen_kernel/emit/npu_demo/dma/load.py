@@ -51,7 +51,7 @@ def _emit_npu_demo_dma_load(op: DmaLoadOp, ctx) -> str:
     """发射 npu_demo `dma.load` C++ 语句。
 
     功能说明:
-    - 根据 `DmaLoadOp` 的 target、source、offset/size/stride 生成 `load<...>(...)` 语句。
+    - 根据 `DmaLoadOp` 的 target、source、offset/size/stride 生成 `load<...>(ctx, ...)` 语句。
     - 仅作为当前文件内注册实现使用，不作为跨文件公开 API。
 
     使用示例:
@@ -62,8 +62,10 @@ def _emit_npu_demo_dma_load(op: DmaLoadOp, ctx) -> str:
 
     target_expr = emit_c_value(op.target, ctx)
     source_expr = emit_c_value(op.source, ctx)
-    layout_exprs: list[str] = []
-    for values in (op.offsets, op.sizes, op.strides):
+    layout_parts: list[tuple[str, list[str]]] = []
+    for label, values in (("offset", op.offsets), ("size", op.sizes), ("stride", op.strides)):
+        if len(values) == 0:
+            raise ctx.emit_error("dma.load", "layout rank mismatch")
         parts: list[str] = []
         for value in values:
             owner = value.owner
@@ -80,11 +82,27 @@ def _emit_npu_demo_dma_load(op: DmaLoadOp, ctx) -> str:
                 parts.append(owner.results[0].type.expr.expr.data)
                 continue
             parts.append(emit_c_value(value, ctx))
-        layout_exprs.append("{" + ", ".join(parts) + "}")
+        layout_parts.append((label, parts))
+    rank = len(layout_parts[0][1])
+    if any(len(parts) != rank for _label, parts in layout_parts):
+        raise ctx.emit_error("dma.load", "layout rank mismatch")
+    if rank > 8:
+        raise ctx.emit_error("dma.load", "layout rank exceeds Vector brace-list capacity")
+    layout_exprs = ["{" + ", ".join(parts) + "}" for _label, parts in layout_parts]
+    layout_lines: list[str] = []
     offset_expr, size_expr, stride_expr = layout_exprs
-    return (
-        f"{ctx.current_indent}load<{ctx.dispatch_attr(op.target.type)}, {ctx.dispatch_attr(op.source.type)}, "
-        f"{_memory_element_cpp_type(op.target.type, ctx)}, {_memory_element_cpp_type(op.source.type, ctx)}>"
-        f"({target_expr} /*dst*/, {source_expr} /*source*/, {offset_expr} /*offset*/, "
-        f"{size_expr} /*size*/, {stride_expr} /*stride*/);"
+    op.target.type.verify()
+    target_type = op.target.type.template_name.data or ctx.dispatch_type(op.target.type.element_type)
+    op.source.type.verify()
+    source_type = op.source.type.template_name.data or ctx.dispatch_type(op.source.type.element_type)
+    return "\n".join(
+        [
+            *layout_lines,
+            (
+                f"{ctx.current_indent}load<{ctx.dispatch_attr(op.target.type)}, {ctx.dispatch_attr(op.source.type)}, "
+                f"{target_type}, {source_type}>"
+                f"(ctx, {target_expr} /*dst*/, {source_expr} /*source*/, {offset_expr} /*offset*/, "
+                f"{size_expr} /*size*/, {stride_expr} /*stride*/);"
+            ),
+        ]
     )

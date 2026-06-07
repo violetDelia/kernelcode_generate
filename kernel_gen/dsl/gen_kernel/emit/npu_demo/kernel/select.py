@@ -47,7 +47,7 @@ def _emit_npu_demo_kernel_select(op: KernelSelectOp, ctx) -> str:
     """发射 npu_demo `kernel.select` C++ 语句。
 
     功能说明:
-    - 根据 `KernelSelectOp` 的 cond/lhs/rhs/out memory 生成 `select<...>(...)` 语句。
+    - 根据 `KernelSelectOp` 的 cond/lhs/rhs/out memory 生成 `select<...>(ctx, ...)` 语句。
     - 仅作为当前文件内注册实现使用，不作为跨文件公开 API。
 
     使用示例:
@@ -79,9 +79,12 @@ def _emit_npu_demo_kernel_select(op: KernelSelectOp, ctx) -> str:
         for value in (out_value, cond_value, lhs_value, rhs_value)
     ):
         raise ctx.emit_error(op.name, "unsupported op")
+    lhs_value.type.verify()
+    input_type = lhs_value.type.template_name.data or ctx.dispatch_type(lhs_value.type.element_type)
+    out_value.type.verify()
+    output_type = out_value.type.template_name.data or ctx.dispatch_type(out_value.type.element_type)
     return (
-        f"{ctx.current_indent}select<{ctx.dispatch_attr(out_value.type)}, {_memory_element_cpp_type(lhs_value.type, ctx)}, "
-        f"{_memory_element_cpp_type(out_value.type, ctx)}>"
-        f"({emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(cond_value, ctx)} /*cond*/, "
+        f"{ctx.current_indent}select<{ctx.dispatch_attr(out_value.type)}, {input_type}, {output_type}>"
+        f"(ctx, {emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(cond_value, ctx)} /*cond*/, "
         f"{emit_c_value(lhs_value, ctx)} /*lhs*/, {emit_c_value(rhs_value, ctx)} /*rhs*/);"
     )

@@ -2,29 +2,24 @@
 
 ## 功能简介
 
-定义 include/api 层统一对外的架构/运行时 API 头文件规范（`include/api/Arch.h`），收口 `launch<block, thread, subthread, shared_memory_size>(callee, args...)` 的公开源码形态、`BarrierVisibility`/`BarrierScope` 枚举，以及后端 `KernelContext::block_id()`、`KernelContext::block_num()`、`KernelContext::thread_id()`、`KernelContext::thread_num()`、`KernelContext::barrier(visibility, scope)`、`KernelContext::get_dynamic_memory<Space, T>()` 与 free helper `block_id()`、`thread_id()`、`thread_num()`、`get_dynamic_memory<Space>()` 必须遵守的命名与参数合同。
+定义 include/api 层统一对外的架构/运行时 API 头文件规范（`include/api/Arch.h`），收口 `launch<block, thread, subthread, shared_memory_size, name>(ctx, args...)` 的公开源码形态、`BarrierVisibility`/`BarrierScope` 枚举、opaque `KernelContext` 类型，以及 free helper `block_id()`、`thread_id()`、`thread_num()`、`get_dynamic_memory<Space>()` 必须遵守的命名与参数合同。
 
-- `launch<block, thread, subthread, shared_memory_size>(callee, args...)`：公开 launch 入口，`callee` 必须是函数对象，不能是字符串。
+- `launch<block, thread, subthread, shared_memory_size, name>(ctx, args...)`：公开 launch 入口，`name` 必须是可用 `Context&` 首参与 `args...` 调用的函数对象，不能是字符串。
 - `BarrierVisibility`：公开可见域枚举，固定成员为 `TSM` 与 `TLM`；其中 `TLM` 表示聚合可见域，覆盖 `TLM1/TLM2/TLM3`。
 - `BarrierScope`：公开同步范围枚举，稳定成员为 `BLOCK`、`THREAD`、`SUBTHREAD`、`GLOBAL`。
-- `barrier(visibility, scope)`：公开同步接口名，`visibility` 与 `scope` 必填；不得退化为无参 barrier。
+- `KernelContext`：opaque context 类型，不公开运行时查询、同步或动态内存成员函数。
 
 ## API 列表
 
 - `BarrierVisibility(TSM, TLM) -> enum class`
 - `BarrierScope(BLOCK, THREAD, SUBTHREAD, GLOBAL) -> enum class`
-- `template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args> Status launch(Callable&& callee, Args&&... args)`
+- `template <long long block, long long thread, long long subthread, long long shared_memory_size, auto name, typename Context, typename... Args> Status launch(Context& ctx, Args&&... args)`
 - `class KernelContext`
-- `KernelContext::block_id() const -> long long`
-- `KernelContext::block_num() const -> long long`
-- `KernelContext::thread_id() const -> long long`
-- `KernelContext::thread_num() const -> long long`
-- `KernelContext::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const -> void`
-- `template <MemorySpace Space, typename T> KernelContext::get_dynamic_memory() const -> Memory<Space, T>`
 - `block_id() -> S_INT`
 - `thread_id() -> S_INT`
 - `thread_num() -> S_INT`
 - `template <MemorySpace Space> get_dynamic_memory() -> DynamicMemoryRef<Space>`
+- `template <MemorySpace Space> class DynamicMemoryRef`
 
 ## 文档信息
 
@@ -57,16 +52,16 @@
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - `include/api/Arch.h` 只声明公开接口，不得放入任何 `npu_demo` 或其他后端的线程创建、barrier 实现、固定硬件模板值或私有辅助函数。
-- 本规范只冻结源码级 `launch` / `barrier` 公开合同，不定义 DSL/front-end、MLIR lowering、codegen 或 runtime 调度细节。
+- 本规范只冻结源码级 `launch`、runtime helper 名称与最小类型边界，不定义 DSL/front-end、MLIR lowering、codegen 或 runtime 调度细节。
 - include/api 只定义接口与最小语义；`KernelContext` 的真实线程索引、extent、barrier 共享对象、动态内存 backing store 与 launch 注入方式，都由 include/npu_demo 等后端私有层承接。
-- `launch<block, thread, subthread, shared_memory_size>(...)` 的 `block/thread/subthread/shared_memory_size` 是编译期 launch extent，不是运行期位置参数。
-- `callee` 的公开语义是“函数对象或等价可调用对象”；不得将 `"my_kernel"` 之类字符串名称暴露为长期稳定合同。
-- `barrier(visibility, scope)` 的 `visibility` 元素类型必须是 `BarrierVisibility`；不得改成 `MemorySpace` 列表、字符串列表、自由文本或后端私有空间枚举。
+- `launch<block, thread, subthread, shared_memory_size, name>(...)` 的 `block/thread/subthread/shared_memory_size` 是编译期 launch extent，不是运行期位置参数；`name` 也是模板参数，不作为普通函数实参传递。
+- `name` 的公开语义是“可用 context-first 签名调用的函数对象或等价可调用对象”；不得将 `"my_kernel"` 之类字符串名称暴露为长期稳定合同。
+- 后端公开 barrier helper 的 `visibility` 元素类型必须是 `BarrierVisibility`；不得改成 `MemorySpace` 列表、字符串列表、自由文本或后端私有空间枚举。
 - `BarrierScope` 公开成员允许后端实现做能力裁剪；若某后端暂不支持某个 scope，必须显式失败，不得静默降级为其他 scope。
-- include/api 层不定义具体 `KernelContext` 的存储布局、生命周期、默认构造、线程绑定或注入方式；这些职责由后端私有 include 承接。
-- `KernelContext::block_id()` / `KernelContext::block_num()` / `KernelContext::thread_id()` / `KernelContext::thread_num()` / `KernelContext::barrier(...)` / `KernelContext::get_dynamic_memory<Space, T>()` 是 include/api 层公开承诺的最小运行时接口面；后端可以补实现细节，但不得改名、改参数面或改成 target 私有别名。
+- include/api 层不定义具体 `KernelContext` 的存储布局、生命周期、默认构造、线程绑定或注入方式；该类型只作为可传入 `launch(ctx, args...)` 和 context-first helper 的上下文占位。
+- `KernelContext` 不公开 runtime member API；运行时索引、同步与动态内存访问必须通过 Arch free helper 或后端命名空间 free helper 承接。
 - `block_id()` / `thread_id()` / `thread_num()` / `get_dynamic_memory<Space>()` 是公开代码生成口径；后端必须保证它们可在已绑定 launch 上下文时直接调用。
-- `TRANCE` 开启且 `KG_TRANCE_DIR_PATH` 为空时，后端 launch 实现必须输出 `in func: npu_demo::launch template=<block=..., thread=..., subthread=..., shared_memory_size=...>`、`args =`、`arg0` callable 参数摘要，以及按 forwarded args 原始顺序输出的 `arg1`、`arg2`、... 参数摘要到 stdout 或当前 sink；关闭时不得产生诊断输出。
+- `TRANCE` 开启且 `KG_TRANCE_DIR_PATH` 为空时，后端 launch 实现必须输出 `in func: npu_demo::launch template=<block=..., thread=..., subthread=..., shared_memory_size=...>`、`args =`、`arg0 = KernelContext`，以及按 forwarded args 原始顺序输出的 `arg1`、`arg2`、... 参数摘要到 stdout 或当前 sink；关闭时不得产生诊断输出。
 - `TRANCE` 开启且 `KG_TRANCE_DIR_PATH` 非空时，后端 launch 实现必须只调用 `kernelcode::trance::prepare_block_trace_dir(...)` 与 `kernelcode::trance::ScopedBlockTranceSink(...)` 公开入口完成 block 文件落盘；`include/npu_demo/Arch.h` 不得拼接文件名、遍历目录、清理文件或调用 `kernelcode::trance::detail::*`。
 - block 文件模式下，launch template/args 日志必须写入每个实际 block 的 `block_XXXX.log`，不得只写 stdout、旧单文件或 `block_0000.log`。
 
@@ -95,23 +90,24 @@ BarrierVisibility visibility = BarrierVisibility::TLM;
   ```cpp
 BarrierScope scope = BarrierScope::GLOBAL;
 ```
-- 功能说明：定义公开同步范围枚举，供 `KernelContext::barrier(visibility, scope)` 使用。
+- 功能说明：定义公开同步范围枚举，供后端 barrier free helper 使用。
 - 注意事项：稳定成员仅包含 `BarrierScope::BLOCK`、`BarrierScope::THREAD`、`BarrierScope::SUBTHREAD`、`BarrierScope::GLOBAL`；后端可以显式拒绝暂不支持的 scope，但不得静默降级或改名。
 
-### `template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args> Status launch(Callable&& callee, Args&&... args)`
+### `template <long long block, long long thread, long long subthread, long long shared_memory_size, auto name, typename Context, typename... Args> Status launch(Context& ctx, Args&&... args)`
 
-- api：`template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args> Status launch(Callable&& callee, Args&&... args)`
+- api：`template <long long block, long long thread, long long subthread, long long shared_memory_size, auto name, typename Context, typename... Args> Status launch(Context& ctx, Args&&... args)`
 - 参数：
-  - `callee`：被调用函数名或符号引用，指定 call/launch 类操作的目标；类型 `Callable&&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
+  - `ctx`：上下文对象；类型 `Context&`；无默认值，调用方必须显式提供；按引用传入，供 `name(ctx, args...)` 调用。
   - `args`：位置参数序列，按公开调用约定传递给目标函数或工具入口；类型 `Args&&...`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
 - 返回值：`Status`，表示执行状态。
 - 使用示例：
 
   ```cpp
-Status status = launch<2, 1, 1, 0>(kernel_body, lhs, rhs, out);
+npu_demo::KernelContext ctx;
+Status status = launch<2, 1, 1, 0, kernel_body>(ctx, lhs, rhs, out);
 ```
-- 功能说明：公开描述一次 kernel launch 请求，并把 `args...` 传递给 `callee`。
-- 注意事项：公开调用形态固定为 `launch<block, thread, subthread, shared_memory_size>(callee, args...)`；`callee` 必须是函数对象或等价可调用对象，不得把字符串 callee 或运行期 extent 位置参数写成稳定合同。
+- 功能说明：公开描述一次 kernel launch 请求，并把 `ctx, args...` 传递给模板参数 `name`。
+- 注意事项：公开调用形态固定为 `launch<block, thread, subthread, shared_memory_size, name>(ctx, args...)`；`name` 必须是函数对象或等价可调用对象，且必须接受 `Context&` 首参；不得把字符串 callee、callee 普通实参或运行期 extent 位置参数写成稳定合同。
 
 ### `class KernelContext`
 
@@ -122,97 +118,11 @@ Status status = launch<2, 1, 1, 0>(kernel_body, lhs, rhs, out);
 
   ```cpp
 void inspect(KernelContext& ctx) {
-    long long bid = ctx.block_id();
-    long long bnum = ctx.block_num();
-    long long tid = ctx.thread_id();
-    long long tnum = ctx.thread_num();
-    ctx.barrier({BarrierVisibility::TSM}, BarrierScope::BLOCK);
-    (void)bid;
-    (void)bnum;
+    (void)ctx;
 }
 ```
-- 功能说明：定义 `KernelContext` 公开类型。
-- 注意事项：include/api 只冻结 `KernelContext` 的公开方法面，不定义存储布局、构造方式、线程绑定、barrier 共享对象或动态内存 backing store。
-
-### `KernelContext::block_id() const -> long long`
-
-- api：`KernelContext::block_id() const -> long long`
-- 参数：无。
-- 返回值：`long long`。
-- 使用示例：
-
-  ```cpp
-auto bid = ctx.block_id();
-```
-- 功能说明：返回当前 launch 的运行时 block 索引。
-- 注意事项：返回值表示当前 launched body 所在 block，不是 target registry 常量，也不是编译期模板值的文本替身。
-
-### `KernelContext::block_num() const -> long long`
-
-- api：`KernelContext::block_num() const -> long long`
-- 参数：无。
-- 返回值：`long long`。
-- 使用示例：
-
-  ```cpp
-auto blocks = ctx.block_num();
-```
-- 功能说明：返回当前 launch 的运行时 block 总数。
-- 注意事项：返回值表示当前 launch 的 block extent；include/api 不规定具体后端上限，后端私有 spec 负责能力裁剪。
-
-### `KernelContext::thread_id() const -> long long`
-
-- api：`KernelContext::thread_id() const -> long long`
-- 参数：无。
-- 返回值：`long long`。
-- 使用示例：
-
-  ```cpp
-auto tid = ctx.thread_id();
-```
-- 功能说明：执行 `thread_id`。
-- 注意事项：返回值表示当前 launch 的运行时线程索引，不是 target registry 常量，也不是编译期模板值的文本替身。
-
-### `KernelContext::thread_num() const -> long long`
-
-- api：`KernelContext::thread_num() const -> long long`
-- 参数：无。
-- 返回值：`long long`。
-- 使用示例：
-
-  ```cpp
-auto threads = ctx.thread_num();
-```
-- 功能说明：执行 `thread_num`。
-- 注意事项：返回值表示当前 launch 的运行时线程总数；include/api 不规定具体整数实现类型，但源码层方法名与返回整型语义必须稳定。
-
-### `KernelContext::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const -> void`
-
-- api：`KernelContext::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const -> void`
-- 参数：
-  - `visibility`：可见性标识，指定 barrier、符号或公开对象的可见范围；类型 `std::initializer_list<BarrierVisibility>`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按可变容器传入时，是否修改输入必须以本接口功能说明和注意事项为准；非法值按该 API 的公开错误语义处理。
-  - `scope`：作用域标识，指定 barrier、注册、查找或名字分配的有效范围；类型 `BarrierScope`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-- 返回值：`void`。
-- 使用示例：
-
-  ```cpp
-ctx.barrier({BarrierVisibility::TSM}, BarrierScope::THREAD);
-```
-- 功能说明：执行 `barrier`。
-- 注意事项：`visibility` 与 `scope` 都是必填；`visibility` 元素类型固定为 `BarrierVisibility`，不得改成 `MemorySpace`、字符串、自由文本或后端私有空间枚举。
-
-### `template <MemorySpace Space, typename T> KernelContext::get_dynamic_memory() const -> Memory<Space, T>`
-
-- api：`template <MemorySpace Space, typename T> KernelContext::get_dynamic_memory() const -> Memory<Space, T>`
-- 参数：无。
-- 返回值：`Memory<Space, T>`。
-- 使用示例：
-
-  ```cpp
-auto memory = ctx.get_dynamic_memory<TSM, float>();
-```
-- 功能说明：读取 `dynamic_memory`。
-- 注意事项：该接口是 `KernelContext` 的公开成员模板；include/api 只定义接口与最小语义，具体 `Space` 合法性、容量和失败条件由后端私有层收口。
+- 功能说明：定义 opaque `KernelContext` 公开类型。
+- 注意事项：include/api 只冻结 `KernelContext` 的类型边界，不定义存储布局、构造方式、线程绑定、barrier 共享对象或动态内存 backing store；运行时查询、同步和动态内存访问不作为成员 API 暴露。
 
 ### `block_id() -> S_INT`
 
@@ -225,7 +135,7 @@ auto memory = ctx.get_dynamic_memory<TSM, float>();
 S_INT bid = block_id();
 ```
 - 功能说明：执行 `block_id`。
-- 注意事项：公开语义与 `KernelContext::block_id()` 一致；该 free helper 隐藏活动上下文绑定细节，生成代码不得再硬编码 `ctx.` 前缀。
+- 注意事项：返回当前活动 launch 的 block 索引；该 free helper 隐藏活动上下文绑定细节，生成代码不得硬编码 context 成员调用。
 
 ### `thread_id() -> S_INT`
 
@@ -238,7 +148,7 @@ S_INT bid = block_id();
 S_INT tid = thread_id();
 ```
 - 功能说明：执行 `thread_id`。
-- 注意事项：公开语义与 `KernelContext::thread_id()` 一致；该 free helper 隐藏活动上下文绑定细节，生成代码不得再硬编码 `ctx.` 前缀。
+- 注意事项：返回当前活动 launch 的线程索引；该 free helper 隐藏活动上下文绑定细节，生成代码不得硬编码 context 成员调用。
 
 ### `thread_num() -> S_INT`
 
@@ -251,7 +161,7 @@ S_INT tid = thread_id();
 S_INT tnum = thread_num();
 ```
 - 功能说明：执行 `thread_num`。
-- 注意事项：公开语义与 `KernelContext::thread_num()` 一致；后端必须保证在已有活动 launch 上下文时可直接调用。
+- 注意事项：返回当前活动 launch 的线程总数；后端必须保证在已有活动 launch 上下文时可直接调用。
 
 ### `template <MemorySpace Space> get_dynamic_memory() -> DynamicMemoryRef<Space>`
 
@@ -291,5 +201,5 @@ Memory<TSM, float> memory = get_dynamic_memory<TSM>();
 | TC-INCLUDE-API-ARCH-001 | 公开入口 | 锁定 `BarrierScope` 与 `launch<...>` 的公开符号面。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_include_api_arch_exports_public_launch_and_scope_contract`。 | 公开入口在“锁定 `BarrierScope` 与 `launch<...>` 的公开符号面。”场景下可导入、构造、注册或按名称发现。 | `test_include_api_arch_exports_public_launch_and_scope_contract` |
 | TC-INCLUDE-API-ARCH-002 | 边界/异常 | 锁定字符串 callee 不属于长期公开合同。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_include_api_arch_rejects_string_callee_contract`。 | “锁定字符串 callee 不属于长期公开合同。”场景按公开错误语义失败或被拒绝。 | `test_include_api_arch_rejects_string_callee_contract` |
 | TC-INCLUDE-API-ARCH-003 | 公开入口 | 锁定 `include/api/Arch.h` 不混入 `npu_demo` 私有实现。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_include_api_arch_keeps_backend_impl_out_of_api_header`。 | 公开入口在“锁定 `include/api/Arch.h` 不混入 `npu_demo` 私有实现。”场景下可导入、构造、注册或按名称发现。 | `test_include_api_arch_keeps_backend_impl_out_of_api_header` |
-| TC-INCLUDE-API-ARCH-004 | 执行结果 | `TRANCE` 开启时 launch 输出模板参数、callable 与 forwarded args 参数摘要。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE`，执行公开 `npu_demo::launch<2, 1, 1, 0>(...)` 并传入两个运行期参数。 | 运行 `test_npu_demo_trance_stdout_memory_and_launch_format`。 | stdout 包含 `in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>`、`arg0 = callable[kernel_body]`、`arg1 = mem[...]` 与 `arg2 = 7`，且 `arg1` 先于 `arg2` 输出。 | `test_npu_demo_trance_stdout_memory_and_launch_format` |
-| TC-INCLUDE-API-ARCH-005 | 执行结果 | `TRANCE` block 目录模式下 launch 每个 block 写独立文件。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE` 与 `KG_TRANCE_DIR_PATH`，执行 `launch<2, 1, 1, 0>(...)`。 | 运行 `test_npu_demo_launch_trance_block_logs_are_per_block_files`。 | `block_0000.log` 与 `block_0001.log` 均包含对应 block header、launch template 和 forwarded args，stdout 无 launch 杂音。 | `test_npu_demo_launch_trance_block_logs_are_per_block_files` |
+| TC-INCLUDE-API-ARCH-004 | 执行结果 | `TRANCE` 开启时 launch 输出模板参数、KernelContext 与 forwarded args 参数摘要。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE`，执行公开 `npu_demo::launch<2, 1, 1, 0, kernel_body>(ctx, ...)` 并传入两个运行期参数。 | 运行 `test_npu_demo_trance_stdout_memory_and_launch_format`。 | stdout 包含 `in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>`、`arg0 = KernelContext`、`arg1 = mem[...]` 与 `arg2 = 7`，且 `arg1` 先于 `arg2` 输出。 | `test_npu_demo_trance_stdout_memory_and_launch_format` |
+| TC-INCLUDE-API-ARCH-005 | 执行结果 | `TRANCE` block 目录模式下 launch 每个 block 写独立文件。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE` 与 `KG_TRANCE_DIR_PATH`，执行 `launch<2, 1, 1, 0, kernel_body>(ctx)`。 | 运行 `test_npu_demo_launch_trance_block_logs_are_per_block_files`。 | `block_0000.log` 与 `block_0001.log` 均包含对应 block header、launch template 和 forwarded args，stdout 无 launch 杂音。 | `test_npu_demo_launch_trance_block_logs_are_per_block_files` |

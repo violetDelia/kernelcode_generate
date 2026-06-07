@@ -8,9 +8,7 @@
 API 列表:
 - `npu_demo::cost::copy<TargetSpace, SourceSpace, T, Kind>(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source) -> S_INT`
 - `npu_demo::cost::slice<TargetSpace, SourceSpace, T, Kind>(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride) -> S_INT`
-- `npu_demo::cost::slice<TargetSpace, SourceSpace, T, Kind>(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride) -> S_INT`
 - `npu_demo::cost::deslice<TargetSpace, SourceSpace, T, Kind>(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride) -> S_INT`
-- `npu_demo::cost::deslice<TargetSpace, SourceSpace, T, Kind>(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride) -> S_INT`
 
 使用示例:
 - #include "include/npu_demo/cost/Dma.h"
@@ -25,8 +23,6 @@ API 列表:
 
 #ifndef KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_COST_DMA_H_
 #define KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_COST_DMA_H_
-
-#include <initializer_list>
 
 #include "include/api/cost/Dma.h"
 #include "include/npu_demo/Core.h"
@@ -62,6 +58,19 @@ inline S_INT vector_element_count(const Vector& size) {
         count *= size[i];
     }
     return count;
+}
+
+inline bool valid_layout(const Vector& offset, const Vector& size, const Vector& stride) {
+    if (offset.size() == 0 || offset.size() != size.size() || offset.size() != stride.size() ||
+        offset.size() > kMaxCostDmaRank) {
+        return false;
+    }
+    for (unsigned long long i = 0; i < size.size(); ++i) {
+        if (size[i] <= 0 || stride[i] <= 0) {
+            return false;
+        }
+    }
+    return true;
 }
 
 template <MemorySpace Space>
@@ -150,56 +159,13 @@ inline S_INT slice(
     (void)target;
     (void)source;
     (void)offset;
-    (void)stride;
+    if (!detail::valid_layout(offset, size, stride)) {
+        return 0;
+    }
     if constexpr (detail::matches_dma_kind<TargetSpace, SourceSpace, Kind>()) {
         return detail::dma_latency_for_elements<T>(detail::vector_element_count(size));
     }
     return 0;
-}
-
-/*
-功能说明:
-- 提供 `slice` 成本 helper 的 initializer-list 布局参数 overload。
-- 非法长度或非正 size/stride 返回 `0`；合法输入立即复制为短生命周期 Vector 并复用 Vector 版成本公式。
-
-使用示例:
-- S_INT cost = npu_demo::cost::slice<TSM, GM, float, npu_demo::DMA1>(target, source, {0, 1}, {2, 2}, {1, 1});
-
-
-关联文件:
-- spec: spec/include/api/cost/Dma.md
-- test: test/include/api/test_cost.py
-- 功能实现: include/npu_demo/cost/Dma.h
-*/
-template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind>
-inline S_INT slice(
-    const Memory<TargetSpace, T>& target,
-    const Memory<SourceSpace, T>& source,
-    std::initializer_list<long long> offset,
-    std::initializer_list<long long> size,
-    std::initializer_list<long long> stride) {
-    if (offset.size() == 0 || offset.size() != size.size() || offset.size() != stride.size() ||
-        offset.size() > detail::kMaxCostDmaRank) {
-        return 0;
-    }
-    long long offset_buf[detail::kMaxCostDmaRank] = {0};
-    long long size_buf[detail::kMaxCostDmaRank] = {0};
-    long long stride_buf[detail::kMaxCostDmaRank] = {0};
-    auto offset_it = offset.begin();
-    auto size_it = size.begin();
-    auto stride_it = stride.begin();
-    for (unsigned long long i = 0; i < offset.size(); ++i, ++offset_it, ++size_it, ++stride_it) {
-        if (*size_it <= 0 || *stride_it <= 0) {
-            return 0;
-        }
-        offset_buf[i] = *offset_it;
-        size_buf[i] = *size_it;
-        stride_buf[i] = *stride_it;
-    }
-    Vector offset_vec(offset_buf, offset.size());
-    Vector size_vec(size_buf, size.size());
-    Vector stride_vec(stride_buf, stride.size());
-    return slice<TargetSpace, SourceSpace, T, Kind>(target, source, offset_vec, size_vec, stride_vec);
 }
 
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind>
@@ -212,56 +178,13 @@ inline S_INT deslice(
     (void)target;
     (void)source;
     (void)offset;
-    (void)stride;
+    if (!detail::valid_layout(offset, size, stride)) {
+        return 0;
+    }
     if constexpr (detail::matches_dma_kind<TargetSpace, SourceSpace, Kind>()) {
         return detail::dma_latency_for_elements<T>(detail::vector_element_count(size));
     }
     return 0;
-}
-
-/*
-功能说明:
-- 提供 `deslice` 成本 helper 的 initializer-list 布局参数 overload。
-- 非法长度或非正 size/stride 返回 `0`；合法输入立即复制为短生命周期 Vector 并复用 Vector 版成本公式。
-
-使用示例:
-- S_INT cost = npu_demo::cost::deslice<GM, TSM, float, npu_demo::DMA2>(target, source, {0, 1}, {2, 2}, {1, 1});
-
-
-关联文件:
-- spec: spec/include/api/cost/Dma.md
-- test: test/include/api/test_cost.py
-- 功能实现: include/npu_demo/cost/Dma.h
-*/
-template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind>
-inline S_INT deslice(
-    const Memory<TargetSpace, T>& target,
-    const Memory<SourceSpace, T>& source,
-    std::initializer_list<long long> offset,
-    std::initializer_list<long long> size,
-    std::initializer_list<long long> stride) {
-    if (offset.size() == 0 || offset.size() != size.size() || offset.size() != stride.size() ||
-        offset.size() > detail::kMaxCostDmaRank) {
-        return 0;
-    }
-    long long offset_buf[detail::kMaxCostDmaRank] = {0};
-    long long size_buf[detail::kMaxCostDmaRank] = {0};
-    long long stride_buf[detail::kMaxCostDmaRank] = {0};
-    auto offset_it = offset.begin();
-    auto size_it = size.begin();
-    auto stride_it = stride.begin();
-    for (unsigned long long i = 0; i < offset.size(); ++i, ++offset_it, ++size_it, ++stride_it) {
-        if (*size_it <= 0 || *stride_it <= 0) {
-            return 0;
-        }
-        offset_buf[i] = *offset_it;
-        size_buf[i] = *size_it;
-        stride_buf[i] = *stride_it;
-    }
-    Vector offset_vec(offset_buf, offset.size());
-    Vector size_vec(size_buf, size.size());
-    Vector stride_vec(stride_buf, stride.size());
-    return deslice<TargetSpace, SourceSpace, T, Kind>(target, source, offset_vec, size_vec, stride_vec);
 }
 
 }  // namespace cost

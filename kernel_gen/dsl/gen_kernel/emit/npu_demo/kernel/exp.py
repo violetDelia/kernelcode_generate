@@ -47,7 +47,7 @@ def _emit_npu_demo_kernel_exp(op: KernelExpOp, ctx) -> str:
     """发射 npu_demo `kernel.exp` C++ 语句。
 
     功能说明:
-    - 根据 `KernelExpOp` 的 input/out memory 生成 `exp<...>(...)` 语句。
+    - 根据 `KernelExpOp` 的 input/out memory 生成 `exp<...>(ctx, ...)` 语句。
     - 仅作为当前文件内注册实现使用，不作为跨文件公开 API。
 
     使用示例:
@@ -60,8 +60,11 @@ def _emit_npu_demo_kernel_exp(op: KernelExpOp, ctx) -> str:
     out_value = op.out
     if not isinstance(input_value.type, NnMemoryType) or not isinstance(out_value.type, NnMemoryType):
         raise ctx.emit_error(op.name, "unsupported op")
+    input_value.type.verify()
+    input_type = input_value.type.template_name.data or ctx.dispatch_type(input_value.type.element_type)
+    out_value.type.verify()
+    output_type = out_value.type.template_name.data or ctx.dispatch_type(out_value.type.element_type)
     return (
-        f"{ctx.current_indent}exp<{ctx.dispatch_attr(out_value.type)}, {_memory_element_cpp_type(input_value.type, ctx)}, "
-        f"{_memory_element_cpp_type(out_value.type, ctx)}>"
-        f"({emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(input_value, ctx)} /*input*/);"
+        f"{ctx.current_indent}exp<{ctx.dispatch_attr(out_value.type)}, {input_type}, {output_type}>"
+        f"(ctx, {emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(input_value, ctx)} /*input*/);"
     )

@@ -168,11 +168,13 @@ def test_execute_engine_compile_trance_block_sink_runs_on_npu_demo(tmp_path: Pat
     set_trance_enabled(True)
     set_dump_dir(tmp_path)
     source = """
-static void kernel_body() {
+static void kernel_body(npu_demo::KernelContext& ctx) {
+    (void)ctx;
 }
 
 void run_kernel() {
-    npu_demo::launch<2, 1, 1, 0>(kernel_body);
+    npu_demo::KernelContext ctx;
+    npu_demo::launch<2, 1, 1, 0, kernel_body>(ctx);
 }
 """
     kernel = ExecutionEngine(target="npu_demo").compile(source=source, function="run_kernel")

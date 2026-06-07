@@ -47,7 +47,7 @@ def _emit_npu_demo_kernel_binary_elewise(op: KernelBinaryElewiseOp, ctx) -> str:
     """发射 npu_demo `kernel.binary_elewise` C++ 语句。
 
     功能说明:
-    - 根据 `KernelBinaryElewiseOp.kind` 选择 npu_demo elewise helper，并生成模板调用。
+    - 根据 `KernelBinaryElewiseOp.kind` 选择 npu_demo elewise helper，并生成 context-first 模板调用。
     - 仅作为当前文件内注册实现使用，不作为跨文件公开 API。
 
     使用示例:
@@ -94,9 +94,11 @@ def _emit_npu_demo_kernel_binary_elewise(op: KernelBinaryElewiseOp, ctx) -> str:
     lhs_expr = emit_c_value(lhs_value, ctx)
     rhs_expr = emit_c_value(rhs_value, ctx)
     space_expr = ctx.dispatch_attr(out_value.type)
-    input_type = _memory_element_cpp_type(lhs_value.type, ctx)
-    output_type = _memory_element_cpp_type(out_value.type, ctx)
+    lhs_value.type.verify()
+    input_type = lhs_value.type.template_name.data or ctx.dispatch_type(lhs_value.type.element_type)
+    out_value.type.verify()
+    output_type = out_value.type.template_name.data or ctx.dispatch_type(out_value.type.element_type)
     return (
         f"{ctx.current_indent}{helper_name}<{space_expr}, {input_type}, {output_type}>"
-        f"({out_expr} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
+        f"(ctx, {out_expr} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
     )

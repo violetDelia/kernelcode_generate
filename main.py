@@ -95,17 +95,18 @@ def _is_npu_demo_wrapper(func_op: func.FuncOp) -> bool:
     return any(isinstance(inner, ArchLaunchOp) for inner in _walk_ops(func_op))
 
 
-def _select_npu_demo_source_functions(module: ModuleOp) -> tuple[func.FuncOp, func.FuncOp]:
-    """从 lowered module 中定位唯一 host wrapper 与 device kernel。
+def _select_npu_demo_source_functions(module: ModuleOp) -> tuple[func.FuncOp, list[func.FuncOp]]:
+    """从 lowered module 中定位唯一 host wrapper 与一个或多个 device kernel。
 
 
     功能说明:
     - 允许 module 在 wrapper 与 device kernel 之外继续包含 sibling cost function。
-    - wrapper 通过唯一 `arch.launch` 识别，device kernel 通过 launch callee 精确定位。
+    - wrapper 通过 `arch.launch` 识别，device kernel 通过 launch callee 精确定位。
+    - 同一 wrapper 可包含多个 `arch.launch`，返回的 body 按 launch 出现顺序排列。
     - 若 wrapper/callee 结构不符合当前 pipeline 形态，显式失败，避免 main.py 静默打印错误区段。
 
     使用示例:
-    - wrapper_func, body_func = _select_npu_demo_source_functions(result.module)
+    - wrapper_func, body_funcs = _select_npu_demo_source_functions(result.module)
 
     关联文件:
     - spec: [`spec/pass/pipeline/npu_demo_lowering.md`](spec/pass/pipeline/npu_demo_lowering.md)
@@ -114,18 +115,49 @@ def _select_npu_demo_source_functions(module: ModuleOp) -> tuple[func.FuncOp, fu
     """
 
     func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
-    wrapper_funcs = [func_op for func_op in func_ops if _is_npu_demo_wrapper(func_op)]
+    wrapper_funcs: list[func.FuncOp] = []
+    for func_op in func_ops:
+        ops: list[Operation] = [func_op]
+        cursor = 0
+        has_launch = False
+        while cursor < len(ops):
+            current = ops[cursor]
+            cursor += 1
+            if isinstance(current, ArchLaunchOp):
+                has_launch = True
+            for region in current.regions:
+                for block in region.blocks:
+                    ops.extend(block.ops)
+        if has_launch:
+            wrapper_funcs.append(func_op)
     if len(wrapper_funcs) != 1:
         raise RuntimeError("npu-demo-lowering module does not contain a unique arch.launch wrapper")
     wrapper_func = wrapper_funcs[0]
-    launch_ops = [inner for inner in _walk_ops(wrapper_func) if isinstance(inner, ArchLaunchOp)]
-    if len(launch_ops) != 1:
-        raise RuntimeError("npu-demo-lowering wrapper does not contain a unique arch.launch")
-    callee_name = launch_ops[0].callee.root_reference.data
-    body_func = next((func_op for func_op in func_ops if func_op.sym_name.data == callee_name), None)
-    if body_func is None:
-        raise RuntimeError(f"npu-demo-lowering module does not contain launch callee {callee_name!r}")
-    return wrapper_func, body_func
+    wrapper_ops: list[Operation] = [wrapper_func]
+    cursor = 0
+    launch_ops: list[ArchLaunchOp] = []
+    while cursor < len(wrapper_ops):
+        current = wrapper_ops[cursor]
+        cursor += 1
+        if isinstance(current, ArchLaunchOp):
+            launch_ops.append(current)
+        for region in current.regions:
+            for block in region.blocks:
+                wrapper_ops.extend(block.ops)
+    if not launch_ops:
+        raise RuntimeError("npu-demo-lowering wrapper does not contain arch.launch")
+    body_funcs: list[func.FuncOp] = []
+    seen_callee_names: set[str] = set()
+    for launch_op in launch_ops:
+        callee_name = launch_op.callee.root_reference.data
+        if callee_name in seen_callee_names:
+            continue
+        seen_callee_names.add(callee_name)
+        body_func = next((func_op for func_op in func_ops if func_op.sym_name.data == callee_name), None)
+        if body_func is None:
+            raise RuntimeError(f"npu-demo-lowering module does not contain launch callee {callee_name!r}")
+        body_funcs.append(body_func)
+    return wrapper_func, body_funcs
 
 
 def _strip_npu_demo_prelude(source: str) -> str:
@@ -274,9 +306,12 @@ def main() -> None:
     set_target("npu_demo")
     result = dsl_run(matmul_kernel, (out, lhs, rhs), "npu-demo-lowering")
 
-    wrapper_func, body_func = _select_npu_demo_source_functions(result.module)
+    wrapper_func, body_funcs = _select_npu_demo_source_functions(result.module)
     host_source = _extract_npu_demo_function_source(result.source, wrapper_func.sym_name.data)
-    kernel_source = _extract_npu_demo_function_source(result.source, body_func.sym_name.data)
+    kernel_source = "\n\n".join(
+        _extract_npu_demo_function_source(result.source, body_func.sym_name.data)
+        for body_func in body_funcs
+    )
 
     print("[LOWERED IR]")
     print(result.module)

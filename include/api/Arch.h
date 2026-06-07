@@ -5,14 +5,8 @@
 API 列表:
 - `enum class BarrierVisibility { TSM, TLM }`
 - `enum class BarrierScope { BLOCK, THREAD, SUBTHREAD, GLOBAL }`
-- `template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args> Status launch(Callable&& callee, Args&&... args)`
+- `template <long long block, long long thread, long long subthread, long long shared_memory_size, auto name, typename Context, typename... Args> Status launch(Context& ctx, Args&&... args)`
 - `class KernelContext`
-- `KernelContext::block_id() const -> long long`
-- `KernelContext::block_num() const -> long long`
-- `KernelContext::thread_id() const -> long long`
-- `KernelContext::thread_num() const -> long long`
-- `KernelContext::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const -> void`
-- `template <MemorySpace Space, typename T> KernelContext::get_dynamic_memory() const -> Memory<Space, T>`
 - `block_id() -> S_INT`
 - `thread_id() -> S_INT`
 - `thread_num() -> S_INT`
@@ -84,21 +78,11 @@ enum class BarrierScope {
 
 /*
 功能说明:
-- 声明 include/api 层公开承诺的最小运行时上下文接口面。
-- 该类只固定公开方法名与参数面，不承接 npu_demo 等后端的线程实现、barrier 共享状态或动态内存 backing store。
+- 声明 include/api 层公开上下文类型；运行时查询、同步和动态内存访问由 Arch free helper 承接。
+- 该类不公开 runtime member API，不承接 npu_demo 等后端的线程实现、barrier 共享状态或动态内存 backing store。
 
 使用示例:
-- void inspect(KernelContext& ctx) {
--     long long bid = ctx.block_id();
--     long long bnum = ctx.block_num();
--     long long tid = ctx.thread_id();
--     long long tnum = ctx.thread_num();
--     ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
--     (void)bid;
--     (void)bnum;
--     (void)tid;
--     (void)tnum;
-- }
+- void inspect(KernelContext& ctx) { (void)ctx; }
 
 
 关联文件:
@@ -110,104 +94,10 @@ class KernelContext {
 public:
     /*
     功能说明:
-    - 返回当前 launch 运行时视图中的 block 索引。
+    - 构造 opaque 公开上下文对象。
 
     使用示例:
-    - long long bid = ctx.block_id();
-
-
-    关联文件:
-    - spec: spec/include/api/Arch.md
-    - test: test/include/api/arch.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
-    virtual long long block_id() const = 0;
-
-    /*
-    功能说明:
-    - 返回当前 launch 运行时视图中的 block 总数。
-
-    使用示例:
-    - long long bnum = ctx.block_num();
-
-
-    关联文件:
-    - spec: spec/include/api/Arch.md
-    - test: test/include/api/arch.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
-    virtual long long block_num() const = 0;
-
-    /*
-    功能说明:
-    - 返回当前 launch 运行时视图中的线程索引。
-
-    使用示例:
-    - long long tid = ctx.thread_id();
-
-
-    关联文件:
-    - spec: spec/include/api/Arch.md
-    - test: test/include/api/arch.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
-    virtual long long thread_id() const = 0;
-
-    /*
-    功能说明:
-    - 返回当前 launch 运行时视图中的线程总数。
-
-    使用示例:
-    - long long tnum = ctx.thread_num();
-
-
-    关联文件:
-    - spec: spec/include/api/Arch.md
-    - test: test/include/api/arch.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
-    virtual long long thread_num() const = 0;
-
-    /*
-    功能说明:
-    - 声明公开 barrier 同步接口，固定 visibility 与 scope 两个参数面。
-
-    使用示例:
-    - ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
-
-
-    关联文件:
-    - spec: spec/include/api/Arch.md
-    - test: test/include/api/arch.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
-    virtual void barrier(
-        std::initializer_list<BarrierVisibility> visibility,
-        BarrierScope scope) const = 0;
-
-    /*
-    功能说明:
-    - 声明公开动态内存模板入口，具体返回语义由后端私有 include 提供。
-
-    使用示例:
-    - auto tsm = ctx.get_dynamic_memory<TSM, float>();
-
-
-    关联文件:
-    - spec: spec/include/api/Arch.md
-    - test: test/include/api/arch.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
-    template <MemorySpace Space, typename T>
-    Memory<Space, T> get_dynamic_memory() const;
-
-protected:
-    /*
-    功能说明:
-    - 保护构造函数，避免业务侧直接实例化只声明接口面的公开运行时上下文。
-
-    使用示例:
-    - class BackendContext : public KernelContext {};
+    - KernelContext ctx;
 
 
     关联文件:
@@ -219,10 +109,10 @@ protected:
 
     /*
     功能说明:
-    - 保护析构函数，限制公开接口层只作为后端运行时上下文基类使用。
+    - 析构 opaque 公开上下文对象。
 
     使用示例:
-    - class BackendContext : public KernelContext {};
+    - KernelContext ctx;
 
 
     关联文件:
@@ -348,10 +238,11 @@ private:
 
 /*
 功能说明:
-- 声明公开 kernel launch 入口，具体后端实现由私有 include 提供。
+- 声明公开 kernel launch 入口，具体后端实现由私有 include 提供；callee/name 固定在模板参数。
 
 使用示例:
-- Status status = launch<2, 1, 1, 0>(kernel_body, input, output);
+- KernelContext ctx;
+- Status status = launch<2, 1, 1, 0, kernel_body>(ctx, input, output);
 
 
 关联文件:
@@ -359,7 +250,7 @@ private:
 - test: test/include/api/arch.py
 - 功能实现: include/npu_demo/Arch.h
 */
-template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args>
-Status launch(Callable&& callee, Args&&... args);
+template <long long block, long long thread, long long subthread, long long shared_memory_size, auto name, typename Context, typename... Args>
+Status launch(Context& ctx, Args&&... args);
 
 #endif  // KERNELCODE_GENERATE_INCLUDE_API_ARCH_H_

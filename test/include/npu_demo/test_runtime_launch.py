@@ -139,19 +139,18 @@ static void kernel_body(
     npu_demo::KernelContext& ctx,
     std::atomic<long long>* body_count,
     long long* block_ids,
-    long long* block_nums,
     long long* thread_ids,
     long long* thread_nums,
     long long* after_values,
     std::uintptr_t* tsm_ptrs) {
-    const long long bid = ctx.block_id();
-    const long long tid = ctx.thread_id();
+    (void)ctx;
+    const long long bid = npu_demo::block_id();
+    const long long tid = npu_demo::thread_id();
     block_ids[bid] = npu_demo::block_id();
-    block_nums[bid] = ctx.block_num();
     thread_ids[bid] = tid;
-    thread_nums[bid] = ctx.thread_num();
+    thread_nums[bid] = npu_demo::thread_num();
 
-    ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
+    npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
     Memory<TSM, long long> tsm = npu_demo::get_dynamic_memory<TSM>();
     tsm.data()[0] = bid + 10;
     tsm_ptrs[bid] = reinterpret_cast<std::uintptr_t>(tsm.data());
@@ -160,19 +159,18 @@ static void kernel_body(
 }
 
 int main() {
+    npu_demo::KernelContext ctx;
     std::atomic<long long> body_count(0);
     long long block_ids[2] = {-1, -1};
-    long long block_nums[2] = {0, 0};
     long long thread_ids[2] = {-1, -1};
     long long thread_nums[2] = {0, 0};
     long long after_values[2] = {-1, -1};
     std::uintptr_t tsm_ptrs[2] = {0, 0};
 
-    if (npu_demo::launch<2, 1, 1, 0>(
-            kernel_body,
+    if (npu_demo::launch<2, 1, 1, 0, kernel_body>(
+            ctx,
             &body_count,
             block_ids,
-            block_nums,
             thread_ids,
             thread_nums,
             after_values,
@@ -187,9 +185,6 @@ int main() {
     for (long long i = 0; i < 2; ++i) {
         if (block_ids[i] != i) {
             return fail(2);
-        }
-        if (block_nums[i] != 2) {
-            return fail(3);
         }
         if (thread_ids[i] != 0) {
             return fail(4);
@@ -222,13 +217,15 @@ def test_npu_demo_launch_trance_block_logs_are_per_block_files(tmp_path: Path) -
     source = r"""
 #include "include/npu_demo/npu_demo.h"
 
-static void kernel_body(long long* seen_blocks) {
+static void kernel_body(npu_demo::KernelContext& ctx, long long* seen_blocks) {
+    (void)ctx;
     seen_blocks[npu_demo::block_id()] = npu_demo::block_id();
 }
 
 int main() {
+    npu_demo::KernelContext ctx;
     long long seen_blocks[2] = {-1, -1};
-    Status status = npu_demo::launch<2, 1, 1, 0>(kernel_body, seen_blocks);
+    Status status = npu_demo::launch<2, 1, 1, 0, kernel_body>(ctx, seen_blocks);
     if (status != StatusCode::kOk) {
         return 1;
     }
@@ -251,7 +248,7 @@ int main() {
     assert "block_id = 1" in block1_text
     assert "in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>" in block0_text
     assert "in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>" in block1_text
-    assert "arg0 = callable[kernel_body]" in block0_text
+    assert "arg0 = KernelContext" in block0_text
     assert "arg1 = " in block0_text
-    assert "arg0 = callable[kernel_body]" in block1_text
+    assert "arg0 = KernelContext" in block1_text
     assert "arg1 = " in block1_text

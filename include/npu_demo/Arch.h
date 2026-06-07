@@ -1,20 +1,12 @@
 /*
 功能说明:
 - 提供 npu_demo 后端的 launch / barrier 运行时实现与 KernelContext 运行时视图。
-- `TRANCE` 开启时在 launch 边界打印函数名、模板参数、callable 与 forwarded args 参数摘要。
+- `TRANCE` 开启时在 launch 边界打印函数名、模板参数、KernelContext 与 forwarded args 参数摘要。
 - `KG_TRANCE_DIR_PATH` 非空时，launch 在每个 block worker 内写入独立的 `block_XXXX.log`。
 
 API 列表:
-- `template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args> Status npu_demo::launch(Callable&& callee, Args&&... args)`
+- `template <long long block, long long thread, long long subthread, long long shared_memory_size, auto name, typename Context, typename... Args> Status npu_demo::launch(Context& ctx, Args&&... args)`
 - `class npu_demo::KernelContext`
-- `KernelContext::block_id() const -> long long`
-- `KernelContext::block_num() const -> long long`
-- `KernelContext::thread_id() const -> long long`
-- `KernelContext::thread_num() const -> long long`
-- `KernelContext::subthread_id() const -> long long`
-- `KernelContext::subthread_num() const -> long long`
-- `KernelContext::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const -> void`
-- `template <MemorySpace Space, typename T> KernelContext::get_dynamic_memory() const -> Memory<Space, T>`
 - `npu_demo::block_id() -> S_INT`
 - `npu_demo::thread_id() -> S_INT`
 - `npu_demo::thread_num() -> S_INT`
@@ -32,7 +24,8 @@ helper 清单:
 
 使用示例:
 - #include "include/npu_demo/Arch.h"
-- Status status = npu_demo::launch<2, 1, 1, 0>(kernel_body, output);
+- npu_demo::KernelContext ctx;
+- Status status = npu_demo::launch<2, 1, 1, 0, kernel_body>(ctx, output);
 
 
 关联文件:
@@ -44,10 +37,12 @@ helper 清单:
 #ifndef KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_ARCH_H_
 #define KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_ARCH_H_
 
+#include <cstddef>
 #include <condition_variable>
 #include <initializer_list>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -77,12 +72,15 @@ static constexpr long long kTlm1MemorySize = 524288;
 static constexpr long long kTlm2MemorySize = 1048576;
 static constexpr long long kTlm3MemorySize = 1048576;
 
+struct KernelRuntimeState;
+struct KernelContextRuntimeAccess;
+
 /*
 功能说明:
-- 为当前线程绑定一次 launch 生命周期内可见的活动 KernelContext 指针。
+- 为当前线程绑定一次 launch 生命周期内可见的活动 runtime state 指针。
 
 使用示例:
-- npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&ctx);
+- npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&runtime);
 
 
 关联文件:
@@ -90,14 +88,14 @@ static constexpr long long kTlm3MemorySize = 1048576;
 - test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
-inline thread_local const KernelContext* active_kernel_context = nullptr;
+inline thread_local const KernelRuntimeState* active_kernel_runtime = nullptr;
 
 /*
 功能说明:
-- 在单次作用域内安装并恢复当前线程可见的活动 KernelContext。
+- 在单次作用域内安装并恢复当前线程可见的活动 runtime state。
 
 使用示例:
-- npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&ctx);
+- npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&runtime);
 
 
 关联文件:
@@ -109,10 +107,10 @@ class ScopedActiveKernelContext {
 public:
     /*
     功能说明:
-    - 安装新的活动 KernelContext，并保存进入作用域前的旧指针。
+    - 安装新的活动 runtime state，并保存进入作用域前的旧指针。
 
     使用示例:
-    - npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&ctx);
+    - npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&runtime);
 
 
     关联文件:
@@ -120,17 +118,17 @@ public:
     - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
-    explicit ScopedActiveKernelContext(const KernelContext* ctx)
-        : previous_(active_kernel_context) {
-        active_kernel_context = ctx;
+    explicit ScopedActiveKernelContext(const KernelRuntimeState* runtime)
+        : previous_(active_kernel_runtime) {
+        active_kernel_runtime = runtime;
     }
 
     /*
     功能说明:
-    - 退出作用域时恢复进入前的活动 KernelContext。
+    - 退出作用域时恢复进入前的活动 runtime state。
 
     使用示例:
-    - { npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&ctx); }
+    - { npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&runtime); }
 
 
     关联文件:
@@ -139,14 +137,14 @@ public:
     - 功能实现: include/npu_demo/Arch.h
     */
     ~ScopedActiveKernelContext() {
-        active_kernel_context = previous_;
+        active_kernel_runtime = previous_;
     }
 
     ScopedActiveKernelContext(const ScopedActiveKernelContext&) = delete;
     ScopedActiveKernelContext& operator=(const ScopedActiveKernelContext&) = delete;
 
 private:
-    const KernelContext* previous_;
+    const KernelRuntimeState* previous_;
 };
 
 /*
@@ -246,7 +244,9 @@ public:
             cv_.notify_all();
             return;
         }
-        cv_.wait(lock, [this, current_generation]() { return generation_ != current_generation; });
+        while (generation_ == current_generation) {
+            cv_.wait(lock);
+        }
     }
 
 private:
@@ -261,11 +261,12 @@ private:
 
 /*
 功能说明:
-- 表示 launched body 内可见的运行时上下文视图，提供 extent/id、barrier 与动态内存入口。
+- 表示 launched body 内显式传递的 npu_demo 上下文对象。
+- 运行时查询、同步与动态内存访问不作为 KernelContext public member API 暴露，统一由 Arch free helper 承接。
 
 使用示例:
-- long long tid = ctx.thread_id();
-- ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
+- npu_demo::KernelContext ctx;
+- (void)ctx;
 
 
 关联文件:
@@ -277,7 +278,7 @@ class KernelContext {
 public:
     /*
     功能说明:
-    - 构造默认 runtime 视图，用于无 launch 上下文的轻量访问场景。
+    - 构造默认 opaque context；launch 会为 worker 副本注入私有运行时状态。
 
     使用示例:
     - npu_demo::KernelContext ctx;
@@ -288,167 +289,98 @@ public:
     - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
-    KernelContext()
-        : block_id_(0),
-          block_num_(1),
-          thread_id_(0),
-          thread_num_(1),
-          subthread_id_(0),
-          subthread_num_(1),
-          barrier_state_(nullptr) {}
+    KernelContext() = default;
+};
 
-    /*
-    功能说明:
-    - 使用 launch 注入的运行时值构造 KernelContext。
+namespace detail {
 
-    使用示例:
-    - npu_demo::KernelContext ctx(0, 1, 2, 4, 0, 1, barrier);
+/*
+功能说明:
+- 保存单个 launch worker 当前可见的运行时状态；该状态不存放在 `KernelContext` 对象内。
+
+使用示例:
+- npu_demo::detail::KernelRuntimeState runtime;
 
 
-    关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/kernel_context.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
-    KernelContext(
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/kernel_context.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+struct KernelRuntimeState {
+    long long block_id = 0;
+    long long block_num = 1;
+    long long thread_id = 0;
+    long long thread_num = 1;
+    long long subthread_id = 0;
+    long long subthread_num = 1;
+    std::shared_ptr<LaunchBarrierState> barrier_state = nullptr;
+};
+
+inline const KernelRuntimeState& default_kernel_runtime() {
+    static const KernelRuntimeState runtime;
+    return runtime;
+}
+
+inline const KernelRuntimeState& current_kernel_runtime() {
+    return active_kernel_runtime != nullptr ? *active_kernel_runtime : default_kernel_runtime();
+}
+
+/*
+功能说明:
+- 在 npu_demo 后端内部读写 launch runtime 状态，避免把 runtime 查询暴露成 `KernelContext` public member API。
+
+使用示例:
+- npu_demo::detail::KernelContextRuntimeAccess::configure(runtime, 0, 2, 0, 1, 0, 1, barrier);
+
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/kernel_context.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+struct KernelContextRuntimeAccess {
+    static void configure(
+        KernelRuntimeState& runtime,
         long long block_id,
         long long block_num,
         long long thread_id,
         long long thread_num,
         long long subthread_id,
         long long subthread_num,
-        std::shared_ptr<detail::LaunchBarrierState> barrier_state)
-        : block_id_(block_id),
-          block_num_(block_num),
-          thread_id_(thread_id),
-          thread_num_(thread_num),
-          subthread_id_(subthread_id),
-          subthread_num_(subthread_num),
-          barrier_state_(std::move(barrier_state)) {}
-
-    /*
-    功能说明:
-    - 返回当前 launch 的 block 索引。
-
-    使用示例:
-    - long long bid = ctx.block_id();
-
-
-    关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/kernel_context.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
-    long long block_id() const {
-        return block_id_;
+        std::shared_ptr<LaunchBarrierState> barrier_state) {
+        runtime.block_id = block_id;
+        runtime.block_num = block_num;
+        runtime.thread_id = thread_id;
+        runtime.thread_num = thread_num;
+        runtime.subthread_id = subthread_id;
+        runtime.subthread_num = subthread_num;
+        runtime.barrier_state = std::move(barrier_state);
     }
 
-    /*
-    功能说明:
-    - 返回当前 launch 的 block extent。
-
-    使用示例:
-    - long long bnum = ctx.block_num();
-
-
-    关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/kernel_context.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
-    long long block_num() const {
-        return block_num_;
+    static long long block_id(const KernelRuntimeState& runtime) {
+        return runtime.block_id;
     }
 
-    /*
-    功能说明:
-- 返回当前 launch 的 thread 索引。
-
-    使用示例:
-    - long long tid = ctx.thread_id();
-
-
-    关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/kernel_context.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
-    long long thread_id() const {
-        return thread_id_;
+    static long long thread_id(const KernelRuntimeState& runtime) {
+        return runtime.thread_id;
     }
 
-    /*
-    功能说明:
-    - 返回当前 launch 的 thread extent。
-
-    使用示例:
-    - long long tnum = ctx.thread_num();
-
-
-    关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/kernel_context.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
-    long long thread_num() const {
-        return thread_num_;
+    static long long thread_num(const KernelRuntimeState& runtime) {
+        return runtime.thread_num;
     }
 
-    /*
-    功能说明:
-    - 返回当前 launch 的 subthread 索引。
-
-    使用示例:
-    - long long sid = ctx.subthread_id();
-
-
-    关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/kernel_context.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
-    long long subthread_id() const {
-        return subthread_id_;
-    }
-
-    /*
-    功能说明:
-    - 返回当前 launch 的 subthread extent。
-
-    使用示例:
-    - long long snum = ctx.subthread_num();
-
-
-    关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/kernel_context.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
-    long long subthread_num() const {
-        return subthread_num_;
-    }
-
-    /*
-    功能说明:
-    - 在当前 launch block 内执行一次带 visibility / scope 的同步。
-
-    使用示例:
-    - ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
-
-
-    关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/kernel_context.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
-    inline void barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const {
+    static void barrier(
+        const KernelRuntimeState& runtime,
+        std::initializer_list<BarrierVisibility> visibility,
+        BarrierScope scope) {
         if (scope != BarrierScope::BLOCK) {
             throw std::invalid_argument(
-                "npu_demo::KernelContext::barrier requires scope=BarrierScope::BLOCK");
+                "npu_demo::barrier requires scope=BarrierScope::BLOCK");
         }
         if (visibility.size() != 2) {
             throw std::invalid_argument(
-                "npu_demo::KernelContext::barrier visibility must contain BarrierVisibility::TSM "
+                "npu_demo::barrier visibility must contain BarrierVisibility::TSM "
                 "and BarrierVisibility::TLM exactly once");
         }
         bool saw_tsm = false;
@@ -458,7 +390,7 @@ public:
                 case BarrierVisibility::TSM:
                     if (saw_tsm) {
                         throw std::invalid_argument(
-                            "npu_demo::KernelContext::barrier visibility must contain BarrierVisibility::TSM "
+                            "npu_demo::barrier visibility must contain BarrierVisibility::TSM "
                             "and BarrierVisibility::TLM exactly once");
                     }
                     saw_tsm = true;
@@ -466,95 +398,200 @@ public:
                 case BarrierVisibility::TLM:
                     if (saw_tlm) {
                         throw std::invalid_argument(
-                            "npu_demo::KernelContext::barrier visibility must contain BarrierVisibility::TSM "
+                            "npu_demo::barrier visibility must contain BarrierVisibility::TSM "
                             "and BarrierVisibility::TLM exactly once");
                     }
                     saw_tlm = true;
                     break;
                 default:
                     throw std::invalid_argument(
-                        "npu_demo::KernelContext::barrier visibility only supports "
+                        "npu_demo::barrier visibility only supports "
                         "BarrierVisibility::TSM and BarrierVisibility::TLM");
             }
         }
         if (!saw_tsm || !saw_tlm) {
             throw std::invalid_argument(
-                "npu_demo::KernelContext::barrier visibility must contain BarrierVisibility::TSM "
+                "npu_demo::barrier visibility must contain BarrierVisibility::TSM "
                 "and BarrierVisibility::TLM exactly once");
         }
-        if (barrier_state_ == nullptr) {
+        if (runtime.barrier_state == nullptr) {
             throw std::runtime_error(
-                "npu_demo::KernelContext::barrier requires active launch context");
+                "npu_demo::barrier requires active launch context");
         }
-        barrier_state_->arrive_and_wait();
+        runtime.barrier_state->arrive_and_wait();
     }
 
-    /*
-    功能说明:
-    - 返回指定片上空间的动态内存视图。
-
-    使用示例:
-    - auto tsm = ctx.get_dynamic_memory<TSM, float>();
-
-
-    关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/kernel_context.py
-    - 功能实现: include/npu_demo/Arch.h
-    */
     template <MemorySpace Space, typename T>
-    Memory<Space, T> get_dynamic_memory() const {
+    static Memory<Space, T> dynamic_memory(const KernelRuntimeState&) {
         if constexpr (Space == MemorySpace::TSM) {
-            return detail::make_linear_memory<MemorySpace::TSM, T>(detail::kTsmMemorySize);
+            return make_linear_memory<MemorySpace::TSM, T>(kTsmMemorySize);
         } else if constexpr (Space == MemorySpace::TLM1) {
-            return detail::make_linear_memory<MemorySpace::TLM1, T>(detail::kTlm1MemorySize);
+            return make_linear_memory<MemorySpace::TLM1, T>(kTlm1MemorySize);
         } else if constexpr (Space == MemorySpace::TLM2) {
-            return detail::make_linear_memory<MemorySpace::TLM2, T>(detail::kTlm2MemorySize);
+            return make_linear_memory<MemorySpace::TLM2, T>(kTlm2MemorySize);
         } else if constexpr (Space == MemorySpace::TLM3) {
-            return detail::make_linear_memory<MemorySpace::TLM3, T>(detail::kTlm3MemorySize);
+            return make_linear_memory<MemorySpace::TLM3, T>(kTlm3MemorySize);
         } else if constexpr (Space == MemorySpace::SM) {
-            detail::throw_zero_sized_memory(
-                "npu_demo::KernelContext::get_dynamic_memory rejected MemorySpace::SM because "
+            throw_zero_sized_memory(
+                "npu_demo::get_dynamic_memory rejected MemorySpace::SM because "
                 "sm_memory_size=0");
-            return detail::make_linear_memory<MemorySpace::SM, T>(0);
+            return make_linear_memory<MemorySpace::SM, T>(0);
         } else if constexpr (Space == MemorySpace::LM) {
-            detail::throw_zero_sized_memory(
-                "npu_demo::KernelContext::get_dynamic_memory rejected MemorySpace::LM because "
+            throw_zero_sized_memory(
+                "npu_demo::get_dynamic_memory rejected MemorySpace::LM because "
                 "lm_memory_size=0");
-            return detail::make_linear_memory<MemorySpace::LM, T>(0);
+            return make_linear_memory<MemorySpace::LM, T>(0);
         } else {
             throw std::invalid_argument(
-                "npu_demo::KernelContext::get_dynamic_memory requires on-chip MemorySpace");
+                "npu_demo::get_dynamic_memory requires on-chip MemorySpace");
         }
     }
-
-private:
-    long long block_id_;
-    long long block_num_;
-    long long thread_id_;
-    long long thread_num_;
-    long long subthread_id_;
-    long long subthread_num_;
-    std::shared_ptr<detail::LaunchBarrierState> barrier_state_;
 };
 
 /*
 功能说明:
-- 返回当前线程可见的活动 KernelContext；若当前不在 launch 内，则回退到默认上下文。
+- 调用 launch 模板参数中的 kernel body，并把 `Context& ctx` 作为首个普通实参传入。
 
 使用示例:
-- const npu_demo::KernelContext& ctx = npu_demo::current_kernel_context();
-
+- npu_demo::detail::invoke_launch_name<kernel_body>(ctx, args_tuple);
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
 - test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
-inline const KernelContext& current_kernel_context() {
-    static const KernelContext default_ctx;
-    return detail::active_kernel_context != nullptr ? *detail::active_kernel_context : default_ctx;
+template <auto name, typename Context, typename Tuple, std::size_t... Indices>
+inline void invoke_launch_name_with_indices(Context& ctx, Tuple& args, std::index_sequence<Indices...>) {
+    Context& active_ctx = ctx;
+    Tuple& forwarded_args = args;
+    (void)forwarded_args;
+    name(active_ctx, std::get<Indices>(forwarded_args)...);
 }
+
+/*
+功能说明:
+- 按 tuple 元素个数展开 launch 普通参数，供 worker 线程调用 body。
+
+使用示例:
+- npu_demo::detail::invoke_launch_name<kernel_body>(ctx, forwarded_args);
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/kernel_context.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+template <auto name, typename Context, typename Tuple>
+inline void invoke_launch_name(Context& ctx, Tuple& args) {
+    constexpr std::size_t arg_count = std::tuple_size<typename std::remove_reference<Tuple>::type>::value;
+    using Indices = std::make_index_sequence<arg_count>;
+    Context& active_ctx = ctx;
+    Tuple& forwarded_args = args;
+    invoke_launch_name_with_indices<name>(active_ctx, forwarded_args, Indices{});
+}
+
+/*
+功能说明:
+- 按顺序打印 launch tuple 中的普通参数，供 TRANCE block 级日志复用。
+
+使用示例:
+- npu_demo::detail::print_launch_tuple_args<0>(sink, args, index);
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/kernel_context.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+template <std::size_t Index, typename Tuple>
+inline void print_launch_tuple_args(const kernelcode::trance::TranceSink& sink, Tuple& args, long long& arg_index) {
+    constexpr std::size_t arg_count = std::tuple_size<typename std::remove_reference<Tuple>::type>::value;
+    if constexpr (Index < arg_count) {
+        kernelcode::trance::print_value_arg(
+            sink,
+            (std::string("arg") + std::to_string(arg_index++)).c_str(),
+            std::get<Index>(args));
+        print_launch_tuple_args<Index + 1>(sink, args, arg_index);
+    }
+}
+
+/*
+功能说明:
+- 执行一个 npu_demo launch worker，负责注入 worker context、绑定 active context、写 TRANCE block 日志并调用 body。
+
+使用示例:
+- npu_demo::detail::run_launch_worker<2, 1, 1, 0, kernel_body>(ctx, &args, 0, 0, barrier, false);
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/kernel_context.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+template <
+    long long block,
+    long long thread,
+    long long subthread,
+    long long shared_memory_size,
+    auto name,
+    typename Context,
+    typename Tuple>
+inline void run_launch_worker(
+    Context ctx,
+    Tuple* forwarded_args,
+    long long block_index,
+    long long thread_index,
+    std::shared_ptr<LaunchBarrierState> barrier_state,
+    bool trace_block_enabled) {
+    Context worker_ctx = ctx;
+    KernelRuntimeState worker_runtime;
+    const KernelRuntimeState* active_runtime = nullptr;
+    if constexpr (std::is_same<typename std::decay<Context>::type, KernelContext>::value) {
+        KernelContextRuntimeAccess::configure(
+            worker_runtime,
+            block_index,
+            block,
+            thread_index,
+            thread,
+            0,
+            subthread,
+            std::move(barrier_state));
+        active_runtime = &worker_runtime;
+    }
+    ScopedActiveKernelContext scoped_active_ctx(active_runtime);
+    Tuple& args = *forwarded_args;
+#ifdef TRANCE
+    if (trace_block_enabled) {
+        kernelcode::trance::ScopedBlockTranceSink __kg_block_trance_scope(
+            KG_TRANCE_DIR_PATH,
+            block_index,
+            block,
+            thread_index,
+            thread);
+        const kernelcode::trance::TranceSink& __kg_block_trance_sink =
+            kernelcode::trance::current_sink();
+        std::ostringstream __kg_block_trance_template;
+        __kg_block_trance_template
+            << "template=<block=" << block
+            << ", thread=" << thread
+            << ", subthread=" << subthread
+            << ", shared_memory_size=" << shared_memory_size
+            << ">";
+        kernelcode::trance::print_func_begin(
+            __kg_block_trance_sink,
+            "npu_demo::launch",
+            __kg_block_trance_template.str().c_str());
+        kernelcode::trance::write_line(__kg_block_trance_sink, "args =");
+        kernelcode::trance::write_line(__kg_block_trance_sink, "  arg0 = KernelContext");
+        long long __kg_block_trance_arg_index = 1;
+        print_launch_tuple_args<0>(__kg_block_trance_sink, args, __kg_block_trance_arg_index);
+        invoke_launch_name<name>(worker_ctx, args);
+        return;
+    }
+#else
+    (void)trace_block_enabled;
+#endif
+    invoke_launch_name<name>(worker_ctx, args);
+}
+
+}  // namespace detail
 
 /*
 功能说明:
@@ -570,7 +607,7 @@ inline const KernelContext& current_kernel_context() {
 - 功能实现: include/npu_demo/Arch.h
 */
 inline S_INT block_id() {
-    return static_cast<S_INT>(current_kernel_context().block_id());
+    return static_cast<S_INT>(detail::KernelContextRuntimeAccess::block_id(detail::current_kernel_runtime()));
 }
 
 /*
@@ -587,7 +624,7 @@ inline S_INT block_id() {
 - 功能实现: include/npu_demo/Arch.h
 */
 inline S_INT thread_id() {
-    return static_cast<S_INT>(current_kernel_context().thread_id());
+    return static_cast<S_INT>(detail::KernelContextRuntimeAccess::thread_id(detail::current_kernel_runtime()));
 }
 
 /*
@@ -604,7 +641,7 @@ inline S_INT thread_id() {
 - 功能实现: include/npu_demo/Arch.h
 */
 inline S_INT thread_num() {
-    return static_cast<S_INT>(current_kernel_context().thread_num());
+    return static_cast<S_INT>(detail::KernelContextRuntimeAccess::thread_num(detail::current_kernel_runtime()));
 }
 
 /*
@@ -623,7 +660,7 @@ inline S_INT thread_num() {
 */
 template <MemorySpace Space>
 inline ::DynamicMemoryRef<Space> get_dynamic_memory() {
-    return ::DynamicMemoryRef<Space>(&current_kernel_context());
+    return ::DynamicMemoryRef<Space>(&detail::current_kernel_runtime());
 }
 
 /*
@@ -640,7 +677,7 @@ inline ::DynamicMemoryRef<Space> get_dynamic_memory() {
 - 功能实现: include/npu_demo/Arch.h
 */
 inline void barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) {
-    current_kernel_context().barrier(visibility, scope);
+    detail::KernelContextRuntimeAccess::barrier(detail::current_kernel_runtime(), visibility, scope);
 }
 
 }  // namespace npu_demo
@@ -678,8 +715,8 @@ inline DynamicMemoryRef<Space>::DynamicMemoryRef(const void* context)
 template <MemorySpace Space>
 template <typename T>
 inline DynamicMemoryRef<Space>::operator Memory<Space, T>() const {
-    const auto* ctx = static_cast<const npu_demo::KernelContext*>(context_);
-    return ctx->template get_dynamic_memory<Space, T>();
+    const auto* runtime = static_cast<const npu_demo::detail::KernelRuntimeState*>(context_);
+    return npu_demo::detail::KernelContextRuntimeAccess::dynamic_memory<Space, T>(*runtime);
 }
 
 /*
@@ -755,10 +792,11 @@ inline DynamicMemoryRef<Space> get_dynamic_memory() {
 /*
 功能说明:
 - 启动一次 npu_demo P0 kernel 执行，并绑定当前线程可见的运行时 KernelContext。
-- callee 可显式接收 `npu_demo::KernelContext&` 首参，也可只接收业务参数并通过 free helper 读取活动上下文。
+- callee/name 固定为模板参数，函数普通实参固定为 `ctx, args...`，不提供 no-ctx fallback。
 
 使用示例:
-- Status status = launch<2, 1, 1, 0>(kernel_body, output);
+- npu_demo::KernelContext ctx;
+- Status status = launch<2, 1, 1, 0, kernel_body>(ctx, output);
 
 
 关联文件:
@@ -766,15 +804,14 @@ inline DynamicMemoryRef<Space> get_dynamic_memory() {
 - test: test/include/api/arch.py
 - 功能实现: include/npu_demo/Arch.h
 */
-template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args>
-inline Status launch(Callable&& callee, Args&&... args) {
+template <long long block, long long thread, long long subthread, long long shared_memory_size, auto name, typename Context, typename... Args>
+inline Status launch(Context& ctx, Args&&... args) {
     static_assert(
-        !std::is_convertible<typename std::decay<Callable>::type, const char*>::value,
-        "launch callee must be function object, not string");
+        !std::is_convertible<decltype(name), const char*>::value,
+        "launch name must be function object, not string");
     static_assert(
-        std::is_invocable<typename std::decay<Callable>::type, npu_demo::KernelContext&, Args...>::value
-            || std::is_invocable<typename std::decay<Callable>::type, Args...>::value,
-        "launch callee must accept args or npu_demo::KernelContext& plus args");
+        std::is_invocable<decltype(name), Context&, Args...>::value,
+        "launch name must accept Context& plus args");
 
     if constexpr (block <= 0 || thread <= 0 || subthread <= 0 || shared_memory_size != 0) {
         return StatusCode::kError;
@@ -805,13 +842,15 @@ inline Status launch(Callable&& callee, Args&&... args) {
             "npu_demo::launch",
             __kg_trance_template.str().c_str());
         kernelcode::trance::write_line(__kg_trance_sink, "args =");
-        kernelcode::trance::print_callable_arg(__kg_trance_sink, "arg0", callee);
+        kernelcode::trance::write_line(__kg_trance_sink, "  arg0 = KernelContext");
         long long __kg_trance_arg_index = 1;
         ((kernelcode::trance::print_value_arg(
              __kg_trance_sink,
              (std::string("arg") + std::to_string(__kg_trance_arg_index++)).c_str(),
              args)), ...);
     }
+#else
+    const bool __kg_trance_block_trace_enabled = false;
 #endif
 
     std::vector<std::shared_ptr<npu_demo::detail::LaunchBarrierState>> barrier_states;
@@ -819,72 +858,27 @@ inline Status launch(Callable&& callee, Args&&... args) {
     for (long long block_index = 0; block_index < block; ++block_index) {
         barrier_states.emplace_back(std::make_shared<npu_demo::detail::LaunchBarrierState>(thread));
     }
-    typename std::decay<Callable>::type callable(std::forward<Callable>(callee));
     std::tuple<Args...> forwarded_args(std::forward<Args>(args)...);
     std::vector<std::thread> workers;
     workers.reserve(static_cast<unsigned long long>(block * thread));
 
     for (long long block_index = 0; block_index < block; ++block_index) {
         for (long long thread_index = 0; thread_index < thread; ++thread_index) {
-            workers.emplace_back([&, block_index, thread_index]() {
-                npu_demo::KernelContext ctx(
-                    block_index,
+            workers.emplace_back(
+                &npu_demo::detail::run_launch_worker<
                     block,
-                    thread_index,
                     thread,
-                    0,
                     subthread,
-                    barrier_states[static_cast<unsigned long long>(block_index)]);
-                npu_demo::detail::ScopedActiveKernelContext scoped_active_ctx(&ctx);
-                auto __kg_call_callee = [&]() {
-                    std::apply(
-                        [&](auto&... unpacked_args) {
-                            if constexpr (std::is_invocable<decltype(callable)&, npu_demo::KernelContext&, decltype(unpacked_args)...>::value) {
-                                callable(ctx, unpacked_args...);
-                            } else {
-                                callable(unpacked_args...);
-                            }
-                        },
-                        forwarded_args);
-                };
-#ifdef TRANCE
-                if (__kg_trance_block_trace_enabled) {
-                    kernelcode::trance::ScopedBlockTranceSink __kg_block_trance_scope(
-                        KG_TRANCE_DIR_PATH,
-                        block_index,
-                        block,
-                        thread_index,
-                        thread);
-                    const kernelcode::trance::TranceSink& __kg_block_trance_sink =
-                        kernelcode::trance::current_sink();
-                    std::ostringstream __kg_block_trance_template;
-                    __kg_block_trance_template
-                        << "template=<block=" << block
-                        << ", thread=" << thread
-                        << ", subthread=" << subthread
-                        << ", shared_memory_size=" << shared_memory_size
-                        << ">";
-                    kernelcode::trance::print_func_begin(
-                        __kg_block_trance_sink,
-                        "npu_demo::launch",
-                        __kg_block_trance_template.str().c_str());
-                    kernelcode::trance::write_line(__kg_block_trance_sink, "args =");
-                    kernelcode::trance::print_callable_arg(__kg_block_trance_sink, "arg0", callable);
-                    long long __kg_block_trance_arg_index = 1;
-                    std::apply(
-                        [&](auto&... unpacked_args) {
-                            ((kernelcode::trance::print_value_arg(
-                                 __kg_block_trance_sink,
-                                 (std::string("arg") + std::to_string(__kg_block_trance_arg_index++)).c_str(),
-                                 unpacked_args)), ...);
-                        },
-                        forwarded_args);
-                    __kg_call_callee();
-                    return;
-                }
-#endif
-                __kg_call_callee();
-            });
+                    shared_memory_size,
+                    name,
+                    Context,
+                    decltype(forwarded_args)>,
+                ctx,
+                &forwarded_args,
+                block_index,
+                thread_index,
+                barrier_states[static_cast<unsigned long long>(block_index)],
+                __kg_trance_block_trace_enabled);
         }
     }
 

@@ -141,20 +141,21 @@ static void kernel_body(npu_demo::KernelContext& ctx, Memory<GM, float>& mem, lo
 
 int main() {
     kernelcode::trance::ScopedTranceSink scope;
+    npu_demo::KernelContext ctx;
 
     float data[6] = {0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
     long long shape[2] = {2, 3};
     long long stride[2] = {3, 1};
     Memory<GM, float> mem(data, shape, stride, 2, MemoryFormat::Norm);
 
-    Status status = npu_demo::launch<2, 1, 1, 0>(kernel_body, mem, 7LL);
+    Status status = npu_demo::launch<2, 1, 1, 0, kernel_body>(ctx, mem, 7LL);
     return status == StatusCode::kOk ? 0 : 1;
 }
 """
     stdout = _compile_and_run_capture_stdout(source, ("-DTRANCE",))
 
     assert "in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>" in stdout
-    assert "arg0 = callable[kernel_body]" in stdout
+    assert "arg0 = KernelContext" in stdout
     assert "arg1 = mem[" in stdout
     assert "[2, 3] [3, 1] f32 GM" in stdout
     assert "arg2 = 7" in stdout
@@ -235,10 +236,13 @@ def test_npu_demo_trance_block_sink_writes_per_block_files(tmp_path: Path) -> No
     launch_two_blocks = r"""
 #include "include/npu_demo/npu_demo.h"
 
-static void kernel_body() {}
+static void kernel_body(npu_demo::KernelContext& ctx) {
+    (void)ctx;
+}
 
 int main() {
-    Status status = npu_demo::launch<2, 1, 1, 0>(kernel_body);
+    npu_demo::KernelContext ctx;
+    Status status = npu_demo::launch<2, 1, 1, 0, kernel_body>(ctx);
     return status == StatusCode::kOk ? 0 : 1;
 }
 """
@@ -258,7 +262,7 @@ int main() {
     assert "thread_id = 0" in block0_text
     assert "thread_num = 1" in block0_text
     assert "in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>" in block0_text
-    assert "arg0 = callable[kernel_body]" in block0_text
+    assert "arg0 = KernelContext" in block0_text
     assert "block_id = 1" in block1_text
     assert "block_num = 2" in block1_text
     assert "in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>" in block1_text
@@ -267,10 +271,13 @@ int main() {
     launch_one_block = r"""
 #include "include/npu_demo/npu_demo.h"
 
-static void kernel_body() {}
+static void kernel_body(npu_demo::KernelContext& ctx) {
+    (void)ctx;
+}
 
 int main() {
-    Status status = npu_demo::launch<1, 1, 1, 0>(kernel_body);
+    npu_demo::KernelContext ctx;
+    Status status = npu_demo::launch<1, 1, 1, 0, kernel_body>(ctx);
     return status == StatusCode::kOk ? 0 : 1;
 }
 """

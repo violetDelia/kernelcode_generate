@@ -49,7 +49,7 @@ def _emit_npu_demo_dma_fill(op: DmaFillOp, ctx) -> str:
 
 
     功能说明:
-    - 生成 `fill<Space, Type>(dst, value)` helper 调用。
+    - 生成 `fill<Space, Type>(ctx, dst, value)` helper 调用。
     - 对字符串无穷字面量对应的 lowered 常量做 C++ 可编译化。
 
     使用示例:
@@ -60,10 +60,11 @@ def _emit_npu_demo_dma_fill(op: DmaFillOp, ctx) -> str:
 
     target_expr = emit_c_value(op.target, ctx)
     space_expr = ctx.dispatch_attr(op.target.type)
-    target_type = _memory_element_cpp_type(op.target.type, ctx)
+    op.target.type.verify()
+    target_type = op.target.type.template_name.data or ctx.dispatch_type(op.target.type.element_type)
     value_expr = emit_c_value(op.value, ctx)
     if value_expr == "inf":
         value_expr = f"std::numeric_limits<{target_type}>::infinity()"
     elif value_expr == "-inf":
         value_expr = f"-std::numeric_limits<{target_type}>::infinity()"
-    return f"{ctx.current_indent}fill<{space_expr}, {target_type}>({target_expr} /*dst*/, {value_expr} /*value*/);"
+    return f"{ctx.current_indent}fill<{space_expr}, {target_type}>(ctx, {target_expr} /*dst*/, {value_expr} /*value*/);"

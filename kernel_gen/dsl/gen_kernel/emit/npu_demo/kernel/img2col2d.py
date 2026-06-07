@@ -47,7 +47,7 @@ def _emit_npu_demo_kernel_img2col2d(op: KernelImg2col2dOp, ctx) -> str:
     """发射 npu_demo `kernel.img2col2d` C++ 语句。
 
     功能说明:
-    - 根据 `KernelImg2col2dOp` 的 input/out memory 与二维卷积参数生成 `img2col2d<...>(...)` 语句。
+    - 根据 `KernelImg2col2dOp` 的 input/out memory 与二维卷积参数生成 `img2col2d<...>(ctx, ...)` 语句。
     - 仅作为当前文件内注册实现使用，不作为跨文件公开 API。
 
     使用示例:
@@ -65,10 +65,14 @@ def _emit_npu_demo_kernel_img2col2d(op: KernelImg2col2dOp, ctx) -> str:
     from ... import emit_c_value
 
     params = [emit_c_value(value, ctx) for value in (op.kh, op.kw, op.sh, op.sw, op.dh, op.dw, op.ph, op.pw, op.pl, op.pr)]
+    input_value.type.verify()
+    input_type = input_value.type.template_name.data or ctx.dispatch_type(input_value.type.element_type)
+    out_value.type.verify()
+    output_type = out_value.type.template_name.data or ctx.dispatch_type(out_value.type.element_type)
     return (
         f"{ctx.current_indent}img2col2d<{ctx.dispatch_attr(input_value.type)}, {ctx.dispatch_attr(out_value.type)}, "
-        f"{_memory_element_cpp_type(input_value.type, ctx)}, {_memory_element_cpp_type(out_value.type, ctx)}>"
-        f"({emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(input_value, ctx)} /*input*/, "
+        f"{input_type}, {output_type}>"
+        f"(ctx, {emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(input_value, ctx)} /*input*/, "
         f"{params[0]} /*kh*/, {params[1]} /*kw*/, {params[2]} /*sh*/, {params[3]} /*sw*/, {params[4]} /*dh*/, {params[5]} /*dw*/, "
         f"{params[6]} /*ph*/, {params[7]} /*pw*/, {params[8]} /*pl*/, {params[9]} /*pr*/);"
     )

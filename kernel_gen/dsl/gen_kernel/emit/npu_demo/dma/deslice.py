@@ -28,8 +28,8 @@ def _emit_npu_demo_dma_deslice(op: DmaDesliceOp, ctx) -> str:
     """发射 npu_demo `dma.deslice` C++ 语句。
 
     功能说明:
-    - 根据 `DmaDesliceOp` 的 source、target 与 layout 参数生成 `deslice(...)` 语句。
-    - offset/size/stride 统一发射为 brace-list，交由 include initializer-list overload 承接。
+    - 根据 `DmaDesliceOp` 的 source、target 与 layout 参数生成 `deslice(ctx, ...)` 语句。
+    - rank 1..8 的 offset/size/stride 发射为 `{...}`，由 include/api `Vector` 参数承接。
     - 仅作为当前文件内注册实现使用，不作为跨文件公开 API。
 
     使用示例:
@@ -42,10 +42,13 @@ def _emit_npu_demo_dma_deslice(op: DmaDesliceOp, ctx) -> str:
     target_expr = emit_c_value(op.target, ctx)
     if not len(op.offsets) == len(op.sizes) == len(op.strides) or len(op.offsets) == 0:
         raise ctx.emit_error("dma.deslice", "layout rank mismatch")
-    offset_vec = "{" + ", ".join(emit_c_value(value, ctx) for value in op.offsets) + "}"
-    size_vec = "{" + ", ".join(emit_c_value(value, ctx) for value in op.sizes) + "}"
-    stride_vec = "{" + ", ".join(emit_c_value(value, ctx) for value in op.strides) + "}"
+    rank = len(op.offsets)
+    if rank > 8:
+        raise ctx.emit_error("dma.deslice", "layout rank exceeds Vector brace-list capacity")
+    offset_vec = ", ".join(emit_c_value(value, ctx) for value in op.offsets)
+    size_vec = ", ".join(emit_c_value(value, ctx) for value in op.sizes)
+    stride_vec = ", ".join(emit_c_value(value, ctx) for value in op.strides)
     return (
-        f"{ctx.current_indent}deslice({target_expr} /*target*/, {source_expr} /*source*/, "
-        f"{offset_vec} /*offset*/, {size_vec} /*size*/, {stride_vec} /*stride*/);"
+        f"{ctx.current_indent}deslice(ctx, {target_expr} /*target*/, {source_expr} /*source*/, "
+        f"{{{offset_vec}}} /*offset*/, {{{size_vec}}} /*size*/, {{{stride_vec}}} /*stride*/);"
     )

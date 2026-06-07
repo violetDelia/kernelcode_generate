@@ -167,6 +167,7 @@ def test_include_api_kernel_compiles_out_first_helpers() -> None:
 static int fail(int code) { return code; }
 
 int main() {
+    int ctx = 0;
     float lhs_data[4] = {1.0f, 2.0f, 3.0f, 4.0f};
     float rhs_data[4] = {10.0f, 20.0f, 30.0f, 40.0f};
     float out_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -176,19 +177,19 @@ int main() {
     Memory<GM, float> rhs(rhs_data, vec_shape, vec_stride, 1, MemoryFormat::Norm);
     Memory<GM, float> out(out_data, vec_shape, vec_stride, 1, MemoryFormat::Norm);
 
-    if (npu_demo::add<GM, float, float>(out, lhs, rhs) != StatusCode::kOk) {
+    if (npu_demo::add<GM, float, float>(ctx, out, lhs, rhs) != StatusCode::kOk) {
         return fail(1);
     }
     if (out_data[0] != 11.0f || out_data[1] != 22.0f || out_data[2] != 33.0f || out_data[3] != 44.0f) {
         return fail(2);
     }
-    if (npu_demo::max<GM, float, float>(out, lhs, rhs) != StatusCode::kOk) {
+    if (npu_demo::max<GM, float, float>(ctx, out, lhs, rhs) != StatusCode::kOk) {
         return fail(21);
     }
     if (out_data[0] != 10.0f || out_data[1] != 20.0f || out_data[2] != 30.0f || out_data[3] != 40.0f) {
         return fail(22);
     }
-    if (npu_demo::min<GM, float, float>(out, lhs, rhs) != StatusCode::kOk) {
+    if (npu_demo::min<GM, float, float>(ctx, out, lhs, rhs) != StatusCode::kOk) {
         return fail(23);
     }
     if (out_data[0] != 1.0f || out_data[1] != 2.0f || out_data[2] != 3.0f || out_data[3] != 4.0f) {
@@ -204,14 +205,14 @@ int main() {
     Memory<TSM, float> rhs_mat(rhs_matmul_data, mat_shape, mat_stride, 2, MemoryFormat::Norm);
     Memory<TLM1, float> out_mat(out_matmul_data, mat_shape, mat_stride, 2, MemoryFormat::Norm);
 
-    if (npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_mat, lhs_mat, rhs_mat) != StatusCode::kOk) {
+    if (npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(ctx, out_mat, lhs_mat, rhs_mat) != StatusCode::kOk) {
         return fail(3);
     }
     if (out_matmul_data[0] != 19.0f || out_matmul_data[1] != 22.0f ||
         out_matmul_data[2] != 43.0f || out_matmul_data[3] != 50.0f) {
         return fail(4);
     }
-    if (npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_mat, lhs_mat, rhs_mat, true) != StatusCode::kOk) {
+    if (npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(ctx, out_mat, lhs_mat, rhs_mat, true) != StatusCode::kOk) {
         return fail(25);
     }
     if (out_matmul_data[0] != 38.0f || out_matmul_data[1] != 44.0f ||
@@ -227,7 +228,7 @@ int main() {
     long long reduce_out_stride[2] = {1, 1};
     Memory<TSM, float> reduce_input(reduce_data, reduce_shape, reduce_stride, 2, MemoryFormat::Norm);
     Memory<TSM, float> reduce_out(reduce_out_data, reduce_out_shape, reduce_out_stride, 2, MemoryFormat::Norm);
-    if (npu_demo::reduce_max<TSM, float, float>(reduce_out, reduce_input, 1) != StatusCode::kOk) {
+    if (npu_demo::reduce_max<TSM, float, float>(ctx, reduce_out, reduce_input, 1) != StatusCode::kOk) {
         return fail(5);
     }
     if (reduce_out_data[0] != 9.0f || reduce_out_data[1] != 7.0f) {
@@ -255,6 +256,7 @@ def test_include_api_kernel_elementwise_supports_same_shape_2d() -> None:
 static int fail(int code) { return code; }
 
 int main() {
+    int ctx = 0;
     float lhs_data[6] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
     float rhs_data[6] = {6.0f, 5.0f, 4.0f, 3.0f, 2.0f, 1.0f};
     float out_data[6] = {0.0f};
@@ -264,7 +266,7 @@ int main() {
     Memory<TSM, float> rhs(rhs_data, shape, stride, 2, MemoryFormat::Norm);
     Memory<TSM, float> out(out_data, shape, stride, 2, MemoryFormat::Norm);
 
-    if (npu_demo::add<TSM, float, float>(out, lhs, rhs) != StatusCode::kOk) {
+    if (npu_demo::add<TSM, float, float>(ctx, out, lhs, rhs) != StatusCode::kOk) {
         return fail(1);
     }
     for (int i = 0; i < 6; ++i) {
@@ -272,13 +274,13 @@ int main() {
             return fail(2);
         }
     }
-    if (npu_demo::sub<TSM, float, float>(out, lhs, rhs) != StatusCode::kOk) {
+    if (npu_demo::sub<TSM, float, float>(ctx, out, lhs, rhs) != StatusCode::kOk) {
         return fail(3);
     }
     if (out_data[0] != -5.0f || out_data[5] != 5.0f) {
         return fail(4);
     }
-    if (npu_demo::exp<TSM, float, float>(out, lhs) != StatusCode::kOk) {
+    if (npu_demo::exp<TSM, float, float>(ctx, out, lhs) != StatusCode::kOk) {
         return fail(5);
     }
     if (std::fabs(out_data[0] - std::exp(1.0f)) > 0.0001f ||
@@ -305,6 +307,7 @@ def test_include_api_kernel_img2col_helpers_materialize_windows() -> None:
 static int fail(int code) { return code; }
 
 int main() {
+    int ctx = 0;
     float input1d_data[5] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
     long long input1d_shape[3] = {1, 1, 5};
     long long input1d_stride[3] = {5, 5, 1};
@@ -314,7 +317,7 @@ int main() {
     long long out1d_shape[4] = {1, 1, 3, 3};
     long long out1d_stride[4] = {9, 9, 3, 1};
     Memory<TSM, float> out1d(out1d_data, out1d_shape, out1d_stride, 4, MemoryFormat::Norm);
-    if (npu_demo::img2col1d<GM, TSM, float, float>(out1d, input1d, 3, 2, 1, 1, 1) != StatusCode::kOk) {
+    if (npu_demo::img2col1d<GM, TSM, float, float>(ctx, out1d, input1d, 3, 2, 1, 1, 1) != StatusCode::kOk) {
         return fail(1);
     }
     float expected1d[9] = {
@@ -341,7 +344,7 @@ int main() {
     long long out2d_shape[6] = {1, 1, 2, 2, 2, 2};
     long long out2d_stride[6] = {16, 16, 8, 4, 2, 1};
     Memory<TSM, float> out2d(out2d_data, out2d_shape, out2d_stride, 6, MemoryFormat::Norm);
-    if (npu_demo::img2col2d<GM, TSM, float, float>(out2d, input2d, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0) != StatusCode::kOk) {
+    if (npu_demo::img2col2d<GM, TSM, float, float>(ctx, out2d, input2d, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0) != StatusCode::kOk) {
         return fail(3);
     }
     float expected2d[16] = {
@@ -374,6 +377,7 @@ def test_include_api_kernel_rejects_old_lhs_rhs_out_order() -> None:
 #include "include/npu_demo/Kernel.h"
 
 int main() {
+    int ctx = 0;
     float lhs_data[1] = {1.0f};
     float rhs_data[1] = {2.0f};
     bool out_data[1] = {false};
@@ -382,9 +386,10 @@ int main() {
     Memory<GM, float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm);
     Memory<GM, float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm);
     Memory<GM, bool> out(out_data, shape, stride, 1, MemoryFormat::Norm);
-    return npu_demo::add<GM, float, bool>(lhs, rhs, out);
+    return npu_demo::add<GM, float, bool>(ctx, lhs, rhs, out);
 }
 """
     )
-    assert "invalid initialization of reference" in stderr
+    assert "no matching function for call" in stderr
+    assert "cannot convert" in stderr
     assert "Memory<MemorySpace::GM, bool>&" in stderr

@@ -166,13 +166,12 @@ def test_dma_member_view_and_target_first_deslice_contract() -> None:
 static int fail(int code) { return code; }
 
 int main() {
+    int ctx = 0;
     float source_data[10];
     for (int i = 0; i < 10; ++i) {
         source_data[i] = static_cast<float>(i);
     }
-    long long shape[1] = {10};
-    long long stride[1] = {1};
-    Memory<GM, float> source(source_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<GM, float> source(source_data, {10}, {1}, MemoryFormat::Norm);
 
     long long offset_buf[1] = {1};
     long long size_buf[1] = {4};
@@ -193,15 +192,8 @@ int main() {
     }
 
     float tile_data[4] = {0};
-    long long tile_shape[1] = {4};
-    long long tile_stride[1] = {1};
-    Memory<TSM, float> tile(
-        tile_data,
-        tile_shape,
-        tile_stride,
-        1,
-        MemoryFormat::Norm);
-    if (npu_demo::slice(tile, source, offset, size, stride_vec) != StatusCode::kOk) {
+    Memory<TSM, float> tile(tile_data, {4}, {1}, MemoryFormat::Norm);
+    if (npu_demo::slice(ctx, tile, source, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(4);
     }
     if (tile_data[0] != 1.0f || tile_data[1] != 3.0f || tile_data[2] != 5.0f || tile_data[3] != 7.0f) {
@@ -209,13 +201,8 @@ int main() {
     }
 
     float target_data[10] = {0};
-    Memory<GM, float> target(
-        target_data,
-        shape,
-        stride,
-        1,
-        MemoryFormat::Norm);
-    if (npu_demo::deslice(target, tile, offset, size, stride_vec) != StatusCode::kOk) {
+    Memory<GM, float> target(target_data, {10}, {1}, MemoryFormat::Norm);
+    if (npu_demo::deslice(ctx, target, tile, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(6);
     }
     if (target_data[1] != 1.0f || target_data[3] != 3.0f || target_data[5] != 5.0f ||
@@ -250,10 +237,9 @@ static bool contains(const std::string& value, const char* needle) {
 }
 
 int main() {
+    int ctx = 0;
     float source_data[10] = {0};
-    long long shape[1] = {10};
-    long long stride[1] = {1};
-    Memory<GM, float> source(source_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<GM, float> source(source_data, {10}, {1}, MemoryFormat::Norm);
 
     long long offset_buf[2] = {0, 0};
     long long size_buf[2] = {1, 1};
@@ -273,26 +259,14 @@ int main() {
     }
 
     float tile_data[1] = {0};
-    long long tile_shape[1] = {1};
-    long long tile_stride[1] = {1};
-    Memory<TSM, float> tile(
-        tile_data,
-        tile_shape,
-        tile_stride,
-        1,
-        MemoryFormat::Norm);
-    if (npu_demo::slice(tile, source, offset, size, stride_vec) != StatusCode::kError) {
+    Memory<TSM, float> tile(tile_data, {1}, {1}, MemoryFormat::Norm);
+    if (npu_demo::slice(ctx, tile, source, offset, size, stride_vec) != StatusCode::kError) {
         return fail(3);
     }
 
     float target_data[10] = {0};
-    Memory<GM, float> target(
-        target_data,
-        shape,
-        stride,
-        1,
-        MemoryFormat::Norm);
-    if (npu_demo::deslice(target, tile, offset, size, stride_vec) != StatusCode::kError) {
+    Memory<GM, float> target(target_data, {10}, {1}, MemoryFormat::Norm);
+    if (npu_demo::deslice(ctx, target, tile, offset, size, stride_vec) != StatusCode::kError) {
         return fail(4);
     }
     return 0;
@@ -316,13 +290,12 @@ def test_dma_deslice_supports_cross_space_templates() -> None:
 static int fail(int code) { return code; }
 
 int main() {
+    int ctx = 0;
     float source_data[8];
     for (int i = 0; i < 8; ++i) {
         source_data[i] = static_cast<float>(i);
     }
-    long long shape[1] = {8};
-    long long stride[1] = {1};
-    Memory<GM, float> source(source_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<GM, float> source(source_data, {8}, {1}, MemoryFormat::Norm);
 
     long long offset_buf[1] = {2};
     long long size_buf[1] = {4};
@@ -332,17 +305,15 @@ int main() {
     Vector stride_vec(stride_buf, 1);
 
     float tile_data[4] = {0};
-    long long tile_shape[1] = {4};
-    long long tile_stride[1] = {1};
-    Memory<TSM, float> tile(tile_data, tile_shape, tile_stride, 1, MemoryFormat::Norm);
+    Memory<TSM, float> tile(tile_data, {4}, {1}, MemoryFormat::Norm);
 
-    if (npu_demo::slice(tile, source, offset, size, stride_vec) != StatusCode::kOk) {
+    if (npu_demo::slice(ctx, tile, source, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(1);
     }
 
     float target_data[8] = {0};
-    Memory<GM, float> target(target_data, shape, stride, 1, MemoryFormat::Norm);
-    if (npu_demo::deslice(target, tile, offset, size, stride_vec) != StatusCode::kOk) {
+    Memory<GM, float> target(target_data, {8}, {1}, MemoryFormat::Norm);
+    if (npu_demo::deslice(ctx, target, tile, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(2);
     }
     if (target_data[2] != 2.0f || target_data[3] != 3.0f || target_data[4] != 4.0f ||
@@ -370,17 +341,14 @@ def test_dma_transpose_materializes_permuted_layout() -> None:
 static int fail(int code) { return code; }
 
 int main() {
+    int ctx = 0;
     float source_data[6] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
-    long long source_shape[2] = {2, 3};
-    long long source_stride[2] = {3, 1};
-    Memory<TSM, float> source(source_data, source_shape, source_stride, 2, MemoryFormat::Norm);
+    Memory<TSM, float> source(source_data, {2, 3}, {3, 1}, MemoryFormat::Norm);
 
     int target_data[6] = {0, 0, 0, 0, 0, 0};
-    long long target_shape[2] = {3, 2};
-    long long target_stride[2] = {2, 1};
-    Memory<GM, int> target(target_data, target_shape, target_stride, 2, MemoryFormat::Norm);
+    Memory<GM, int> target(target_data, {3, 2}, {2, 1}, MemoryFormat::Norm);
 
-    if (npu_demo::transpose(target, source, Vector{1, 0}) != StatusCode::kOk) {
+    if (npu_demo::transpose(ctx, target, source, Vector{1, 0}) != StatusCode::kOk) {
         return fail(1);
     }
     if (target_data[0] != 1 || target_data[1] != 4 ||
@@ -389,15 +357,13 @@ int main() {
         return fail(2);
     }
 
-    long long bad_shape[2] = {2, 3};
-    long long bad_stride[2] = {3, 1};
-    Memory<GM, int> bad_target(target_data, bad_shape, bad_stride, 2, MemoryFormat::Norm);
-    if (npu_demo::transpose(bad_target, source, Vector{1, 0}) != StatusCode::kError) {
+    Memory<GM, int> bad_target(target_data, {2, 3}, {3, 1}, MemoryFormat::Norm);
+    if (npu_demo::transpose(ctx, bad_target, source, Vector{1, 0}) != StatusCode::kError) {
         return fail(3);
     }
     long long duplicate_perm_buf[2] = {0, 0};
     Vector duplicate_perm(duplicate_perm_buf, 2);
-    if (npu_demo::transpose(target, source, duplicate_perm) != StatusCode::kError) {
+    if (npu_demo::transpose(ctx, target, source, duplicate_perm) != StatusCode::kError) {
         return fail(4);
     }
     return 0;
@@ -407,13 +373,13 @@ int main() {
 
 
 # API-DMA-003C
-# 功能说明: 验证 DMA initializer-list overload 覆盖 slice/deslice/store/load/transpose generated source layout 合同。
-# 测试目的: 锁定 generated source 可直接传 `{...}` layout，不需要 `Vector` 临时对象或局部 layout buffer。
-# 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_initializer_list_layout_overloads`
+# 功能说明: 验证 DMA helper 通过 `{...}` layout 文本绑定 `Vector` 参数。
+# 测试目的: 锁定 generated source 可保留 `{...}` layout，同时不需要 DMA initializer-list overload。
+# 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_brace_layout_binds_vector_contract`
 # 对应功能实现文件路径: `include/npu_demo/Dma.h`
 # 对应 spec 文件路径: `spec/include/api/Dma.md`
 # 对应测试文件路径: `test/include/api/test_dma.py`
-def test_dma_initializer_list_layout_overloads() -> None:
+def test_dma_brace_layout_binds_vector_contract() -> None:
     source = r"""
 #include "include/api/Dma.h"
 #include "include/npu_demo/Dma.h"
@@ -421,6 +387,7 @@ def test_dma_initializer_list_layout_overloads() -> None:
 static int fail(int code) { return code; }
 
 int main() {
+    int ctx = 0;
     float source_data[12];
     for (int i = 0; i < 12; ++i) {
         source_data[i] = static_cast<float>(i);
@@ -429,7 +396,13 @@ int main() {
 
     float tile_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     Memory<TSM, float> tile(tile_data, {2, 2}, {2, 1}, MemoryFormat::Norm);
-    if (npu_demo::slice(tile, source, {1, 1}, {2, 2}, {1, 1}) != StatusCode::kOk) {
+    long long slice_offset_buf[2] = {1, 1};
+    long long tile_size_buf[2] = {2, 2};
+    long long unit_stride_buf[2] = {1, 1};
+    Vector slice_offset(slice_offset_buf, 2);
+    Vector tile_size(tile_size_buf, 2);
+    Vector unit_stride(unit_stride_buf, 2);
+    if (npu_demo::slice(ctx, tile, source, {1, 1}, {2, 2}, {1, 1}) != StatusCode::kOk) {
         return fail(1);
     }
     if (tile_data[0] != 5.0f || tile_data[1] != 6.0f || tile_data[2] != 9.0f || tile_data[3] != 10.0f) {
@@ -438,7 +411,9 @@ int main() {
 
     float target_data[12] = {0.0f};
     Memory<GM, float> target(target_data, {3, 4}, {4, 1}, MemoryFormat::Norm);
-    if (npu_demo::deslice(target, tile, {0, 1}, {2, 2}, {1, 1}) != StatusCode::kOk) {
+    long long deslice_offset_buf[2] = {0, 1};
+    Vector deslice_offset(deslice_offset_buf, 2);
+    if (npu_demo::deslice(ctx, target, tile, {0, 1}, {2, 2}, {1, 1}) != StatusCode::kOk) {
         return fail(3);
     }
     if (target_data[1] != 5.0f || target_data[2] != 6.0f ||
@@ -448,7 +423,9 @@ int main() {
 
     float stored_data[12] = {0.0f};
     Memory<GM, float> stored(stored_data, {3, 4}, {4, 1}, MemoryFormat::Norm);
-    if (npu_demo::store(stored, tile, {1, 0}, {2, 2}, {1, 1}) != StatusCode::kOk) {
+    long long store_offset_buf[2] = {1, 0};
+    Vector store_offset(store_offset_buf, 2);
+    if (npu_demo::store(ctx, stored, tile, {1, 0}, {2, 2}, {1, 1}) != StatusCode::kOk) {
         return fail(5);
     }
     if (stored_data[4] != 5.0f || stored_data[5] != 6.0f ||
@@ -458,7 +435,7 @@ int main() {
 
     int load_data[4] = {0, 0, 0, 0};
     Memory<TSM, int> loaded(load_data, {2, 2}, {2, 1}, MemoryFormat::Norm);
-    if (npu_demo::load(loaded, source, {1, 1}, {2, 2}, {1, 1}) != StatusCode::kOk) {
+    if (npu_demo::load(ctx, loaded, source, {1, 1}, {2, 2}, {1, 1}) != StatusCode::kOk) {
         return fail(7);
     }
     if (load_data[0] != 5 || load_data[1] != 6 || load_data[2] != 9 || load_data[3] != 10) {
@@ -467,7 +444,9 @@ int main() {
 
     float transposed_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     Memory<TSM, float> transposed(transposed_data, {2, 2}, {2, 1}, MemoryFormat::Norm);
-    if (npu_demo::transpose(transposed, tile, {1, 0}) != StatusCode::kOk) {
+    long long perm_buf[2] = {1, 0};
+    Vector perm(perm_buf, 2);
+    if (npu_demo::transpose(ctx, transposed, tile, {1, 0}) != StatusCode::kOk) {
         return fail(9);
     }
     if (transposed_data[0] != 5.0f || transposed_data[1] != 9.0f ||
@@ -475,16 +454,54 @@ int main() {
         return fail(10);
     }
 
-    if (npu_demo::slice(tile, source, {0}, {2}, {1}) != StatusCode::kError) {
+    long long bad_offset_buf[1] = {0};
+    long long bad_size_buf[1] = {2};
+    long long bad_stride_buf[1] = {1};
+    Vector bad_offset(bad_offset_buf, 1);
+    Vector bad_size(bad_size_buf, 1);
+    Vector bad_stride(bad_stride_buf, 1);
+    if (npu_demo::slice(ctx, tile, source, {0}, {2}, {1}) != StatusCode::kError) {
         return fail(11);
     }
-    if (npu_demo::load(loaded, source, {1, 1}, {2, 2}, {1, 0}) != StatusCode::kError) {
+    long long zero_stride_buf[2] = {1, 0};
+    Vector zero_stride(zero_stride_buf, 2);
+    if (npu_demo::load(ctx, loaded, source, {1, 1}, {2, 2}, {1, 0}) != StatusCode::kError) {
         return fail(12);
     }
     return 0;
 }
 """
     _compile_and_run(source)
+
+
+# API-DMA-003D
+# 功能说明: 验证 DMA helper 不再公开任意 rank initializer-list layout 参数。
+# 测试目的: 防止 `std::initializer_list<long long>` overload 回流；rank 1..8 的 `{...}` 只能经 `Vector` 固定参数构造工作。
+# 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_initializer_list_layout_overload_is_removed`
+# 对应功能实现文件路径: `include/npu_demo/Dma.h`
+# 对应 spec 文件路径: `spec/include/api/Dma.md`
+# 对应测试文件路径: `test/include/api/test_dma.py`
+def test_dma_initializer_list_layout_overload_is_removed() -> None:
+    source = r"""
+#include "include/api/Dma.h"
+#include "include/npu_demo/Dma.h"
+
+int main() {
+    int ctx = 0;
+    Memory<GM, float>* source = nullptr;
+    Memory<TSM, float>* tile = nullptr;
+    return npu_demo::slice(
+        ctx,
+        *tile,
+        *source,
+        {0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {1, 1, 1, 1, 1, 1, 1, 1, 1},
+        {1, 1, 1, 1, 1, 1, 1, 1, 1}) == StatusCode::kOk ? 0 : 1;
+}
+"""
+    stderr = _compile_expect_failure(source)
+    if "std::initializer_list<long long>" in stderr:
+        raise AssertionError("DMA initializer-list overload unexpectedly remains visible")
 
 
 # API-DMA-003B
@@ -502,11 +519,10 @@ def test_dma_fill_and_broadcast_materialize_target() -> None:
 static int fail(int code) { return code; }
 
 int main() {
+    int ctx = 0;
     float fill_data[6] = {0.0f};
-    long long fill_shape[2] = {2, 3};
-    long long fill_stride[2] = {3, 1};
-    Memory<TSM, float> fill_target(fill_data, fill_shape, fill_stride, 2, MemoryFormat::Norm);
-    if (npu_demo::fill<TSM, float>(fill_target, 2.5f) != StatusCode::kOk) {
+    Memory<TSM, float> fill_target(fill_data, {2, 3}, {3, 1}, MemoryFormat::Norm);
+    if (npu_demo::fill<TSM, float>(ctx, fill_target, 2.5f) != StatusCode::kOk) {
         return fail(1);
     }
     for (int i = 0; i < 6; ++i) {
@@ -516,15 +532,11 @@ int main() {
     }
 
     float source_data[2] = {10.0f, 20.0f};
-    long long source_shape[2] = {2, 1};
-    long long source_stride[2] = {1, 1};
-    Memory<TSM, float> source(source_data, source_shape, source_stride, 2, MemoryFormat::Norm);
+    Memory<TSM, float> source(source_data, {2, 1}, {1, 1}, MemoryFormat::Norm);
 
     int target_data[6] = {0, 0, 0, 0, 0, 0};
-    long long target_shape[2] = {2, 3};
-    long long target_stride[2] = {3, 1};
-    Memory<TSM, int> target(target_data, target_shape, target_stride, 2, MemoryFormat::Norm);
-    if (npu_demo::broadcast<TSM, TSM, int, float>(target, source) != StatusCode::kOk) {
+    Memory<TSM, int> target(target_data, {2, 3}, {3, 1}, MemoryFormat::Norm);
+    if (npu_demo::broadcast<TSM, TSM, int, float>(ctx, target, source) != StatusCode::kOk) {
         return fail(3);
     }
     int expected[6] = {10, 10, 10, 20, 20, 20};
@@ -534,10 +546,8 @@ int main() {
         }
     }
 
-    long long bad_shape[2] = {3, 3};
-    long long bad_stride[2] = {3, 1};
-    Memory<TSM, int> bad_target(target_data, bad_shape, bad_stride, 2, MemoryFormat::Norm);
-    if (npu_demo::broadcast<TSM, TSM, int, float>(bad_target, source) != StatusCode::kError) {
+    Memory<TSM, int> bad_target(target_data, {3, 3}, {3, 1}, MemoryFormat::Norm);
+    if (npu_demo::broadcast<TSM, TSM, int, float>(ctx, bad_target, source) != StatusCode::kError) {
         return fail(5);
     }
     return 0;
@@ -547,7 +557,7 @@ int main() {
 
 
 # API-DMA-003A
-# 功能说明: 验证 `alloc<Space, T>(shape, stride)` helper 可配合 npu_demo 后端编译运行。
+# 功能说明: 验证 `alloc<Space, T>(ctx, shape, stride)` helper 可配合 npu_demo 后端编译运行。
 # 测试目的: 锁定 DMA helper temporary memory 的公开源码形态存在对应实现，支持静态与动态 shape/stride。
 # 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_alloc_helper_contract`
 # 对应功能实现文件路径: `include/npu_demo/Dma.h`
@@ -561,7 +571,8 @@ def test_dma_alloc_helper_contract() -> None:
 static int fail(int code) { return code; }
 
 int main() {
-    auto tile = npu_demo::alloc<TSM, float>({2, 3}, {3, 1});
+    int ctx = 0;
+    auto tile = npu_demo::alloc<TSM, float>(ctx, {2, 3}, {3, 1});
     if (tile.rank() != 2) {
         return fail(1);
     }
@@ -581,7 +592,7 @@ int main() {
 
     long long m = 4;
     long long n = 5;
-    auto dyn = npu_demo::alloc<GM, float>({m, n}, {n, 1});
+    auto dyn = npu_demo::alloc<GM, float>(ctx, {m, n}, {n, 1});
     if (dyn.rank() != 2) {
         return fail(6);
     }
@@ -614,12 +625,10 @@ def test_dma_rejects_legacy_free_view_contract() -> None:
 
 int main() {
     float source_data[4] = {0};
-    long long shape[1] = {4};
-    long long stride[1] = {1};
     long long offset_buf[1] = {0};
     long long size_buf[1] = {1};
     long long stride_buf[1] = {1};
-    Memory<GM, float> source(source_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<GM, float> source(source_data, {4}, {1}, MemoryFormat::Norm);
     Vector offset(offset_buf, 1);
     Vector size(size_buf, 1);
     Vector stride_vec(stride_buf, 1);

@@ -5,7 +5,7 @@
 定义 include/api 层统一对外的基础类型与返回状态规范（`include/api/Core.h`），为 `Memory`、`Dma`、后端 helper 与代码生成层提供统一的状态码语义与最小基础类型边界。
 
 - 本轮公共层只收口 `StatusCode`、`Status`、`S_INT`、`Vector` 四个公开名字。
-- `Vector` 是轻量只读/可写视图；也支持 1..4 个 `long long` 值的花括号构造，并把这些值复制到对象内联存储。
+- `Vector` 是轻量只读/可写视图；也支持 1..8 个 `long long` 值的花括号构造，并把这些值复制到对象内联存储。
 - `Vector` 不做动态分配，不依赖初始化列表或标准库容器。
 - `Core` 不定义 `view`、`reshape`、`slice`、`deslice` 等业务 helper。
 
@@ -15,12 +15,15 @@
 - `Status: type alias = StatusCode`
 - `S_INT: type alias = long long`
 - `class Vector`
-- `Vector::Vector(long long* data, unsigned long long size)`
-- `Vector::Vector(const long long* data, unsigned long long size)`
+- `template <typename Pointer> explicit Vector::Vector(Pointer data, unsigned long long size)`
 - `Vector::Vector(long long value0)`
 - `Vector::Vector(long long value0, long long value1)`
 - `Vector::Vector(long long value0, long long value1, long long value2)`
 - `Vector::Vector(long long value0, long long value1, long long value2, long long value3)`
+- `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4)`
+- `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5)`
+- `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5, long long value6)`
+- `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5, long long value6, long long value7)`
 - `Vector::Vector(const Vector& other)`
 - `Vector::operator=(const Vector& other) -> Vector&`
 - `Vector::size() const -> unsigned long long`
@@ -40,14 +43,14 @@
 
 ## 依赖
 
-- 无（`Core` 为 include/api 基础类型规范）。
+- C++ 标准头：`<type_traits>`。
 
 ## 目标
 
 - 为 include/api 全部公开接口提供统一返回状态基座。
 - 明确状态码语义，避免各 API 自行定义不一致的错误表达。
 - 提供统一基础向量类型 `Vector`，作为坐标、索引、shape、stride、offset 等公共载体。
-- 支持 `Vector{...}` 与 `Vector values = {...}` 两种 1..4 个值的调用形态。
+- 支持 `Vector{...}` 与 `Vector values = {...}` 两种 1..8 个值的调用形态。
 - 明确删旧边界：公共层不再把 `std::vector<long long>`、`std::array<long long, N>`、后端私有坐标容器写成稳定接口。
 
 ## 额外补充
@@ -119,11 +122,11 @@ Vector dims{2, 3, 4};
 - 功能说明：定义 `Vector` 公开类型。
 - 注意事项：`Vector` 固定表达 `long long` 坐标/索引序列；不得把 `shape/stride/rank` 元信息或标准库容器互转能力作为该类型的公开合同。
 
-### `Vector::Vector(long long* data, unsigned long long size)`
+### `template <typename Pointer> explicit Vector::Vector(Pointer data, unsigned long long size)`
 
-- api：`Vector::Vector(long long* data, unsigned long long size)`
+- api：`template <typename Pointer> explicit Vector::Vector(Pointer data, unsigned long long size)`
 - 参数：
-  - `data`：输入数据或缓冲区内容；类型 `long long*`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `data`：输入数据或缓冲区内容；类型 `Pointer`，仅允许 `long long*` 或 `const long long*`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `size`：尺寸序列或元素数量，指定切片、缓冲区或范围的大小；类型 `unsigned long long`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
 - 返回值：`Vector` 实例。
 - 使用示例：
@@ -133,23 +136,7 @@ long long data[2] = {1, 2};
 Vector shape(data, 2);
 ```
 - 功能说明：构造 `Vector` 实例。
-- 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
-
-### `Vector::Vector(const long long* data, unsigned long long size)`
-
-- api：`Vector::Vector(const long long* data, unsigned long long size)`
-- 参数：
-  - `data`：输入数据或缓冲区内容；类型 `const long long*`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `size`：尺寸序列或元素数量，指定切片、缓冲区或范围的大小；类型 `unsigned long long`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-- 返回值：`Vector` 实例。
-- 使用示例：
-
-  ```cpp
-long long data[2] = {1, 2};
-Vector shape(data, 2);
-```
-- 功能说明：构造 `Vector` 实例。
-- 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
+- 注意事项：该视图构造器必须显式调用，避免 `{0, 1}` 这类固定值 layout 被误解析为空指针缓冲区视图；实例内部缓存、状态字典和派生字段不作为外部可变入口。
 
 ### `Vector::Vector(long long value0)`
 
@@ -216,6 +203,84 @@ Vector shape(data, 2);
 ```
 - 功能说明：构造 `Vector` 实例。
 - 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
+
+### `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4)`
+
+- api：`Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4)`
+- 参数：
+  - `value0`：第 0 维值；类型 `long long`；无默认值。
+  - `value1`：第 1 维值；类型 `long long`；无默认值。
+  - `value2`：第 2 维值；类型 `long long`；无默认值。
+  - `value3`：第 3 维值；类型 `long long`；无默认值。
+  - `value4`：第 4 维值；类型 `long long`；无默认值。
+- 返回值：`Vector` 实例。
+- 使用示例：
+
+  ```cpp
+Vector dims{1, 2, 3, 4, 5};
+```
+- 功能说明：构造自有内联存储 `Vector` 实例。
+- 注意事项：该构造器服务 generated source 的 brace-list layout 绑定；不得把它替换为 `std::initializer_list<long long>` helper overload。
+
+### `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5)`
+
+- api：`Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5)`
+- 参数：
+  - `value0`：第 0 维值；类型 `long long`；无默认值。
+  - `value1`：第 1 维值；类型 `long long`；无默认值。
+  - `value2`：第 2 维值；类型 `long long`；无默认值。
+  - `value3`：第 3 维值；类型 `long long`；无默认值。
+  - `value4`：第 4 维值；类型 `long long`；无默认值。
+  - `value5`：第 5 维值；类型 `long long`；无默认值。
+- 返回值：`Vector` 实例。
+- 使用示例：
+
+  ```cpp
+Vector dims{1, 2, 3, 4, 5, 6};
+```
+- 功能说明：构造自有内联存储 `Vector` 实例。
+- 注意事项：该构造器服务 generated source 的 brace-list layout 绑定；不得把它替换为 `std::initializer_list<long long>` helper overload。
+
+### `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5, long long value6)`
+
+- api：`Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5, long long value6)`
+- 参数：
+  - `value0`：第 0 维值；类型 `long long`；无默认值。
+  - `value1`：第 1 维值；类型 `long long`；无默认值。
+  - `value2`：第 2 维值；类型 `long long`；无默认值。
+  - `value3`：第 3 维值；类型 `long long`；无默认值。
+  - `value4`：第 4 维值；类型 `long long`；无默认值。
+  - `value5`：第 5 维值；类型 `long long`；无默认值。
+  - `value6`：第 6 维值；类型 `long long`；无默认值。
+- 返回值：`Vector` 实例。
+- 使用示例：
+
+  ```cpp
+Vector dims{1, 2, 3, 4, 5, 6, 7};
+```
+- 功能说明：构造自有内联存储 `Vector` 实例。
+- 注意事项：该构造器服务 generated source 的 brace-list layout 绑定；不得把它替换为 `std::initializer_list<long long>` helper overload。
+
+### `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5, long long value6, long long value7)`
+
+- api：`Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5, long long value6, long long value7)`
+- 参数：
+  - `value0`：第 0 维值；类型 `long long`；无默认值。
+  - `value1`：第 1 维值；类型 `long long`；无默认值。
+  - `value2`：第 2 维值；类型 `long long`；无默认值。
+  - `value3`：第 3 维值；类型 `long long`；无默认值。
+  - `value4`：第 4 维值；类型 `long long`；无默认值。
+  - `value5`：第 5 维值；类型 `long long`；无默认值。
+  - `value6`：第 6 维值；类型 `long long`；无默认值。
+  - `value7`：第 7 维值；类型 `long long`；无默认值。
+- 返回值：`Vector` 实例。
+- 使用示例：
+
+  ```cpp
+Vector dims{1, 2, 3, 4, 5, 6, 7, 8};
+```
+- 功能说明：构造自有内联存储 `Vector` 实例。
+- 注意事项：该构造器服务 generated source 的 brace-list layout 绑定；不得把它替换为 `std::initializer_list<long long>` helper overload。
 
 ### `Vector::Vector(const Vector& other)`
 

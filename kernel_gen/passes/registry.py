@@ -436,14 +436,10 @@ def build_registered_pass(name: str, options: dict[str, str] | None = None) -> X
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: unknown pass '{name}'")
     pass_cls = _PASS_REGISTRY[name]
     normalized_options = _normalize_options(options)
-    passthrough_errors: tuple[type[BaseException], ...] = ()
-    if name == "launch-kernel-cost-func":
-        passthrough_errors = (KernelCodeError,)
     return _build_registered_pass_instance(
         name,
         pass_cls,
         normalized_options,
-        passthrough_errors=passthrough_errors,
     )
 
 
@@ -518,7 +514,6 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.inline import InlinePass
     from kernel_gen.passes.tuning import (
         KernelPatternAttachPass,
-        LaunchKernelCostFuncPass,
         LowerDmaMemoryHierarchyPass,
     )
     from kernel_gen.passes.kernel_aggregate import KernelAggregatePass
@@ -560,7 +555,6 @@ def load_builtin_passes() -> None:
         SymbolHoistPipelinePass,
         MemoryPoolPass,
         MemoryPlanPass,
-        LaunchKernelCostFuncPass,
         TemplateNameInferPass,
         TransformApplyPass,
         ProducerConsumerAnalysisPass,

@@ -110,12 +110,10 @@ static int fail(int code) { return code; }
 int main() {
     float source_data[4] = {1.0f, 2.0f, 3.0f, 4.0f};
     float out_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    long long shape[1] = {4};
-    long long stride[1] = {1};
 
-    Memory<GM, float> source(source_data, shape, stride, 1, MemoryFormat::Norm);
-    Memory<GM, float> out(out_data, shape, stride, 1, MemoryFormat::Norm);
-    Memory<TSM, float> tile(out_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<GM, float> source(source_data, {4}, {1}, MemoryFormat::Norm);
+    Memory<GM, float> out(out_data, {4}, {1}, MemoryFormat::Norm);
+    Memory<TSM, float> tile(out_data, {4}, {1}, MemoryFormat::Norm);
 
     S_INT add_cost =
         npu_demo::cost::add<GM, float, float, npu_demo::VECTOR1>(out, source, source);

@@ -91,7 +91,7 @@
 - `build_contiguous_stride` 不迁移 `Vector`、`Memory`、`MemorySpace` 等基础类型；这些类型继续来自 include/api 的当前公开位置。
 - `view` 不再作为 DMA 自由函数暴露在公共层；`dma.view` 的源码目标固定桥接到成员式 `source.view<T>(...)`。
 - `reshape(shape)` 只按当前公开子集收口为成员式接口，不在本轮扩展模板参数、隐式拷贝或空间改写语义。
-- initializer-list constructor、`view` 与 `reshape` overload 是 generated source layout brace-list 的稳定承接口径；生成源码不得为 npu_demo layout 参数泄漏 `Vector(...)`、`Vector{...}` 或局部 `long long *_shape[]` / `*_stride[]` buffer。
+- initializer-list constructor、`view` 与 `reshape` overload 是 Memory 生成路径的稳定 brace-list 承接口径；生成源码在这些 Memory 成员/构造路径不得先物化 `Vector(...)`、`Vector{...}` 或局部 `long long *_shape[]` / `*_stride[]` buffer。DMA / cost helper layout 参数按 `Dma` 与 generated-source 规范消费 `Vector` 公开参数。
 - `include/api/Memory.h` 仅提供声明与类型边界，不提供函数体实现；具体后端实现需在各自 include 层提供。
 
 ## API详细说明

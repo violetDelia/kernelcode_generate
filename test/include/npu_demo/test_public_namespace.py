@@ -157,37 +157,36 @@ static int fail(int code) {
 }
 
 static void kernel_body(npu_demo::KernelContext& ctx, long long* block_ids, long long* thread_nums) {
-    block_ids[ctx.block_id()] = ctx.block_id();
-    thread_nums[ctx.block_id()] = ctx.thread_num();
+    (void)ctx;
+    block_ids[npu_demo::block_id()] = npu_demo::block_id();
+    thread_nums[npu_demo::block_id()] = npu_demo::thread_num();
 }
 
 int main() {
-    Vector shape{2};
-    Vector stride = {1};
-
+    npu_demo::KernelContext ctx;
     float lhs_data[2] = {1.5f, 2.5f};
     float rhs_data[2] = {2.0f, 3.0f};
     float out_data[2] = {0.0f, 0.0f};
 
-    Memory<GM, float> lhs(lhs_data, shape.data(), stride.data(), shape.size(), MemoryFormat::Norm);
-    Memory<GM, float> rhs(rhs_data, shape.data(), stride.data(), shape.size(), MemoryFormat::Norm);
-    Memory<GM, float> out(out_data, shape.data(), stride.data(), shape.size(), MemoryFormat::Norm);
+    Memory<GM, float> lhs(lhs_data, {2}, {1}, MemoryFormat::Norm);
+    Memory<GM, float> rhs(rhs_data, {2}, {1}, MemoryFormat::Norm);
+    Memory<GM, float> out(out_data, {2}, {1}, MemoryFormat::Norm);
 
-    Status add_status = npu_demo::add<GM, float, float>(out, lhs, rhs);
+    Status add_status = npu_demo::add<GM, float, float>(ctx, out, lhs, rhs);
     if (add_status != StatusCode::kOk) {
         return fail(1);
     }
     if (out_data[0] != 3.5f || out_data[1] != 5.5f) {
         return fail(2);
     }
-    Status max_status = npu_demo::max<GM, float, float>(out, lhs, rhs);
+    Status max_status = npu_demo::max<GM, float, float>(ctx, out, lhs, rhs);
     if (max_status != StatusCode::kOk) {
         return fail(20);
     }
     if (out_data[0] != 2.0f || out_data[1] != 3.0f) {
         return fail(21);
     }
-    Status min_status = npu_demo::min<GM, float, float>(out, lhs, rhs);
+    Status min_status = npu_demo::min<GM, float, float>(ctx, out, lhs, rhs);
     if (min_status != StatusCode::kOk) {
         return fail(22);
     }
@@ -197,7 +196,7 @@ int main() {
 
     long long block_ids[2] = {-1, -1};
     long long thread_nums[2] = {0, 0};
-    Status launch_status = npu_demo::launch<2, 1, 1, 0>(kernel_body, &block_ids[0], &thread_nums[0]);
+    Status launch_status = npu_demo::launch<2, 1, 1, 0, kernel_body>(ctx, &block_ids[0], &thread_nums[0]);
     if (launch_status != StatusCode::kOk) {
         return fail(3);
     }
@@ -236,6 +235,7 @@ static int fail(int code) {
 }
 
 int main() {
+    npu_demo::KernelContext ctx;
     long long stride_buf[2] = {0, 0};
     long long shape_buf[2] = {2, 2};
     npu_demo::build_contiguous_stride(shape_buf, 2, stride_buf);
@@ -244,24 +244,24 @@ int main() {
     }
 
     float line_data[4] = {1.0f, 2.0f, 3.0f, 4.0f};
-    Memory<GM, float> line(line_data, Vector{4}.data(), Vector{1}.data(), 1, MemoryFormat::Norm);
+    Memory<GM, float> line(line_data, {4}, {1}, MemoryFormat::Norm);
     Memory<GM, float> row = npu_demo::view(line, 1, 2, 1);
     if (row.rank() != 1 || row.get_shape(0) != 2 || row.data() != line.data() + 1) {
         return fail(2);
     }
 
-    auto tile = npu_demo::alloc<TSM, float>({2}, {1}, MemoryFormat::Norm);
+    auto tile = npu_demo::alloc<TSM, float>(ctx, {2}, {1}, MemoryFormat::Norm);
     if (tile.rank() != 1 || tile.get_shape(0) != 2 || tile.get_stride(0) != 1) {
         return fail(3);
     }
-    if (npu_demo::fill<TSM, float>(tile, 0.0f) != StatusCode::kOk) {
+    if (npu_demo::fill<TSM, float>(ctx, tile, 0.0f) != StatusCode::kOk) {
         return fail(30);
     }
     if (tile.data()[0] != 0.0f || tile.data()[1] != 0.0f) {
         return fail(31);
     }
 
-    if (npu_demo::slice(tile, line, {1}, {2}, {1}) != StatusCode::kOk) {
+    if (npu_demo::slice(ctx, tile, line, {1}, {2}, {1}) != StatusCode::kOk) {
         return fail(4);
     }
     if (tile.data()[0] != 2.0f || tile.data()[1] != 3.0f) {
@@ -269,8 +269,8 @@ int main() {
     }
 
     float target_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    Memory<GM, float> target(target_data, Vector{4}.data(), Vector{1}.data(), 1, MemoryFormat::Norm);
-    if (npu_demo::deslice(target, tile, {1}, {2}, {1}) != StatusCode::kOk) {
+    Memory<GM, float> target(target_data, {4}, {1}, MemoryFormat::Norm);
+    if (npu_demo::deslice(ctx, target, tile, {1}, {2}, {1}) != StatusCode::kOk) {
         return fail(6);
     }
     if (target_data[1] != 2.0f || target_data[2] != 3.0f) {
@@ -278,10 +278,10 @@ int main() {
     }
 
     float matrix_data[6] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
-    Memory<TSM, float> matrix(matrix_data, Vector{2, 3}.data(), Vector{3, 1}.data(), 2, MemoryFormat::Norm);
+    Memory<TSM, float> matrix(matrix_data, {2, 3}, {3, 1}, MemoryFormat::Norm);
     float transposed_data[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    Memory<GM, float> transposed(transposed_data, Vector{3, 2}.data(), Vector{2, 1}.data(), 2, MemoryFormat::Norm);
-    if (npu_demo::transpose(transposed, matrix, {1, 0}) != StatusCode::kOk) {
+    Memory<GM, float> transposed(transposed_data, {3, 2}, {2, 1}, MemoryFormat::Norm);
+    if (npu_demo::transpose(ctx, transposed, matrix, {1, 0}) != StatusCode::kOk) {
         return fail(8);
     }
     if (transposed_data[0] != 1.0f || transposed_data[1] != 4.0f ||
@@ -290,20 +290,10 @@ int main() {
         return fail(9);
     }
     float broadcast_source_data[2] = {5.0f, 7.0f};
-    Memory<TSM, float> broadcast_source(
-        broadcast_source_data,
-        Vector{2, 1}.data(),
-        Vector{1, 1}.data(),
-        2,
-        MemoryFormat::Norm);
+    Memory<TSM, float> broadcast_source(broadcast_source_data, {2, 1}, {1, 1}, MemoryFormat::Norm);
     float broadcast_target_data[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    Memory<TSM, float> broadcast_target(
-        broadcast_target_data,
-        Vector{2, 3}.data(),
-        Vector{3, 1}.data(),
-        2,
-        MemoryFormat::Norm);
-    if (npu_demo::broadcast<TSM, TSM, float, float>(broadcast_target, broadcast_source) != StatusCode::kOk) {
+    Memory<TSM, float> broadcast_target(broadcast_target_data, {2, 3}, {3, 1}, MemoryFormat::Norm);
+    if (npu_demo::broadcast<TSM, TSM, float, float>(ctx, broadcast_target, broadcast_source) != StatusCode::kOk) {
         return fail(10);
     }
     if (broadcast_target_data[0] != 5.0f || broadcast_target_data[1] != 5.0f ||
@@ -313,7 +303,7 @@ int main() {
     }
     float store_target_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     Memory<GM, float> store_target(store_target_data, {4}, {1}, MemoryFormat::Norm);
-    if (npu_demo::store(store_target, tile, {1}, {2}, {1}) != StatusCode::kOk) {
+    if (npu_demo::store(ctx, store_target, tile, {1}, {2}, {1}) != StatusCode::kOk) {
         return fail(12);
     }
     if (store_target_data[1] != 2.0f || store_target_data[2] != 3.0f) {
@@ -321,7 +311,7 @@ int main() {
     }
     int load_data[2] = {0, 0};
     Memory<TSM, int> load_target(load_data, {2}, {1}, MemoryFormat::Norm);
-    if (npu_demo::load(load_target, line, {1}, {2}, {1}) != StatusCode::kOk) {
+    if (npu_demo::load(ctx, load_target, line, {1}, {2}, {1}) != StatusCode::kOk) {
         return fail(14);
     }
     if (load_data[0] != 2 || load_data[1] != 3) {

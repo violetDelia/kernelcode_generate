@@ -117,7 +117,7 @@ def _walk_test_ops(op: Operation) -> list[Operation]:
     return items
 
 
-def _select_test_npu_demo_source_functions(module: ModuleOp) -> tuple[func.FuncOp, func.FuncOp]:
+def _select_test_npu_demo_source_functions(module: ModuleOp) -> tuple[func.FuncOp, list[func.FuncOp]]:
     """在测试内定位 npu_demo wrapper/body 函数。
 
 
@@ -125,7 +125,7 @@ def _select_test_npu_demo_source_functions(module: ModuleOp) -> tuple[func.FuncO
     - 只使用 lowered module 的公开 IR 结构，不调用 `main.py` 私有 helper。
 
     使用示例:
-    - wrapper, body = _select_test_npu_demo_source_functions(result.module)
+    - wrapper, bodies = _select_test_npu_demo_source_functions(result.module)
 
     关联文件:
     - spec: [`spec/pass/pipeline/npu_demo_lowering.md`](spec/pass/pipeline/npu_demo_lowering.md)
@@ -134,19 +134,46 @@ def _select_test_npu_demo_source_functions(module: ModuleOp) -> tuple[func.FuncO
     """
 
     func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
-    wrapper_funcs = [
-        func_op
-        for func_op in func_ops
-        if any(isinstance(inner, ArchLaunchOp) for inner in _walk_test_ops(func_op))
-    ]
+    wrapper_funcs: list[func.FuncOp] = []
+    for func_op in func_ops:
+        ops: list[Operation] = [func_op]
+        cursor = 0
+        has_launch = False
+        while cursor < len(ops):
+            current = ops[cursor]
+            cursor += 1
+            if isinstance(current, ArchLaunchOp):
+                has_launch = True
+            for region in current.regions:
+                for block in region.blocks:
+                    ops.extend(block.ops)
+        if has_launch:
+            wrapper_funcs.append(func_op)
     assert len(wrapper_funcs) == 1
     wrapper_func = wrapper_funcs[0]
-    launch_ops = [inner for inner in _walk_test_ops(wrapper_func) if isinstance(inner, ArchLaunchOp)]
-    assert len(launch_ops) == 1
-    callee_name = launch_ops[0].callee.root_reference.data
-    body_func = next((func_op for func_op in func_ops if func_op.sym_name.data == callee_name), None)
-    assert body_func is not None
-    return wrapper_func, body_func
+    wrapper_ops: list[Operation] = [wrapper_func]
+    cursor = 0
+    launch_ops: list[ArchLaunchOp] = []
+    while cursor < len(wrapper_ops):
+        current = wrapper_ops[cursor]
+        cursor += 1
+        if isinstance(current, ArchLaunchOp):
+            launch_ops.append(current)
+        for region in current.regions:
+            for block in region.blocks:
+                wrapper_ops.extend(block.ops)
+    assert len(launch_ops) >= 1
+    body_funcs: list[func.FuncOp] = []
+    seen_callee_names: set[str] = set()
+    for launch_op in launch_ops:
+        callee_name = launch_op.callee.root_reference.data
+        if callee_name in seen_callee_names:
+            continue
+        seen_callee_names.add(callee_name)
+        body_func = next((func_op for func_op in func_ops if func_op.sym_name.data == callee_name), None)
+        assert body_func is not None
+        body_funcs.append(body_func)
+    return wrapper_func, body_funcs
 
 
 def _extract_test_npu_demo_function_source(source: str, function_name: str) -> str:
@@ -216,9 +243,11 @@ def test_main_npu_demo_pipeline_prints_host_kernel_source_sections() -> None:
     assert "[SOURCE]" in stdout
     assert "[EXECUTE]" in stdout
     assert "[CHECK]" in stdout
-    assert "npu_demo::launch<c_0, c_1, c_2, c_3>(matmul_kernel_device" in stdout
-    assert "static void matmul_kernel_device(npu_demo::KernelContext& ctx" not in stdout
-    assert "static void matmul_kernel_device(" in stdout
+    assert "npu_demo::launch<2, 1, 1, 0, matmul_kernel_pattern0_device" in stdout
+    assert "npu_demo::launch<2, 1, 1, 0, matmul_kernel_pattern1_device" in stdout
+    assert "template <typename T1, typename T2, typename T3>\nvoid matmul_kernel_pattern0_device(npu_demo::KernelContext& ctx" in stdout
+    assert "template <typename T1, typename T2, typename T3>\nvoid matmul_kernel_pattern1_device(npu_demo::KernelContext& ctx" in stdout
+    assert "body<npu_demo::KernelContext>" not in stdout
     assert "_cost_DMA1_matmul_kernel_device" not in stdout
     assert "_cost_MAC_matmul_kernel_device" not in stdout
     assert "output matches torch.matmul" in stdout
@@ -259,15 +288,25 @@ def test_main_npu_demo_pipeline_helpers_split_wrapper_and_kernel_sources() -> No
         )
     finally:
         reset_config()
-    wrapper_func, body_func = _select_test_npu_demo_source_functions(result.module)
+    wrapper_func, body_funcs = _select_test_npu_demo_source_functions(result.module)
     host_source = _extract_test_npu_demo_function_source(result.source, wrapper_func.sym_name.data)
-    kernel_source = _extract_test_npu_demo_function_source(result.source, body_func.sym_name.data)
+    kernel_source = "\n\n".join(
+        _extract_test_npu_demo_function_source(result.source, body_func.sym_name.data)
+        for body_func in body_funcs
+    )
 
     assert wrapper_func.sym_name.data == "matmul_kernel"
-    assert body_func.sym_name.data == "matmul_kernel_device"
+    assert [body_func.sym_name.data for body_func in body_funcs] == [
+        "matmul_kernel_pattern0_device",
+        "matmul_kernel_pattern1_device",
+    ]
     assert "_cost_DMA1_matmul_kernel_device" not in result.source
     assert "_cost_MAC_matmul_kernel_device" not in result.source
     assert host_source.startswith("void matmul_kernel(")
-    assert "npu_demo::launch<c_0, c_1, c_2, c_3>(matmul_kernel_device" in host_source
-    assert kernel_source.startswith("static void matmul_kernel_device(")
-    assert "npu_demo::KernelContext& ctx" not in kernel_source
+    assert "npu_demo::KernelContext ctx;" in host_source
+    assert "npu_demo::launch<2, 1, 1, 0, matmul_kernel_pattern0_device" in host_source
+    assert "npu_demo::launch<2, 1, 1, 0, matmul_kernel_pattern1_device" in host_source
+    assert "template <typename T1, typename T2, typename T3>" in result.source
+    assert "template <typename T1, typename T2, typename T3, typename Context>" not in result.source
+    assert "void matmul_kernel_pattern0_device(npu_demo::KernelContext& ctx" in kernel_source
+    assert "void matmul_kernel_pattern1_device(npu_demo::KernelContext& ctx" in kernel_source

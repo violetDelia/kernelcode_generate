@@ -7,15 +7,13 @@
 - 当前成功路径覆盖 `tuner.cost(op_name="dma.copy") -> npu_demo::cost::copy(...)` 与 `tuner.cost(op_name="dma.slice" | "dma.deslice") -> npu_demo::cost::{slice, deslice}(...)`。
 - `slice` / `deslice` 成本 helper 的模板顺序与参数顺序必须与 `include/api/Dma.h` 对齐。
 - `DMA1/DMA2/DMA3/DMA4` 的命中由 `TargetSpace/SourceSpace` 判定；非命中 op-kind 组合稳定返回 `0`。
-- `alloc` 当前不属于成本 helper 输入域；`launch-kernel-cost-func` 现阶段不会为 `dma.alloc` 生成 `tuner.cost`。
+- `alloc` 当前不属于成本 helper 输入域；成本 helper 合同不为 `dma.alloc` 定义 `tuner.cost` 映射。
 
 ## API 列表
 
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::copy(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::slice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::slice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::deslice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::deslice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
 
 ## 文档信息
 
@@ -49,7 +47,7 @@
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 当前 `emit_c/gen_kernel(target="npu_demo")` 的 Dma 成本成功路径至少覆盖 `dma.copy -> cost::copy` 与 `dma.slice/deslice -> cost::slice/deslice`。
-- generated source 中 `cost::slice/deslice` layout 参数必须使用 `{...} /*offset*/`、`{...} /*size*/`、`{...} /*stride*/` brace-list 形态；不得泄漏 `Vector(...)`、`Vector{...}` 或局部 layout buffer。
+- `cost::slice/deslice` layout 参数类型为 `Vector`；rank 1..8 调用处可使用 `{...}` 构造临时 `Vector`，rank >8 按公开错误失败。
 - `alloc` 没有对应成本 helper；若后续需要表达分配成本，应在新专题里单独补公开合同。
 - `slice` / `deslice` 是 `npu-demo-lowering` pipeline 末尾 cost pass 的可发射成本 helper；不得扩展到 `alloc` 或未定义的 DMA 旧别名。
 - 成本 helper 不负责搬运真实数据，也不替代 [`spec/include/api/Dma.md`](../../../../spec/include/api/Dma.md) 的运行时 DMA public function。
@@ -96,24 +94,6 @@
 - 功能说明：定义 `tuner.cost(op_name="dma.slice")` 的稳定 C++ 成本 helper。
 - 注意事项：输入 memory、offset、size、stride 和 dtype 必须符合 DMA operation 合同；参数顺序与 [`spec/include/api/Dma.md`](../../../../spec/include/api/Dma.md) 的 `slice` 完全一致；模板顺序固定为 `TargetSpace -> SourceSpace -> T -> Kind`；不得扩展为 `alloc` 成本 helper 或未定义 DMA 旧别名；非法组合必须稳定失败。
 
-### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::slice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
-
-- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::slice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
-- 参数：
-  - `target`：目标 memory；类型 `const Memory<TargetSpace, T>&`。
-  - `source`：源 memory；类型 `const Memory<SourceSpace, T>&`。
-  - `offset`：切片起点；类型 `std::initializer_list<long long>`。
-  - `size`：切片大小；类型 `std::initializer_list<long long>`。
-  - `stride`：切片步长；类型 `std::initializer_list<long long>`。
-- 返回值：`S_INT`。
-- 使用示例：
-
-  ```cpp
-  S_INT slice_cost = cost::slice<TSM, GM, float, DMA1>(target, source, {0, 0}, {2, 4}, {1, 1});
-  ```
-- 功能说明：定义 `tuner.cost(op_name="dma.slice")` 的 brace-list 成本 helper。
-- 注意事项：本 overload 是 generated source layout brace-list 的稳定入口；非法长度、非正 `size/stride` 或未命中 kind/space 组合返回 `0`。
-
 ### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::deslice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
 
 - api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::deslice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
@@ -135,24 +115,6 @@
 - 功能说明：定义 `tuner.cost(op_name="dma.deslice")` 的稳定 C++ 成本 helper。
 - 注意事项：输入 memory、offset、size、stride 和 dtype 必须符合 DMA operation 合同；参数顺序与 [`spec/include/api/Dma.md`](../../../../spec/include/api/Dma.md) 的 `deslice` 完全一致；模板顺序固定为 `TargetSpace -> SourceSpace -> T -> Kind`；不得扩展为 `alloc` 成本 helper 或未定义 DMA 旧别名；非法组合必须稳定失败。
 
-### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::deslice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
-
-- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::deslice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
-- 参数：
-  - `target`：目标 memory；类型 `const Memory<TargetSpace, T>&`。
-  - `source`：源 memory；类型 `const Memory<SourceSpace, T>&`。
-  - `offset`：写回起点；类型 `std::initializer_list<long long>`。
-  - `size`：写回大小；类型 `std::initializer_list<long long>`。
-  - `stride`：写回步长；类型 `std::initializer_list<long long>`。
-- 返回值：`S_INT`。
-- 使用示例：
-
-  ```cpp
-  S_INT deslice_cost = cost::deslice<GM, TSM, float, DMA2>(target, source, {0, 0}, {2, 4}, {1, 1});
-  ```
-- 功能说明：定义 `tuner.cost(op_name="dma.deslice")` 的 brace-list 成本 helper。
-- 注意事项：本 overload 是 generated source layout brace-list 的稳定入口；非法长度、非正 `size/stride` 或未命中 kind/space 组合返回 `0`。
-
 ## 测试
 
 - 测试文件：
@@ -166,7 +128,7 @@
 
 ### 测试目标
 
-- 通过当前聚合入口 `test_include_api_cost_dma_signatures_compile` 一次性验证 `copy`、`slice`、`deslice` 及 brace-list overload 的模板顺序、参数顺序与 `S_INT` 返回合同。
+- 通过当前聚合入口 `test_include_api_cost_dma_signatures_compile` 一次性验证 `copy`、`slice`、`deslice` 的模板顺序、参数顺序与 `S_INT` 返回合同。
 - 验证 `tuner.cost(op_name="dma.copy" | "dma.slice" | "dma.deslice")` 的节点级文本发射。
 - 验证完整 cost function 生成后可消费 `cost::copy`。
 
@@ -175,6 +137,6 @@
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-COST-DMA-001 | 生成/编译 | `cost::copy` 独立实例化 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_include_api_cost_dma_signatures_compile`。 | 生成源码、IR 文本或编译结果体现“`cost::copy` 独立实例化”场景。 | `test_include_api_cost_dma_signatures_compile` |
-| TC-COST-DMA-002 | 生成/编译 | `cost::slice` / `cost::deslice` 独立实例化与 brace-list overload | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_include_api_cost_dma_signatures_compile`。 | 生成源码、IR 文本或编译结果体现 Vector 与 brace-list 两类成本 helper 均可实例化。 | `test_include_api_cost_dma_signatures_compile` |
+| TC-COST-DMA-002 | 生成/编译 | `cost::slice` / `cost::deslice` 独立实例化与 brace-list-to-Vector 绑定 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_include_api_cost_dma_signatures_compile`。 | 生成源码、IR 文本或编译结果体现 Vector 参数与 rank 1 brace-list 调用均可实例化。 | `test_include_api_cost_dma_signatures_compile` |
 | TC-COST-DMA-003 | pass 改写 | `emit_c` 节点级发射 `dma.copy` 成本调用 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tuner_cost_dma_copy`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`emit_c` 节点级发射 `dma.copy` 成本调用”场景。 | `test_emit_c_lowers_npu_demo_tuner_cost_dma_copy` |
 | TC-COST-DMA-004 | pass 改写 | `emit_c` 节点级发射 `dma.slice/deslice` 成本调用 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tuner_cost_dma_slice_and_deslice`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`emit_c` 节点级发射 `dma.slice/deslice` 成本调用”场景。 | `test_emit_c_lowers_npu_demo_tuner_cost_dma_slice_and_deslice` |

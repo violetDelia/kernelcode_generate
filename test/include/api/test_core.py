@@ -3,7 +3,7 @@
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 include/api/Core.h 的 Vector 与 Status 语义，并使用 include/npu_demo/Core.h 提供实现。
-- 覆盖 `Vector{...}` 与 `Vector values = {...}` 的 1..4 个 long long 固定参数构造。
+- 覆盖 `Vector{...}` 与 `Vector values = {...}` 的 1..8 个 long long 固定参数构造。
 
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路为 C++ 头文件，按规则豁免 `pytest-cov` 覆盖率统计。
@@ -184,13 +184,13 @@ int main() {
         return fail(3);
     }
 
-    long long four_expected[4] = {1, 2, 3, 4};
-    Vector full{1, 2, 3, 4};
-    if (expect_vector(full, 4, four_expected) != 0) {
+    long long eight_expected[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    Vector full{1, 2, 3, 4, 5, 6, 7, 8};
+    if (expect_vector(full, 8, eight_expected) != 0) {
         return fail(4);
     }
-    full[2] = 9;
-    if (full.data()[2] != 9) {
+    full[6] = 9;
+    if (full.data()[6] != 9) {
         return fail(5);
     }
 
@@ -202,10 +202,10 @@ int main() {
     }
 
     Vector assigned{0};
-    Vector assign_source{10, 11, 12, 13};
+    Vector assign_source{10, 11, 12, 13, 14, 15};
     assigned = assign_source;
     assign_source[0] = 100;
-    if (assigned.size() != 4 || assigned[0] != 10 || assigned[3] != 13) {
+    if (assigned.size() != 6 || assigned[0] != 10 || assigned[5] != 15) {
         return fail(7);
     }
 

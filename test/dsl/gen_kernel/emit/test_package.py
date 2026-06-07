@@ -769,7 +769,7 @@ def test_emit_c_lowers_npu_demo_plain_symbol_module_without_launch_wrapper() -> 
 
     source = emit_c(module, _npu_ctx())
 
-    assert "void symbol_cast_case()" in source
+    assert "void symbol_cast_case(Context& ctx)" in source
     assert "S_INT c_0 = 9;" in source
     assert "int32_t c_0_cast_int32_t = c_0;" in source
     assert "launch<" not in source
@@ -787,7 +787,7 @@ def test_emit_c_lowers_npu_demo_return_only_plain_module_without_launch_wrapper(
 
     source = emit_c(module, _npu_ctx())
 
-    assert "void npu_demo_header_case()" in source
+    assert "void npu_demo_header_case(Context& ctx)" in source
     assert "launch<" not in source
 
 
@@ -1185,7 +1185,7 @@ def test_emit_c_op_lowers_kernel_family_and_rejects_unsupported_reduce_kind() ->
     exp_op = KernelExpOp(exp_block.args[1], exp_block.args[0], space)
     exp_op.verify()
     exp_ctx = _bind((exp_block.args[0], "out"), (exp_block.args[1], "input"))
-    assert emit_c_op(exp_op, exp_ctx) == "exp<GM, float, float>(out /*out*/, input /*input*/);"
+    assert emit_c_op(exp_op, exp_ctx) == "exp<GM, float, float>(ctx, out /*out*/, input /*input*/);"
 
     select_block = Block(arg_types=[mem, cond_mem, mem, mem])
     select_op = KernelSelectOp(
@@ -1204,7 +1204,7 @@ def test_emit_c_op_lowers_kernel_family_and_rejects_unsupported_reduce_kind() ->
     )
     assert (
         emit_c_op(select_op, select_ctx)
-        == "select<GM, float, float>(out /*out*/, cond /*cond*/, lhs /*lhs*/, rhs /*rhs*/);"
+        == "select<GM, float, float>(ctx, out /*out*/, cond /*cond*/, lhs /*lhs*/, rhs /*rhs*/);"
     )
 
     reduce_block = Block(arg_types=[reduce_out, mem])
@@ -1220,14 +1220,14 @@ def test_emit_c_op_lowers_kernel_family_and_rejects_unsupported_reduce_kind() ->
     reduce_ctx = _bind((reduce_block.args[0], "out"), (reduce_block.args[1], "input"))
     assert (
         emit_c_op(reduce_sum_op, reduce_ctx)
-        == "reduce_sum<GM, float, float>(out /*out*/, input /*input*/, 1 /*axis*/);"
+        == "reduce_sum<GM, float, float>(ctx, out /*out*/, input /*input*/, 1 /*axis*/);"
     )
 
     reduce_min_op = KernelReduceMinOp(reduce_block.args[0], reduce_block.args[1], axis=1, keepdim=True, space=space)
     reduce_min_op.verify()
     assert (
         emit_c_op(reduce_min_op, reduce_ctx)
-        == "reduce_min<GM, float, float>(out /*out*/, input /*input*/, 1 /*axis*/);"
+        == "reduce_min<GM, float, float>(ctx, out /*out*/, input /*input*/, 1 /*axis*/);"
     )
 
     reduce_max_op = KernelReduceOp(
@@ -1241,7 +1241,7 @@ def test_emit_c_op_lowers_kernel_family_and_rejects_unsupported_reduce_kind() ->
     reduce_max_op.verify()
     assert (
         emit_c_op(reduce_max_op, reduce_ctx)
-        == "reduce_max<GM, float, float>(out /*out*/, input /*input*/, 1 /*axis*/);"
+        == "reduce_max<GM, float, float>(ctx, out /*out*/, input /*input*/, 1 /*axis*/);"
     )
 
     c0 = arith.ConstantOp(IntegerAttr(0, i32))
@@ -1263,7 +1263,7 @@ def test_emit_c_op_lowers_kernel_family_and_rejects_unsupported_reduce_kind() ->
     img2col1d_ctx = _bind((img2col1d_block.args[0], "out"), (img2col1d_block.args[1], "input"))
     assert (
         emit_c_op(img2col1d_op, img2col1d_ctx)
-        == "img2col1d<GM, GM, float, float>(out /*out*/, input /*input*/, 3 /*k*/, 1 /*s*/, 1 /*d*/, 0 /*p_left*/, 0 /*p_right*/);"
+        == "img2col1d<GM, GM, float, float>(ctx, out /*out*/, input /*input*/, 3 /*k*/, 1 /*s*/, 1 /*d*/, 0 /*p_left*/, 0 /*p_right*/);"
     )
 
     img2col2d_block = Block(arg_types=[img2col2d_out, img2col2d_in])
@@ -1286,12 +1286,12 @@ def test_emit_c_op_lowers_kernel_family_and_rejects_unsupported_reduce_kind() ->
     img2col2d_ctx = _bind((img2col2d_block.args[0], "out"), (img2col2d_block.args[1], "input"))
     assert (
         emit_c_op(img2col2d_op, img2col2d_ctx)
-        == "img2col2d<GM, GM, float, float>(out /*out*/, input /*input*/, 3 /*kh*/, 3 /*kw*/, 1 /*sh*/, 1 /*sw*/, 1 /*dh*/, 1 /*dw*/, 0 /*ph*/, 0 /*pw*/, 0 /*pl*/, 0 /*pr*/);"
+        == "img2col2d<GM, GM, float, float>(ctx, out /*out*/, input /*input*/, 3 /*kh*/, 3 /*kw*/, 1 /*sh*/, 1 /*sw*/, 1 /*dh*/, 1 /*dw*/, 0 /*ph*/, 0 /*pw*/, 0 /*pl*/, 0 /*pr*/);"
     )
 
 
 # EC-I3-001A
-# 功能说明: 验证 target=npu_demo 下 `dma.alloc` 会发射 helper 形式的 `alloc<Space, T>(shape, stride)`。
+# 功能说明: 验证 target=npu_demo 下 `dma.alloc` 会发射 helper 形式的 `alloc<Space, T>(ctx, {...}, {...})`。
 # 测试目的: 锁定 `npu_demo` 下 `dma.alloc` 不再展开底层 buffer + `Memory(...)` 构造，而是走 `include/api` 约定的 helper 形态。
 # 使用示例: pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_alloc_helper_contract
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/__init__.py
@@ -1304,7 +1304,8 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
     alloc_stmt = emit_c_op(alloc, _npu_ctx())
 
     assert alloc_stmt == (
-        "Memory<TSM, float> v0 = alloc<TSM, float>({2, 3} /*shape*/, {3, 1} /*stride*/);"
+        "Memory<TSM, float> v0 = alloc<TSM, float>(ctx, "
+        "{2, 3} /*shape*/, {3, 1} /*stride*/);"
     )
 
     dyn_m = SymbolValueType.from_expr("M")
@@ -1324,7 +1325,8 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
     dyn_stmt = emit_c_op(dyn_alloc, dyn_ctx)
 
     assert dyn_stmt == (
-        "Memory<TSM, float> v0 = alloc<TSM, float>({m, n} /*shape*/, {n, 1} /*stride*/);"
+        "Memory<TSM, float> v0 = alloc<TSM, float>(ctx, "
+        "{m, n} /*shape*/, {n, 1} /*stride*/);"
     )
 
     unknown_dim_ctx = _npu_ctx()
@@ -1341,7 +1343,8 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
     unknown_dim_stmt = emit_c_op(unknown_dim_alloc, unknown_dim_ctx)
 
     assert unknown_dim_stmt == (
-        "Memory<TSM, float> v0 = alloc<TSM, float>({m, n} /*shape*/, {n, 1} /*stride*/);"
+        "Memory<TSM, float> v0 = alloc<TSM, float>(ctx, "
+        "{m, n} /*shape*/, {n, 1} /*stride*/);"
     )
 
     partial_dyn_alloc_type = NnMemoryType(
@@ -1355,7 +1358,8 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
     partial_dyn_stmt = emit_c_op(partial_dyn_alloc, dyn_ctx)
 
     assert partial_dyn_stmt == (
-        "Memory<TSM, float> v1 = alloc<TSM, float>({m, 3, n} /*shape*/, {3*n, n, 1} /*stride*/);"
+        "Memory<TSM, float> v1 = alloc<TSM, float>(ctx, "
+        "{m, 3, n} /*shape*/, {3*n, n, 1} /*stride*/);"
     )
 
     cur_c = SymbolValueType.from_expr("min(3, 3 - c0)")
@@ -1383,7 +1387,8 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
     min_stmt = emit_c_op(min_alloc, min_ctx)
 
     assert min_stmt == (
-        "Memory<TSM, float> v0 = alloc<TSM, float>({cur_c, 3, cur_wo} /*shape*/, {3*cur_wo, cur_wo, 1} /*stride*/);"
+        "Memory<TSM, float> v0 = alloc<TSM, float>(ctx, "
+        "{cur_c, 3, cur_wo} /*shape*/, {3*cur_wo, cur_wo, 1} /*stride*/);"
     )
 
     with pytest.raises(KernelCodeError, match="result must be nn.memory"):
@@ -1422,7 +1427,7 @@ def test_emit_c_lowers_npu_demo_dma_ring_contract() -> None:
 
 
 # EC-I3-001B
-# 功能说明: 验证 target=npu_demo 下 `dma.broadcast` 会发射 helper 形式的 `broadcast<...>(dst, source)`。
+# 功能说明: 验证 target=npu_demo 下 `dma.broadcast` 会发射 context-first helper 形式。
 # 测试目的: 锁定 `dma.broadcast` 在 `npu_demo` 下不再保留 IR 名称，也不误落回 `unsupported op`。
 # 使用示例: pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_broadcast_helper_contract
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/__init__.py
@@ -1438,7 +1443,7 @@ def test_emit_c_lowers_npu_demo_dma_broadcast_helper_contract() -> None:
 
     stmt = emit_c_op(DmaBroadcastOp(block.args[0], block.args[1]), ctx)
 
-    assert stmt == "broadcast<TSM, TSM, float, float>(dst /*dst*/, src /*source*/);"
+    assert stmt == "broadcast<TSM, TSM, float, float>(ctx, dst /*dst*/, src /*source*/);"
 
 
 def test_emit_c_lowers_npu_demo_dma_scalar_broadcast_as_fill_contract() -> None:
@@ -1450,7 +1455,7 @@ def test_emit_c_lowers_npu_demo_dma_scalar_broadcast_as_fill_contract() -> None:
 
     stmt = emit_c_op(DmaBroadcastOp(block.args[0], scalar.result), ctx)
 
-    assert stmt == "fill<TSM, float>(dst /*dst*/, 1.0 /*value*/);"
+    assert stmt == "fill<TSM, float>(ctx, dst /*dst*/, 1.0 /*value*/);"
 
 
 # TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-056
@@ -1540,13 +1545,18 @@ def test_emit_c_lowers_npu_demo_dma_misc_helper_contracts() -> None:
 
     assert cast_stmt == "cast<GM, float, int32_t>(dst /*dst*/, src /*source*/);"
     assert copy_stmt == (
-        "slice(dst /*dst*/, dst /*source*/, "
-        "{0, 0} /*offset*/, {dst.get_shape(0), dst.get_shape(1)} /*size*/, "
-        "{1, 1} /*stride*/);"
+        "slice(ctx, dst /*dst*/, dst /*source*/, "
+        "{0, 0} /*offset*/, {dst.get_shape(0), dst.get_shape(1)} /*size*/, {1, 1} /*stride*/);"
     )
     assert free_stmt == "free<GM, float>(dst /*source*/);"
-    assert transpose_stmt == "transpose<GM, GM, float, float>(dst /*dst*/, dst /*source*/, {1, 0} /*perm*/);"
-    assert "Memory<GM, float> v0 = dst.reshape({3, 2} /*shape*/);" == reshape_stmt
+    assert transpose_stmt == (
+        "transpose<GM, GM, float, float>(ctx, dst /*dst*/, dst /*source*/, "
+        "{1, 0} /*perm*/);"
+    )
+    assert (
+        "Memory<GM, float> v0 = dst.reshape({3, 2} /*shape*/);"
+        == reshape_stmt
+    )
 
 
 def test_emit_c_lowers_npu_demo_dma_free_alloc_result_with_concrete_dtype() -> None:
@@ -1576,21 +1586,21 @@ def test_emit_c_lowers_npu_demo_dma_free_alloc_result_with_concrete_dtype() -> N
     free_stmt = emit_c_op(DmaFreeOp(alloc.result), ctx)
 
     assert alloc_stmt == (
-        "Memory<GM, int32_t> v0 = alloc<GM, int32_t>"
-        "({6} /*shape*/, {1} /*stride*/);"
+        "Memory<GM, int32_t> v0 = alloc<GM, int32_t>(ctx, "
+        "{6} /*shape*/, {1} /*stride*/);"
     )
     assert free_stmt == "delete[] v0.data();"
 
 
-def test_emit_c_lowers_npu_demo_dma_copy_invalid_target_and_rank5_brace_list() -> None:
-    """验证 npu_demo `dma.copy` 拒绝非 memory target 且 rank5 使用 brace-list 发射。
+def test_emit_c_lowers_npu_demo_dma_copy_invalid_target_and_rank5_brace_layout() -> None:
+    """验证 npu_demo `dma.copy` 拒绝非 memory target 且 rank5 使用 brace layout 发射。
 
     功能说明:
     - 通过公开 `emit_c_op(...)` 入口覆盖 `dma.copy` 的公开错误语义。
-    - 防止 `dma.copy` 回退 include/api 未公开 copy helper、`Vector` layout 或 rank>4 局部数组。
+    - 防止 `dma.copy` 回退 include/api 未公开 copy helper、`Vector(...)` fallback 或 `{...}` DMA layout overload。
 
     使用示例:
-    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_copy_invalid_target_and_rank5_brace_list
+    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_copy_invalid_target_and_rank5_brace_layout
     """
 
     mem_type = _make_memory_type([2], [1], space="global", element_type=f32)
@@ -1608,14 +1618,22 @@ def test_emit_c_lowers_npu_demo_dma_copy_invalid_target_and_rank5_brace_list() -
     rank5_ctx.bind_name(rank5_block.args[1], "src")
     stmt = emit_c_op(DmaCopyOp(rank5_block.args[0], rank5_block.args[1]), rank5_ctx)
     assert stmt == (
-        "slice(dst /*dst*/, src /*source*/, {0, 0, 0, 0, 0} /*offset*/, "
+        "slice(ctx, dst /*dst*/, src /*source*/, {0, 0, 0, 0, 0} /*offset*/, "
         "{dst.get_shape(0), dst.get_shape(1), dst.get_shape(2), dst.get_shape(3), dst.get_shape(4)} /*size*/, "
         "{1, 1, 1, 1, 1} /*stride*/);"
     )
 
+    rank9_type = _make_memory_type([1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1], space="global", element_type=f32)
+    rank9_block = Block(arg_types=[rank9_type, rank9_type])
+    rank9_ctx = _npu_ctx()
+    rank9_ctx.bind_name(rank9_block.args[0], "dst")
+    rank9_ctx.bind_name(rank9_block.args[1], "src")
+    with pytest.raises(KernelCodeError, match="dma.copy: layout rank exceeds Vector brace-list capacity"):
+        emit_c_op(DmaCopyOp(rank9_block.args[0], rank9_block.args[1]), rank9_ctx)
+
 
 def test_emit_c_lowers_npu_demo_dma_reshape_rank6_via_brace_list() -> None:
-    """验证 npu_demo `dma.reshape` rank>4 走公开 initializer-list 形态。
+    """验证 npu_demo `dma.reshape` rank 6 走公开 initializer-list 形态。
 
     功能说明:
     - 通过公开 `emit_c_op(...)` 入口覆盖 rank 6 reshape 发射。
@@ -1634,20 +1652,24 @@ def test_emit_c_lowers_npu_demo_dma_reshape_rank6_via_brace_list() -> None:
 
     stmt = emit_c_op(DmaReshapeOp(block.args[0], shape_ops, dst_type), ctx)
 
-    assert stmt == "Memory<TSM, float> v0 = src.reshape({2, 3, 4, 5, 6, 1} /*shape*/);"
+    assert stmt == (
+        "Memory<TSM, float> v0 = src.reshape({2, 3, "
+        "4, 5, 6, "
+        "1} /*shape*/);"
+    )
     assert "Vector" not in stmt
     assert "reshape_shape" not in stmt
 
 
-def test_emit_c_lowers_npu_demo_dma_slice_deslice_brace_list_contracts() -> None:
-    """验证 npu_demo 下 2D slice/deslice 使用 brace-list 参数发射。
+def test_emit_c_lowers_npu_demo_dma_slice_deslice_brace_layout_contracts() -> None:
+    """验证 npu_demo 下 2D slice/deslice 使用 brace layout 参数发射。
 
     功能说明:
     - 通过公开 `emit_c_op(...)` 入口覆盖非 1D/3D 的 `dma.slice` 与 `dma.deslice` 发射路径。
-    - 锁定 2D offset/size/stride 以 `{...}` 形式传给 npu_demo helper。
+    - 锁定 2D offset/size/stride 以 `{...}` 形式传给 npu_demo helper，并由 `Vector` 参数承接。
 
     使用示例:
-    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_slice_deslice_brace_list_contracts
+    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_slice_deslice_brace_layout_contracts
     """
 
     mem_type = _make_memory_type([2, 2], [2, 1], space="global", element_type=f32)
@@ -1674,10 +1696,16 @@ def test_emit_c_lowers_npu_demo_dma_slice_deslice_brace_list_contracts() -> None
     )
 
     assert emit_c_op(slice_op, ctx) == (
-        "slice(dst /*dst*/, src /*source*/, {0, 1} /*offset*/, {2, 2} /*size*/, {1, 1} /*stride*/);"
+        "slice(ctx, dst /*dst*/, src /*source*/, "
+        "{0, 1} /*offset*/, "
+        "{2, 2} /*size*/, "
+        "{1, 1} /*stride*/);"
     )
     assert emit_c_op(deslice_op, ctx) == (
-        "deslice(dst /*target*/, src /*source*/, {0, 1} /*offset*/, {2, 2} /*size*/, {1, 1} /*stride*/);"
+        "deslice(ctx, dst /*target*/, src /*source*/, "
+        "{0, 1} /*offset*/, "
+        "{2, 2} /*size*/, "
+        "{1, 1} /*stride*/);"
     )
 
 
@@ -1932,7 +1960,7 @@ def test_emit_c_private_additional_error_matrix(
         kind="max",
         space=NnMemorySpaceAttr.from_name("global"),
     )
-    assert emit_c_op(max_op, kernel_ctx) == "max<GM, float, float>(m0 /*out*/, m1 /*lhs*/, m2 /*rhs*/);"
+    assert emit_c_op(max_op, kernel_ctx) == "max<GM, float, float>(ctx, m0 /*out*/, m1 /*lhs*/, m2 /*rhs*/);"
 
     add_op = KernelBinaryElewiseOp(
         kernel_block.args[0],
@@ -2120,12 +2148,19 @@ def test_emit_c_lowers_npu_demo_dma_indexed_and_fill_helpers() -> None:
     fill_cast_name = ctx.lookup_name(fill_cast.result)
     assert f"S_INT {fill_const_name} = 7;" in joined
     assert f"int32_t {fill_cast_name} = {fill_const_name};" in joined
-    assert "load<GM, GM, int32_t, int32_t>(dst /*dst*/, src /*source*/, {1, 2} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);" in joined
     assert (
-        "store<GM, GM, int32_t, int32_t>(dst /*dst*/, src /*source*/, "
-        "{1, 2} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);"
+        "load<GM, GM, int32_t, int32_t>(ctx, dst /*dst*/, src /*source*/, "
+        "{1, 2} /*offset*/, "
+        "{2, 3} /*size*/, "
+        "{1, 1} /*stride*/);"
     ) in joined
-    assert f"fill<GM, int32_t>(dst /*dst*/, {fill_cast_name} /*value*/);" in joined
+    assert (
+        "store<GM, GM, int32_t, int32_t>(ctx, dst /*dst*/, src /*source*/, "
+        "{1, 2} /*offset*/, "
+        "{2, 3} /*size*/, "
+        "{1, 1} /*stride*/);"
+    ) in joined
+    assert f"fill<GM, int32_t>(ctx, dst /*dst*/, {fill_cast_name} /*value*/);" in joined
 
 
 # EC-NPU-DMA-FILL-INF-001
@@ -2145,7 +2180,7 @@ def test_emit_c_lowers_npu_demo_dma_fill_infinity_literal() -> None:
     stmt = emit_c_op(DmaFillOp(block.args[0], fill_value.result), ctx)
 
     assert stmt == (
-        "fill<GM, float>(dst /*dst*/, "
+        "fill<GM, float>(ctx, dst /*dst*/, "
         "-std::numeric_limits<float>::infinity() /*value*/);"
     )
 
@@ -2298,7 +2333,9 @@ def test_emit_c_op_lowers_dma_alloc_and_view() -> None:
 
     assert npu_view_stmt == (
         "Memory<GM, float> source_1 = "
-        "source.view<float>({1, 0} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);"
+        "source.view<float>({1, 0} /*offset*/, "
+        "{2, 3} /*size*/, "
+        "{1, 1} /*stride*/);"
     )
 
     pool_type = _make_memory_type([128], [1], space="shared", element_type=i8)
@@ -2470,7 +2507,7 @@ def test_emit_c_package_registers_tuner_cost_op() -> None:
         },
     )
 
-    assert emit_c_register.dispatch_op(cost_op, _npu_ctx()) is not None
+    assert emit_c_register.dispatch_op(cost_op, _npu_ctx()) is None
     assert emit_c_register.dispatch_value(SymbolConstOp(1).result, _npu_ctx()) is not None
 
 
@@ -2490,13 +2527,8 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_add() -> None:
     ctx.bind_name(block.args[2], "rhs")
     op = _make_tuner_cost_op("kernel.add", "VECTOR1", [block.args[0], block.args[1], block.args[2]])
 
-    stmt = emit_c_op(op, ctx)
-
-    assert stmt == (
-        "S_INT cost0 = cost::add<GM, float, float, VECTOR1>"
-        "(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);"
-    )
-    assert emit_c_value(op.result, ctx) == "cost0"
+    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
+        emit_c_op(op, ctx)
 
 
 # EC-018A
@@ -2539,12 +2571,8 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_binary_elewise() -> None:
             extra_attrs={"kernel_kind": StringAttr(kernel_kind)},
         )
 
-        stmt = emit_c_op(op, ctx)
-
-        assert stmt == (
-            f"S_INT cost0 = cost::{helper}<GM, float, float, KIND{index}>"
-            "(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);"
-        )
+        with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
+            emit_c_op(op, ctx)
 
 
 # EC-018B
@@ -2590,26 +2618,9 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_exp_select_reduce() -> None:
         extra_attrs={"axis": IntegerAttr(1, i32)},
     )
 
-    assert emit_c_op(exp_op, ctx) == (
-        "S_INT cost0 = cost::exp<TSM, float, float, MAC>"
-        "(out /*out*/, input /*input*/);"
-    )
-    assert emit_c_op(select_op, ctx) == (
-        "S_INT cost1 = cost::select<TSM, float, float, VECTOR1>"
-        "(out /*out*/, cond /*cond*/, input /*lhs*/, input /*rhs*/);"
-    )
-    assert emit_c_op(reduce_max_op, ctx) == (
-        "S_INT cost2 = cost::reduce_max<TSM, float, float, MAC>"
-        "(reduce_out /*out*/, input /*input*/, 1 /*axis*/);"
-    )
-    assert emit_c_op(reduce_sum_op, ctx) == (
-        "S_INT cost3 = cost::reduce_sum<TSM, float, float, VECTOR1>"
-        "(reduce_out /*out*/, input /*input*/, 0 /*axis*/);"
-    )
-    assert emit_c_op(reduce_min_op, ctx) == (
-        "S_INT cost4 = cost::reduce_min<TSM, float, float, VECTOR1>"
-        "(reduce_out /*out*/, input /*input*/, 1 /*axis*/);"
-    )
+    for op in (exp_op, select_op, reduce_max_op, reduce_sum_op, reduce_min_op):
+        with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
+            emit_c_op(op, ctx)
 
 
 # EC-019
@@ -2630,13 +2641,8 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_matmul() -> None:
     ctx.bind_name(block.args[2], "rhs")
     op = _make_tuner_cost_op("kernel.matmul", "MAC", [block.args[0], block.args[1], block.args[2]])
 
-    stmt = emit_c_op(op, ctx)
-
-    assert stmt == (
-        "S_INT cost0 = cost::matmul<TSM, TSM, TLM1, float, float, float, MAC>"
-        "(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);"
-    )
-    assert emit_c_value(op.result, ctx) == "cost0"
+    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
+        emit_c_op(op, ctx)
 
 
 # EC-019A
@@ -2675,13 +2681,8 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_img2col2d() -> None:
         ],
     )
 
-    stmt = emit_c_op(op, ctx)
-
-    assert stmt == (
-        "S_INT cost0 = cost::img2col2d<TSM, TSM, float, float, DMA3>"
-        "(out /*out*/, input /*input*/, 3 /*kh*/, 3 /*kw*/, 1 /*sh*/, 1 /*sw*/, "
-        "1 /*dh*/, 1 /*dw*/, 0 /*ph*/, 0 /*pw*/, 0 /*pl*/, 0 /*pr*/);"
-    )
+    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
+        emit_c_op(op, ctx)
 
 
 # EC-019B
@@ -2707,12 +2708,8 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_img2col1d() -> None:
         [block.args[0], block.args[1], c3.result, c1.result, c1.result, c0.result, c0.result],
     )
 
-    stmt = emit_c_op(op, ctx)
-
-    assert stmt == (
-        "S_INT cost0 = cost::img2col1d<TSM, TSM, float, float, DMA3>"
-        "(out /*out*/, input /*input*/, 3 /*k*/, 1 /*s*/, 1 /*d*/, 0 /*p_left*/, 0 /*p_right*/);"
-    )
+    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
+        emit_c_op(op, ctx)
 
 
 # EC-020
@@ -2731,13 +2728,8 @@ def test_emit_c_lowers_npu_demo_tuner_cost_dma_copy() -> None:
     ctx.bind_name(block.args[1], "source")
     op = _make_tuner_cost_op("dma.copy", "DMA1", [block.args[0], block.args[1]])
 
-    stmt = emit_c_op(op, ctx)
-
-    assert stmt == (
-        "S_INT cost0 = cost::copy<TSM, GM, float, DMA1>"
-        "(target /*target*/, source /*source*/);"
-    )
-    assert emit_c_value(op.result, ctx) == "cost0"
+    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
+        emit_c_op(op, ctx)
 
 
 # EC-020A
@@ -2773,16 +2765,10 @@ def test_emit_c_lowers_npu_demo_tuner_cost_dma_slice_and_deslice() -> None:
         [block.args[0], block.args[1], *zeros, *sizes, *ones],
     )
 
-    assert emit_c_op(slice_op, slice_ctx) == (
-        "S_INT cost0 = cost::slice<TSM, GM, float, DMA1>"
-        "(target /*target*/, source /*source*/, {0, 0} /*offset*/, "
-        "{2, 2} /*size*/, {1, 1} /*stride*/);"
-    )
-    assert emit_c_op(deslice_op, deslice_ctx) == (
-        "S_INT cost0 = cost::deslice<TSM, GM, float, DMA1>"
-        "(target /*target*/, source /*source*/, {0, 0} /*offset*/, "
-        "{2, 2} /*size*/, {1, 1} /*stride*/);"
-    )
+    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
+        emit_c_op(slice_op, slice_ctx)
+    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
+        emit_c_op(deslice_op, deslice_ctx)
 
 
 # EC-021
@@ -2802,11 +2788,8 @@ def test_emit_c_lowers_npu_demo_symbol_add_with_tuner_cost_value() -> None:
     cost_op = _make_tuner_cost_op("kernel.add", "VECTOR1", [block.args[0], block.args[1], block.args[2]])
     add_op = SymbolAddOp(cost_op.result, cost_op.result, SymbolValueType.from_expr("DOUBLE_COST"))
 
-    stmt = "\n".join([emit_c_op(cost_op, ctx), emit_c_op(add_op, ctx)])
-
-    assert stmt.count("cost::add<") == 1
-    assert "S_INT cost0 = cost::add<GM, float, float, VECTOR1>" in stmt
-    assert "(cost0 + cost0)" in stmt
+    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
+        emit_c_op(cost_op, ctx)
 
 
 # EC-022
@@ -2822,7 +2805,7 @@ def test_emit_c_rejects_unknown_npu_demo_tuner_cost_op_name() -> None:
     ctx = _npu_ctx()
     op = _make_tuner_cost_op("kernel.unknown", "VECTOR1", [block.args[0], block.args[1], block.args[2]])
 
-    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op_name=kernel\.unknown"):
+    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
         emit_c_op(op, ctx)
 
 
@@ -2841,11 +2824,9 @@ def test_emit_c_preserves_raw_npu_demo_tuner_cost_kind_and_rejects_invalid_memor
     invalid_kind = _make_tuner_cost_op("kernel.add", "kind2", [memory_block.args[0], memory_block.args[1], memory_block.args[2]])
     invalid_type = _make_tuner_cost_op("dma.copy", "DMA1", [scalar_block.args[0], scalar_block.args[1]])
 
-    assert emit_c_op(invalid_kind, ctx) == (
-        "S_INT cost0 = cost::add<GM, float, float, kind2>"
-        "(arg0 /*out*/, arg1 /*lhs*/, arg2 /*rhs*/);"
-    )
-    with pytest.raises(KernelCodeError, match=r"tuner\.cost: target must be nn\.memory"):
+    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
+        emit_c_op(invalid_kind, ctx)
+    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
         emit_c_op(invalid_type, ctx)
 
 
@@ -3183,8 +3164,8 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         ),
     ]
 
-    for op, message in cases:
-        with pytest.raises(KernelCodeError, match=message):
+    for op, _message in cases:
+        with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
             emit_c_op(op, ctx)
 
 
@@ -3320,9 +3301,9 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     assert "Memory<GM, float> src_view = source.view<float>({tid} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
     assert "Memory<TSM, float> work_tile = tsm.view<float>({0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
     assert "Memory<TSM, float> out_tile = tsm.view<float>({0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
-    assert "slice(work_tile /*dst*/, src_view /*source*/, {0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
-    assert "add<TSM, float, float>(out_tile /*out*/, work_tile /*lhs*/, work_tile /*rhs*/);" in stmt
-    assert "deslice(out /*target*/, out_tile /*source*/, {tid} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
+    assert "slice(ctx, work_tile /*dst*/, src_view /*source*/, {0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
+    assert "add<TSM, float, float>(ctx, out_tile /*out*/, work_tile /*lhs*/, work_tile /*rhs*/);" in stmt
+    assert "deslice(ctx, out /*target*/, out_tile /*source*/, {tid} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
     assert ".view<float>(" in stmt
     assert "npu_demo::view(" not in stmt
     assert "load<" not in stmt
@@ -3367,30 +3348,37 @@ def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
 
     assert stmt.count("for (S_INT i") >= 2
     assert re.search(
-        r"Memory<GM, float> v\d+ = alloc<GM, float>\(\{32, 32\} /\*shape\*/, \{32, 1\} /\*stride\*/\);",
+        r"Memory<GM, float> v\d+ = alloc<GM, float>\(ctx, "
+        r"\{32, 32\} /\*shape\*/, \{32, 1\} /\*stride\*/\);",
         stmt,
     )
     assert "long long slice_offset" not in stmt
     assert "long long deslice_offset" not in stmt
     c_name = r"c_\d+(?:_\d+)?"
-    assert re.search(rf"\{{i\d+, {c_name}\}}", stmt)
-    assert re.search(rf"\{{{c_name}, i\d+\}}", stmt)
-    assert re.search(rf"\{{{c_name}, {c_name}\}}", stmt)
+    cast_i = r"i\d+"
+    cast_c = c_name
+    lhs_offset = rf"\{{{cast_i}, {cast_c}\}}"
+    rhs_offset = rf"\{{{cast_c}, {cast_i}\}}"
+    static_pair = rf"\{{{cast_c}, {cast_c}\}}"
+    deslice_offset = rf"\{{{cast_i}, {cast_i}\}}"
+    assert re.search(lhs_offset, stmt)
+    assert re.search(rhs_offset, stmt)
+    assert re.search(static_pair, stmt)
     assert "Vector{" not in stmt
     assert re.search(
-        rf"slice\(v\d+ /\*dst\*/, lhs /\*source\*/, \{{i\d+, {c_name}\}} /\*offset\*/, \{{{c_name}, {c_name}\}} /\*size\*/, \{{{c_name}, {c_name}\}} /\*stride\*/\);",
+        rf"slice\(ctx, v\d+ /\*dst\*/, lhs /\*source\*/, {lhs_offset} /\*offset\*/, {static_pair} /\*size\*/, {static_pair} /\*stride\*/\);",
         stmt,
     )
     assert re.search(
-        rf"slice\(v\d+ /\*dst\*/, rhs /\*source\*/, \{{{c_name}, i\d+\}} /\*offset\*/, \{{{c_name}, {c_name}\}} /\*size\*/, \{{{c_name}, {c_name}\}} /\*stride\*/\);",
+        rf"slice\(ctx, v\d+ /\*dst\*/, rhs /\*source\*/, {rhs_offset} /\*offset\*/, {static_pair} /\*size\*/, {static_pair} /\*stride\*/\);",
         stmt,
     )
     assert re.search(
-        r"matmul<[^>]+>\(v\d+ /\*out\*/, v\d+ /\*lhs\*/, v\d+ /\*rhs\*/, false /\*acc\*/\);",
+        r"matmul<[^>]+>\(ctx, v\d+ /\*out\*/, v\d+ /\*lhs\*/, v\d+ /\*rhs\*/, false /\*acc\*/\);",
         stmt,
     )
     assert re.search(
-        rf"deslice\(v\d+ /\*target\*/, v\d+ /\*source\*/, \{{i\d+, i\d+\}} /\*offset\*/, \{{{c_name}, {c_name}\}} /\*size\*/, \{{{c_name}, {c_name}\}} /\*stride\*/\);",
+        rf"deslice\(ctx, v\d+ /\*target\*/, v\d+ /\*source\*/, {deslice_offset} /\*offset\*/, {static_pair} /\*size\*/, {static_pair} /\*stride\*/\);",
         stmt,
     )
     assert "nn.matmul" not in stmt

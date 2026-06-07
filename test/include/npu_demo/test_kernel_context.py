@@ -117,6 +117,44 @@ def _compile_and_run(source: str) -> None:
             )
 
 
+def _compile_expect_failure(source: str) -> str:
+    """编译 C++ 测试片段并返回预期失败的 stderr。
+
+    功能说明:
+    - 用于验证被删除的旧公开调用面不能再通过编译。
+
+    使用示例:
+    - stderr = _compile_expect_failure("int main() { return missing; }")
+
+    关联文件:
+    - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+    - test: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+    - 功能实现: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source_path = Path(tmpdir) / "npu_demo_kernel_context_negative.cpp"
+        binary_path = Path(tmpdir) / "npu_demo_kernel_context_negative"
+        source_path.write_text(source, encoding="utf-8")
+        compile_result = subprocess.run(
+            [
+                "g++",
+                "-std=c++17",
+                "-pthread",
+                "-I",
+                str(REPO_ROOT),
+                str(source_path),
+                "-o",
+                str(binary_path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if compile_result.returncode == 0:
+            raise AssertionError("expected g++ compile failure, but compile succeeded")
+        return compile_result.stderr
+
+
 # NPU-DEMO-KC-001
 # 测试目的: 验证 launched body 中的 KernelContext 查询返回本次 launch 的运行时 extent 与索引。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_runtime_view_tracks_launch_extent
@@ -132,36 +170,26 @@ static int fail(int code) { return code; }
 static void kernel_body(
     npu_demo::KernelContext& ctx,
     long long* block_ids,
-    long long* block_nums,
     long long* thread_ids,
-    long long* thread_nums,
-    long long* subthread_ids,
-    long long* subthread_nums) {
+    long long* thread_nums) {
+    (void)ctx;
     const long long bid = block_id();
-    block_ids[bid] = ctx.block_id();
-    block_nums[bid] = ctx.block_num();
+    block_ids[bid] = npu_demo::block_id();
     thread_ids[bid] = thread_id();
     thread_nums[bid] = thread_num();
-    subthread_ids[bid] = ctx.subthread_id();
-    subthread_nums[bid] = ctx.subthread_num();
 }
 
 int main() {
+    npu_demo::KernelContext ctx;
     long long block_ids[2] = {-1, -1};
-    long long block_nums[2] = {0, 0};
     long long thread_ids[2] = {-1, -1};
     long long thread_nums[2] = {0, 0};
-    long long subthread_ids[2] = {-1, -1};
-    long long subthread_nums[2] = {0, 0};
 
-    if (npu_demo::launch<2, 1, 1, 0>(
-            kernel_body,
+    if (npu_demo::launch<2, 1, 1, 0, kernel_body>(
+            ctx,
             block_ids,
-            block_nums,
             thread_ids,
-            thread_nums,
-            subthread_ids,
-            subthread_nums)
+            thread_nums)
         != StatusCode::kOk) {
         return fail(1);
     }
@@ -170,20 +198,11 @@ int main() {
         if (block_ids[i] != i) {
             return fail(2);
         }
-        if (block_nums[i] != 2) {
-            return fail(3);
-        }
         if (thread_ids[i] != 0) {
             return fail(4);
         }
         if (thread_nums[i] != 1) {
             return fail(5);
-        }
-        if (subthread_ids[i] != 0) {
-            return fail(6);
-        }
-        if (subthread_nums[i] != 1) {
-            return fail(7);
         }
     }
     return 0;
@@ -193,16 +212,15 @@ int main() {
 
 
 # NPU-DEMO-KC-001B
-# 测试目的: 验证 npu_demo::launch 支持无显式 KernelContext 参数的 callee，并通过 free helper 读取活动上下文。
-# 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_launch_accepts_context_free_callee_with_free_helpers
+# 测试目的: 验证 npu_demo::launch 不再支持无显式 KernelContext 参数的 callee。
+# 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_launch_rejects_context_free_callee
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
 # 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
-def test_npu_demo_launch_accepts_context_free_callee_with_free_helpers() -> None:
-    source = r"""
+def test_npu_demo_launch_rejects_context_free_callee() -> None:
+    stderr = _compile_expect_failure(
+        r"""
 #include "include/npu_demo/npu_demo.h"
-
-static int fail(int code) { return code; }
 
 static void kernel_body(long long* block_ids, long long* thread_ids, long long* thread_nums, long long* after_barrier) {
     const long long bid = npu_demo::block_id();
@@ -214,34 +232,20 @@ static void kernel_body(long long* block_ids, long long* thread_ids, long long* 
 }
 
 int main() {
+    npu_demo::KernelContext ctx;
     long long block_ids[2] = {-1, -1};
     long long thread_ids[2] = {-1, -1};
     long long thread_nums[2] = {0, 0};
     long long after_barrier[2] = {0, 0};
-
-    if (npu_demo::launch<2, 1, 1, 0>(kernel_body, block_ids, thread_ids, thread_nums, after_barrier) != StatusCode::kOk) {
-        return fail(1);
-    }
-
-    for (long long i = 0; i < 2; ++i) {
-        if (block_ids[i] != i) {
-            return fail(10 + static_cast<int>(i));
-        }
-        if (thread_ids[i] != 0) {
-            return fail(20 + static_cast<int>(i));
-        }
-        if (thread_nums[i] != 1 || after_barrier[i] != 1) {
-            return fail(20 + static_cast<int>(i));
-        }
-    }
-    return 0;
+    return npu_demo::launch<2, 1, 1, 0, kernel_body>(ctx, block_ids, thread_ids, thread_nums, after_barrier);
 }
 """
-    _compile_and_run(source)
+    )
+    assert "launch name must accept Context& plus args" in stderr
 
 
 # NPU-DEMO-KC-001A
-# 测试目的: 验证 KernelContext::barrier 需要显式 visibility / scope，且只接受 {BarrierVisibility::TSM, BarrierVisibility::TLM} + BLOCK。
+# 测试目的: 验证 npu_demo::barrier 需要显式 visibility / scope，且只接受 {BarrierVisibility::TSM, BarrierVisibility::TLM} + BLOCK。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_barrier_requires_visibility_and_block_scope
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -260,13 +264,14 @@ static bool contains(const std::string& value, const char* needle) {
 }
 
 static void kernel_body(npu_demo::KernelContext& ctx, int* result_code) {
-    ctx.barrier({BarrierVisibility::TLM, BarrierVisibility::TSM}, BarrierScope::BLOCK);
-    if (ctx.thread_id() != 0) {
+    (void)ctx;
+    npu_demo::barrier({BarrierVisibility::TLM, BarrierVisibility::TSM}, BarrierScope::BLOCK);
+    if (npu_demo::thread_id() != 0) {
         return;
     }
 
     try {
-        ctx.barrier({}, BarrierScope::BLOCK);
+        npu_demo::barrier({}, BarrierScope::BLOCK);
         *result_code = 1;
         return;
     } catch (const std::invalid_argument& err) {
@@ -277,7 +282,7 @@ static void kernel_body(npu_demo::KernelContext& ctx, int* result_code) {
     }
 
     try {
-        ctx.barrier({BarrierVisibility::TSM}, BarrierScope::BLOCK);
+        npu_demo::barrier({BarrierVisibility::TSM}, BarrierScope::BLOCK);
         *result_code = 3;
         return;
     } catch (const std::invalid_argument& err) {
@@ -288,7 +293,7 @@ static void kernel_body(npu_demo::KernelContext& ctx, int* result_code) {
     }
 
     try {
-        ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TSM}, BarrierScope::BLOCK);
+        npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TSM}, BarrierScope::BLOCK);
         *result_code = 5;
         return;
     } catch (const std::invalid_argument& err) {
@@ -299,7 +304,7 @@ static void kernel_body(npu_demo::KernelContext& ctx, int* result_code) {
     }
 
     try {
-        ctx.barrier({BarrierVisibility::TSM, static_cast<BarrierVisibility>(-1)}, BarrierScope::BLOCK);
+        npu_demo::barrier({BarrierVisibility::TSM, static_cast<BarrierVisibility>(-1)}, BarrierScope::BLOCK);
         *result_code = 7;
         return;
     } catch (const std::invalid_argument& err) {
@@ -310,7 +315,7 @@ static void kernel_body(npu_demo::KernelContext& ctx, int* result_code) {
     }
 
     try {
-        ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::THREAD);
+        npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::THREAD);
         *result_code = 9;
         return;
     } catch (const std::invalid_argument& err) {
@@ -324,8 +329,9 @@ static void kernel_body(npu_demo::KernelContext& ctx, int* result_code) {
 }
 
 int main() {
+    npu_demo::KernelContext ctx;
     int result_code = 99;
-    if (npu_demo::launch<2, 1, 1, 0>(kernel_body, &result_code) != StatusCode::kOk) {
+    if (npu_demo::launch<2, 1, 1, 0, kernel_body>(ctx, &result_code) != StatusCode::kOk) {
         return fail(11);
     }
     if (result_code != 0) {
@@ -354,25 +360,26 @@ static void noop(npu_demo::KernelContext& ctx) {
 }
 
 int main() {
-    if (npu_demo::launch<2, 1, 1, 0>(noop) != StatusCode::kOk) {
+    npu_demo::KernelContext ctx;
+    if (npu_demo::launch<2, 1, 1, 0, noop>(ctx) != StatusCode::kOk) {
         return fail(1);
     }
-    if (npu_demo::launch<1, 1, 1, 0>(noop) != StatusCode::kOk) {
+    if (npu_demo::launch<1, 1, 1, 0, noop>(ctx) != StatusCode::kOk) {
         return fail(6);
     }
-    if (npu_demo::launch<3, 1, 1, 0>(noop) != StatusCode::kError) {
+    if (npu_demo::launch<3, 1, 1, 0, noop>(ctx) != StatusCode::kError) {
         return fail(7);
     }
-    if (npu_demo::launch<2, 2, 1, 0>(noop) != StatusCode::kError) {
+    if (npu_demo::launch<2, 2, 1, 0, noop>(ctx) != StatusCode::kError) {
         return fail(2);
     }
-    if (npu_demo::launch<1, 9, 1, 0>(noop) != StatusCode::kError) {
+    if (npu_demo::launch<1, 9, 1, 0, noop>(ctx) != StatusCode::kError) {
         return fail(4);
     }
-    if (npu_demo::launch<2, 1, 2, 0>(noop) != StatusCode::kError) {
+    if (npu_demo::launch<2, 1, 2, 0, noop>(ctx) != StatusCode::kError) {
         return fail(5);
     }
-    if (npu_demo::launch<2, 1, 1, 1>(noop) != StatusCode::kError) {
+    if (npu_demo::launch<2, 1, 1, 1, noop>(ctx) != StatusCode::kError) {
         return fail(8);
     }
     return 0;
@@ -504,6 +511,7 @@ def test_npu_demo_dynamic_memory_backing_supports_view_and_slice() -> None:
 static int fail(int code) { return code; }
 
 int main() {
+    npu_demo::KernelContext ctx;
     Memory<TSM, int8_t> backing = get_dynamic_memory<TSM>();
     if (backing.data() == nullptr) {
         return fail(1);
@@ -519,15 +527,13 @@ int main() {
     if (tile.data() == nullptr || tile.rank() != 1 || tile.get_shape(0) != 4) {
         return fail(2);
     }
-    if (npu_demo::fill(tile, 0.0f) != StatusCode::kOk) {
+    if (npu_demo::fill(ctx, tile, 0.0f) != StatusCode::kOk) {
         return fail(3);
     }
 
     float source_data[4] = {1.0f, 2.0f, 3.0f, 4.0f};
-    long long source_shape[1] = {4};
-    long long source_stride[1] = {1};
-    Memory<GM, float> source(source_data, source_shape, source_stride, 1, MemoryFormat::Norm);
-    if (npu_demo::slice(tile, source, offset, size, stride_vec) != StatusCode::kOk) {
+    Memory<GM, float> source(source_data, {4}, {1}, MemoryFormat::Norm);
+    if (npu_demo::slice(ctx, tile, source, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(4);
     }
     if (tile.data()[0] != 1.0f || tile.data()[1] != 2.0f ||
@@ -556,9 +562,8 @@ def test_npu_demo_kernel_context_rejects_sm_when_size_zero() -> None:
 static int fail(int code) { return code; }
 
 int main() {
-    npu_demo::KernelContext ctx;
     try {
-        auto mem = ctx.get_dynamic_memory<MemorySpace::SM, float>();
+        Memory<MemorySpace::SM, float> mem = npu_demo::get_dynamic_memory<MemorySpace::SM>();
         (void)mem;
         return fail(1);
     } catch (const std::runtime_error& err) {
@@ -591,9 +596,8 @@ def test_npu_demo_kernel_context_rejects_lm_when_size_zero() -> None:
 static int fail(int code) { return code; }
 
 int main() {
-    npu_demo::KernelContext ctx;
     try {
-        auto mem = ctx.get_dynamic_memory<LM, float>();
+        Memory<LM, float> mem = npu_demo::get_dynamic_memory<LM>();
         (void)mem;
         return fail(1);
     } catch (const std::runtime_error& err) {
@@ -630,27 +634,26 @@ static bool contains(const std::string& value, const char* needle) {
 }
 
 int main() {
-    npu_demo::KernelContext ctx;
-    auto tsm = ctx.get_dynamic_memory<TSM, float>();
+    Memory<TSM, float> tsm = npu_demo::get_dynamic_memory<TSM>();
     if (tsm.rank() != 1 || tsm.shape()[0] != 2097152 || tsm.stride()[0] != 1 || tsm.space() != MemorySpace::TSM) {
         return fail(1);
     }
 
-    auto tlm1 = ctx.get_dynamic_memory<TLM1, float>();
+    Memory<TLM1, float> tlm1 = npu_demo::get_dynamic_memory<TLM1>();
     if (tlm1.rank() != 1 || tlm1.shape()[0] != 524288 || tlm1.stride()[0] != 1 || tlm1.space() != MemorySpace::TLM1) {
         return fail(2);
     }
-    auto tlm2 = ctx.get_dynamic_memory<TLM2, float>();
+    Memory<TLM2, float> tlm2 = npu_demo::get_dynamic_memory<TLM2>();
     if (tlm2.rank() != 1 || tlm2.shape()[0] != 1048576 || tlm2.stride()[0] != 1 || tlm2.space() != MemorySpace::TLM2) {
         return fail(3);
     }
-    auto tlm3 = ctx.get_dynamic_memory<TLM3, float>();
+    Memory<TLM3, float> tlm3 = npu_demo::get_dynamic_memory<TLM3>();
     if (tlm3.rank() != 1 || tlm3.shape()[0] != 1048576 || tlm3.stride()[0] != 1 || tlm3.space() != MemorySpace::TLM3) {
         return fail(4);
     }
 
     try {
-        auto sm = ctx.get_dynamic_memory<SM, float>();
+        Memory<SM, float> sm = npu_demo::get_dynamic_memory<SM>();
         (void)sm;
         return fail(5);
     } catch (const std::runtime_error& err) {
@@ -662,7 +665,7 @@ int main() {
     }
 
     try {
-        auto lm = ctx.get_dynamic_memory<LM, float>();
+        Memory<LM, float> lm = npu_demo::get_dynamic_memory<LM>();
         (void)lm;
         return fail(8);
     } catch (const std::runtime_error& err) {
@@ -691,13 +694,12 @@ def test_npu_demo_dma_view_slice_deslice_supports_1d_subset() -> None:
 static int fail(int code) { return code; }
 
 int main() {
+    npu_demo::KernelContext ctx;
     float data[10];
     for (int i = 0; i < 10; ++i) {
         data[i] = static_cast<float>(i);
     }
-    long long shape[1] = {10};
-    long long stride[1] = {1};
-    Memory<MemorySpace::GM, float> source(data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> source(data, {10}, {1}, MemoryFormat::Norm);
 
     long long offset_buf[1] = {1};
     long long size_buf[1] = {4};
@@ -718,10 +720,8 @@ int main() {
     }
 
     float tile_data[4] = {0};
-    long long tile_shape[1] = {4};
-    long long tile_stride[1] = {1};
-    Memory<MemorySpace::TSM, float> tile(tile_data, tile_shape, tile_stride, 1, MemoryFormat::Norm);
-    if (npu_demo::slice(tile, source, offset, size, stride_vec) != StatusCode::kOk) {
+    Memory<MemorySpace::TSM, float> tile(tile_data, {4}, {1}, MemoryFormat::Norm);
+    if (npu_demo::slice(ctx, tile, source, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(4);
     }
     if (tile_data[0] != 1.0f || tile_data[1] != 3.0f || tile_data[2] != 5.0f || tile_data[3] != 7.0f) {
@@ -729,8 +729,8 @@ int main() {
     }
 
     float target_data[10] = {0};
-    Memory<MemorySpace::GM, float> target(target_data, shape, stride, 1, MemoryFormat::Norm);
-    if (npu_demo::deslice(target, tile, offset, size, stride_vec) != StatusCode::kOk) {
+    Memory<MemorySpace::GM, float> target(target_data, {10}, {1}, MemoryFormat::Norm);
+    if (npu_demo::deslice(ctx, target, tile, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(6);
     }
     if (target_data[1] != 1.0f || target_data[3] != 3.0f || target_data[5] != 5.0f ||
@@ -775,9 +775,7 @@ int main() {
     for (int i = 0; i < 10; ++i) {
         data[i] = static_cast<float>(i);
     }
-    long long shape[1] = {10};
-    long long stride[1] = {1};
-    Memory<MemorySpace::GM, float> source(data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> source(data, {10}, {1}, MemoryFormat::Norm);
 
     // 成员式 Vector 参数：非法 offset/size/stride 与越界。
     long long offset_neg_scalar_buf[1] = {-1};
@@ -895,9 +893,7 @@ int main() {
 
     // rank2：result stride 必须等于 source physical stride 与 view logical stride 的逐维乘积。
     float data2[6] = {0, 1, 2, 3, 4, 5};
-    long long shape2[2] = {2, 3};
-    long long stride2[2] = {3, 1};
-    Memory<MemorySpace::GM, float> source2(data2, shape2, stride2, 2, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> source2(data2, {2, 3}, {3, 1}, MemoryFormat::Norm);
 
     long long offset2_buf[2] = {1, 1};
     long long size2_buf[2] = {1, 2};
@@ -947,12 +943,11 @@ static int expect_overflow(const std::runtime_error& err, int code) {
 }
 
 int main() {
+    npu_demo::KernelContext ctx;
     const long long kMax = std::numeric_limits<long long>::max();
     float data[1] = {0.0f};
 
-    long long huge_shape[1] = {kMax};
-    long long unit_stride[1] = {1};
-    Memory<MemorySpace::GM, float> huge_source(data, huge_shape, unit_stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> huge_source(data, {kMax}, {1}, MemoryFormat::Norm);
 
     try {
         long long offset_buf[1] = {1};
@@ -971,8 +966,7 @@ int main() {
         }
     }
 
-    long long huge_stride[1] = {kMax};
-    Memory<MemorySpace::GM, float> huge_stride_source(data, huge_shape, huge_stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> huge_stride_source(data, {kMax}, {kMax}, MemoryFormat::Norm);
 
     try {
         long long offset_buf[1] = {2};
@@ -1030,21 +1024,16 @@ def test_npu_demo_dma_slice_deslice_rejects_overflow_params() -> None:
 static int fail(int code) { return code; }
 
 int main() {
+    npu_demo::KernelContext ctx;
     const long long kMax = std::numeric_limits<long long>::max();
     float data[1] = {0.0f};
 
-    long long huge_shape[1] = {kMax};
-    long long huge_stride[1] = {kMax};
-    Memory<MemorySpace::GM, float> huge_source(data, huge_shape, huge_stride, 1, MemoryFormat::Norm);
-    Memory<MemorySpace::GM, float> huge_target(data, huge_shape, huge_stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> huge_source(data, {kMax}, {kMax}, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> huge_target(data, {kMax}, {kMax}, MemoryFormat::Norm);
 
-    long long tile_small_shape[1] = {1};
-    long long tile_small_stride[1] = {1};
-    Memory<MemorySpace::GM, float> tile_small(data, tile_small_shape, tile_small_stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> tile_small(data, {1}, {1}, MemoryFormat::Norm);
 
-    long long tile_big_shape[1] = {kMax};
-    long long tile_big_stride[1] = {1};
-    Memory<MemorySpace::GM, float> tile_big(data, tile_big_shape, tile_big_stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> tile_big(data, {kMax}, {1}, MemoryFormat::Norm);
 
     long long offset_small_buf[1] = {2};
     long long size_small_buf[1] = {1};
@@ -1052,7 +1041,7 @@ int main() {
     Vector offset_small(offset_small_buf, 1);
     Vector size_small(size_small_buf, 1);
     Vector stride_small(stride_small_buf, 1);
-    if (npu_demo::slice(tile_small, huge_source, offset_small, size_small, stride_small) != StatusCode::kError) {
+    if (npu_demo::slice(ctx, tile_small, huge_source, offset_small, size_small, stride_small) != StatusCode::kError) {
         return fail(1);
     }
     long long offset_big_buf[1] = {1};
@@ -1061,13 +1050,13 @@ int main() {
     Vector offset_big(offset_big_buf, 1);
     Vector size_big(size_big_buf, 1);
     Vector stride_big(stride_big_buf, 1);
-    if (npu_demo::slice(tile_big, huge_source, offset_big, size_big, stride_big) != StatusCode::kError) {
+    if (npu_demo::slice(ctx, tile_big, huge_source, offset_big, size_big, stride_big) != StatusCode::kError) {
         return fail(2);
     }
-    if (npu_demo::deslice(huge_target, tile_small, offset_small, size_small, stride_small) != StatusCode::kError) {
+    if (npu_demo::deslice(ctx, huge_target, tile_small, offset_small, size_small, stride_small) != StatusCode::kError) {
         return fail(3);
     }
-    if (npu_demo::deslice(huge_target, tile_big, offset_big, size_big, stride_big) != StatusCode::kError) {
+    if (npu_demo::deslice(ctx, huge_target, tile_big, offset_big, size_big, stride_big) != StatusCode::kError) {
         return fail(4);
     }
     return 0;
@@ -1077,7 +1066,7 @@ int main() {
 
 
 # NPU-DEMO-KC-007
-# 测试目的: 验证 `npu_demo::add<GM, float, float>(out, lhs, rhs)` 在 1-D 子集下执行逐元素加法，并对 shape 不一致与任一 operand 的 rank!=1 返回失败。
+# 测试目的: 验证 `npu_demo::add<GM, float, float>(ctx, out, lhs, rhs)` 在 1-D 子集下执行逐元素加法，并对 shape 不一致与任一 operand 的 rank!=1 返回失败。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_add_supports_1d_subset
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/api/Kernel.md](spec/include/api/Kernel.md)
@@ -1089,16 +1078,15 @@ def test_npu_demo_add_supports_1d_subset() -> None:
 static int fail(int code) { return code; }
 
 int main() {
+    npu_demo::KernelContext ctx;
     float lhs_data[4] = {1.0f, 2.0f, 3.0f, 4.0f};
     float rhs_data[4] = {10.0f, 20.0f, 30.0f, 40.0f};
     float out_data[4] = {0};
-    long long shape[1] = {4};
-    long long stride[1] = {1};
-    Memory<MemorySpace::GM, float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm);
-    Memory<MemorySpace::GM, float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm);
-    Memory<MemorySpace::GM, float> out(out_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> lhs(lhs_data, {4}, {1}, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> rhs(rhs_data, {4}, {1}, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> out(out_data, {4}, {1}, MemoryFormat::Norm);
 
-    if (npu_demo::add<GM, float, float>(out, lhs, rhs) != StatusCode::kOk) {
+    if (npu_demo::add<GM, float, float>(ctx, out, lhs, rhs) != StatusCode::kOk) {
         return fail(1);
     }
     if (out_data[0] != 11.0f || out_data[1] != 22.0f || out_data[2] != 33.0f ||
@@ -1106,24 +1094,21 @@ int main() {
         return fail(2);
     }
 
-    long long bad_shape[1] = {3};
-    Memory<MemorySpace::GM, float> bad(lhs_data, bad_shape, stride, 1, MemoryFormat::Norm);
-    if (npu_demo::add<GM, float, float>(out, bad, rhs) == StatusCode::kOk) {
+    Memory<MemorySpace::GM, float> bad(lhs_data, {3}, {1}, MemoryFormat::Norm);
+    if (npu_demo::add<GM, float, float>(ctx, out, bad, rhs) == StatusCode::kOk) {
         return fail(3);
     }
 
-    long long rank2_shape[2] = {2, 2};
-    long long rank2_stride[2] = {2, 1};
-    Memory<MemorySpace::GM, float> bad_rank(lhs_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm);
-    if (npu_demo::add<GM, float, float>(out, bad_rank, rhs) == StatusCode::kOk) {
+    Memory<MemorySpace::GM, float> bad_rank(lhs_data, {2, 2}, {2, 1}, MemoryFormat::Norm);
+    if (npu_demo::add<GM, float, float>(ctx, out, bad_rank, rhs) == StatusCode::kOk) {
         return fail(4);
     }
-    Memory<MemorySpace::GM, float> bad_rhs(rhs_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm);
-    if (npu_demo::add<GM, float, float>(out, lhs, bad_rhs) == StatusCode::kOk) {
+    Memory<MemorySpace::GM, float> bad_rhs(rhs_data, {2, 2}, {2, 1}, MemoryFormat::Norm);
+    if (npu_demo::add<GM, float, float>(ctx, out, lhs, bad_rhs) == StatusCode::kOk) {
         return fail(5);
     }
-    Memory<MemorySpace::GM, float> bad_out(out_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm);
-    if (npu_demo::add<GM, float, float>(bad_out, lhs, rhs) == StatusCode::kOk) {
+    Memory<MemorySpace::GM, float> bad_out(out_data, {2, 2}, {2, 1}, MemoryFormat::Norm);
+    if (npu_demo::add<GM, float, float>(ctx, bad_out, lhs, rhs) == StatusCode::kOk) {
         return fail(6);
     }
     return 0;
@@ -1149,16 +1134,15 @@ def test_npu_demo_single_entry_keeps_kernel_bridge_without_reexporting_nn_header
 static int fail(int code) { return code; }
 
 int main() {
+    npu_demo::KernelContext ctx;
     float lhs_data[4] = {1.0f, 2.0f, 3.0f, 4.0f};
     float rhs_data[4] = {10.0f, 20.0f, 30.0f, 40.0f};
     float out_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    long long shape[1] = {4};
-    long long stride[1] = {1};
-    Memory<TSM, float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm);
-    Memory<TSM, float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm);
-    Memory<TLM1, float> out(out_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<TSM, float> lhs(lhs_data, {4}, {1}, MemoryFormat::Norm);
+    Memory<TSM, float> rhs(rhs_data, {4}, {1}, MemoryFormat::Norm);
+    Memory<TSM, float> out(out_data, {4}, {1}, MemoryFormat::Norm);
 
-    if (add(lhs, rhs, out) != StatusCode::kOk) {
+    if (npu_demo::add<TSM, float, float>(ctx, out, lhs, rhs) != StatusCode::kOk) {
         return fail(1);
     }
     if (out_data[0] != 11.0f || out_data[1] != 22.0f || out_data[2] != 33.0f || out_data[3] != 44.0f) {

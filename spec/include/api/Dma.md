@@ -4,30 +4,27 @@
 
 定义 include/api 层统一对外 DMA 操作 API 头文件规范（`include/api/Dma.h`），当前公共层收口 `npu_demo::alloc`、`npu_demo::fill`、`npu_demo::slice`、`npu_demo::deslice`、`npu_demo::transpose`、`npu_demo::store`、`npu_demo::load` 与 `npu_demo::broadcast` public function，面向后端无关的 `Memory<Space, T>`、`Vector` 与 generated source brace-list layout 抽象。
 
-- `npu_demo::alloc<Space, T>(shape, stride, format)`：定义创建 DMA 临时 `Memory<Space, T>` 视图的公开接口。
-- `npu_demo::fill(target, value)`：定义按标量填充目标块全部逻辑元素的公开接口。
-- `npu_demo::slice(target, source, offset, size, stride)`：定义把源区域切片读取到预分配 `target` 的公开接口；`offset/size/stride` 同时支持 `Vector` 与 `std::initializer_list<long long>`。
-- `npu_demo::deslice(target, source, offset, size, stride)`：定义将源块写回目标区域的公开接口；`offset/size/stride` 同时支持 `Vector` 与 `std::initializer_list<long long>`。
-- `npu_demo::transpose(target, source, perm)`：定义按 `perm` 将源块物化转置到预分配 `target` 的公开接口；`perm` 同时支持 `Vector` 与 `std::initializer_list<long long>`。
-- `npu_demo::store(target, source, offset, size, stride)`：定义 generated source 写回接口，layout 参数固定为 `std::initializer_list<long long>`。
-- `npu_demo::load(target, source, offset, size, stride)`：定义 generated source 读取接口，layout 参数固定为 `std::initializer_list<long long>`。
-- `npu_demo::broadcast(target, source)`：定义按 trailing-dimension 规则把 `source` 物化扩张到预分配 `target` 的公开接口。
+- `npu_demo::alloc<Space, T>(ctx, shape, stride, format)`：定义创建 DMA 临时 `Memory<Space, T>` 视图的公开接口。
+- `npu_demo::fill(ctx, target, value)`：定义按标量填充目标块全部逻辑元素的公开接口。
+- `npu_demo::slice(ctx, target, source, offset, size, stride)`：定义把源区域切片读取到预分配 `target` 的公开接口；`offset/size/stride` 类型为 `Vector`。
+- `npu_demo::deslice(ctx, target, source, offset, size, stride)`：定义将源块写回目标区域的公开接口；`offset/size/stride` 类型为 `Vector`。
+- `npu_demo::transpose(ctx, target, source, perm)`：定义按 `perm` 将源块物化转置到预分配 `target` 的公开接口；`perm` 类型为 `Vector`。
+- `npu_demo::store(ctx, target, source, offset, size, stride)`：定义 generated source 写回接口，layout 参数类型为 `Vector`。
+- `npu_demo::load(ctx, target, source, offset, size, stride)`：定义 generated source 读取接口，layout 参数类型为 `Vector`。
+- `npu_demo::broadcast(ctx, target, source)`：定义按 trailing-dimension 规则把 `source` 物化扩张到预分配 `target` 的公开接口。
 - `view` 与 `reshape` 已移动到 `Memory` 的成员接口，不再保留以 `source` 为首参的公共层自由函数。
 - 本规范只冻结统一 API 名称、参数形态、输入约束与错误边界；不绑定任何具体后端实现。
 
 ## API 列表
 
-- `template <MemorySpace Space, typename T> Memory<Space, T> npu_demo::alloc(std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
-- `template <MemorySpace Space, typename T> Status npu_demo::fill(Memory<Space, T>& target, const T& value)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::slice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::slice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::deslice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::deslice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::transpose(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& perm)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::transpose(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> perm)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::store(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::load(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::broadcast(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source)`
+- `template <MemorySpace Space, typename T, typename Context> Memory<Space, T> npu_demo::alloc(Context& ctx, const Vector& shape, const Vector& stride, MemoryFormat format = MemoryFormat::Norm)`
+- `template <MemorySpace Space, typename T, typename Context> Status npu_demo::fill(Context& ctx, Memory<Space, T>& target, const T& value)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, typename Context> Status npu_demo::slice(Context& ctx, Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, typename Context> Status npu_demo::deslice(Context& ctx, Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::transpose(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& perm)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::store(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::load(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::broadcast(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source)`
 
 ## 文档信息
 
@@ -50,10 +47,10 @@
 ## 目标
 
 - 为跨后端代码生成提供统一、稳定的 DMA 公开 API。
-- 统一手写兼容路径的 `offset/size/stride` 公开参数类型为 [`spec/include/api/Core.md`](../../../spec/include/api/Core.md) 中的 `Vector`，并为 generated source 增补 `std::initializer_list<long long>` layout overload。
+- 统一手写兼容路径与 generated source 的 `shape/offset/size/stride/perm` 公开参数类型为 [`spec/include/api/Core.md`](../../../spec/include/api/Core.md) 中的 `Vector`。
 - 明确 DMA public function 的成功调用入口统一为 `npu_demo::alloc(...)`、`npu_demo::fill(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)`、`npu_demo::transpose(...)`、`npu_demo::store(...)`、`npu_demo::load(...)`、`npu_demo::broadcast(...)`。
 - 明确 `slice/deslice` 的输入约束、返回语义与错误边界。
-- 明确删旧边界：`view` / `reshape` 不再属于 DMA 公共层；`source-first deslice` 与非 initializer-list `store/load` 旧形态退出本轮稳定口径。
+- 明确删旧边界：`view` / `reshape` 不再属于 DMA 公共层；`source-first deslice`、无 `ctx` helper 与 DMA helper `std::initializer_list<long long>` overload 旧形态退出本轮稳定口径。
 - 为后续 `spec/operation/dma.md`、`spec/dialect/dma.md`、`spec/dsl/ast/mlir_gen.md`、`spec/dsl/gen_kernel/emit.md`、`spec/dsl/gen_kernel/gen_kernel.md` 提供统一收敛目标。
 
 ## 额外补充
@@ -63,8 +60,8 @@
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 本规范不定义 DMA 硬件调度、异步执行、带宽模型、barrier、launch、host wrapper 或后端私有运行时。
 - 本规范只定义 `npu_demo::alloc`、`npu_demo::fill`、`npu_demo::slice`、`npu_demo::deslice`、`npu_demo::transpose`、`npu_demo::store`、`npu_demo::load`、`npu_demo::broadcast` DMA public function；`free/copy/cast` 等语义若实现暂存，也不属于本轮稳定公共层。
-- `offset/size/stride` 的公开参数类型为 `Vector` 或 `std::initializer_list<long long>`；不得把 `std::vector<long long>`、`std::array<long long, N>`、裸 `long long[N]` 直接暴露成稳定公开签名。
-- initializer-list overload 是 generated source 的稳定承接口径；生成源码中 layout 参数必须发射为 `{...} /*name*/`，不得泄漏 `Vector(...)`、`Vector{...}`、局部 `long long *_shape[]` 或 `long long *_stride[]` layout buffer。
+- `shape/offset/size/stride/perm` 的公开参数类型为 `Vector`；不得把 `std::initializer_list<long long>`、`std::vector<long long>`、`std::array<long long, N>`、裸 `long long[N]` 直接暴露成稳定公开签名。
+- generated source 的 rank 1..8 layout 参数可发射为 `{...} /*name*/` 并绑定到 `Vector` 参数；rank >8 必须按公开错误失败。
 - `alloc/slice/deslice` 的接口面向 `Memory<Space, T>`；不使用 `memory<rank, type>`、`memory<float>` 之类模板占位语言作为公开契约描述。
 - `view` 与 `reshape` 已在 `Memory` 公共层收口；`Dma` 不再公开以 `source` 为首参的 `view` 自由函数。
 - `deslice` 固定为 `target-first`；不得继续保留 `source-first deslice` 这种旧顺序公共口径。
@@ -76,41 +73,45 @@
 
 ## API详细说明
 
-### `template <MemorySpace Space, typename T> Memory<Space, T> npu_demo::alloc(std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
+### `template <MemorySpace Space, typename T, typename Context> Memory<Space, T> npu_demo::alloc(Context& ctx, const Vector& shape, const Vector& stride, MemoryFormat format = MemoryFormat::Norm)`
 
-- api：`template <MemorySpace Space, typename T> Memory<Space, T> npu_demo::alloc(std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
+- api：`template <MemorySpace Space, typename T, typename Context> Memory<Space, T> npu_demo::alloc(Context& ctx, const Vector& shape, const Vector& stride, MemoryFormat format = MemoryFormat::Norm)`
 - 参数：
-  - `shape`：形状序列，定义张量、内存或符号对象的维度大小；类型 `std::initializer_list<long long>`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按可变容器传入时，是否修改输入必须以本接口功能说明和注意事项为准；非法值按该 API 的公开错误语义处理。
-  - `stride`：步长序列，定义各维度在底层线性布局中的跨距；类型 `std::initializer_list<long long>`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按可变容器传入时，是否修改输入必须以本接口功能说明和注意事项为准；非法值按该 API 的公开错误语义处理。
+  - `ctx`：上下文对象；类型 `Context&`；无默认值，调用方必须显式提供；按引用传入，不由当前 helper 持有。
+  - `shape`：形状序列，定义张量、内存或符号对象的维度大小；类型 `const Vector&`；无默认值，调用方必须显式提供；非法值按该 API 的公开错误语义处理。
+  - `stride`：步长序列，定义各维度在底层线性布局中的跨距；类型 `const Vector&`；无默认值，调用方必须显式提供；非法值按该 API 的公开错误语义处理。
   - `format`：内存格式或输出格式，定义当前对象的布局或文本输出形式；类型 `MemoryFormat`；默认值 `MemoryFormat::Norm`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
 - 返回值：`Memory<Space, T>`。
 - 使用示例：
 
   ```cpp
-auto tile = npu_demo::alloc<TSM, float>({16}, {1}, MemoryFormat::Norm);
+npu_demo::KernelContext ctx;
+auto tile = npu_demo::alloc<TSM, float>(ctx, {16}, {1}, MemoryFormat::Norm);
 ```
 - 功能说明：按给定 `shape/stride/format` 创建 DMA 临时 `Memory<Space, T>` 视图。
-- 注意事项：`shape` 与 `stride` 的长度必须一致，且元素值必须满足 `Memory` 视图合同；成功调用入口固定为 `npu_demo::alloc(...)`，未限定的全局 `alloc` 不属于公开合同。
+- 注意事项：`shape` 与 `stride` 的长度必须一致，且元素值必须满足 `Memory` 视图合同；rank 1..8 调用处可以用 `{...}` 构造临时 `Vector`，rank >8 按公开错误失败；成功调用入口固定为 `npu_demo::alloc(...)`，未限定的全局 `alloc` 不属于公开合同。
 
-### `template <MemorySpace Space, typename T> Status npu_demo::fill(Memory<Space, T>& target, const T& value)`
+### `template <MemorySpace Space, typename T, typename Context> Status npu_demo::fill(Context& ctx, Memory<Space, T>& target, const T& value)`
 
-- api：`template <MemorySpace Space, typename T> Status npu_demo::fill(Memory<Space, T>& target, const T& value)`
+- api：`template <MemorySpace Space, typename T, typename Context> Status npu_demo::fill(Context& ctx, Memory<Space, T>& target, const T& value)`
 - 参数：
+  - `ctx`：上下文对象；类型 `Context&`；无默认值，调用方必须显式提供；按引用传入，不由当前 helper 持有。
   - `target`：目标对象、目标名称或目标缓冲区，指定当前操作写入或作用的位置；类型 `Memory<Space, T>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `value`：当前接口处理或写入的业务值，作为生成、转换、比较或存储语义的主要输入；类型 `const T&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
 - 返回值：`Status`，表示执行状态。
 - 使用示例：
 
   ```cpp
-Status status = npu_demo::fill<TSM, float>(target, 0.0f);
+Status status = npu_demo::fill<TSM, float>(ctx, target, 0.0f);
 ```
 - 功能说明：使用标量 `value` 填充 `target` 的全部逻辑元素。
 - 注意事项：调用方必须显式提供目标块；`fill` 不分配内存、不返回新 `Memory`；未限定的全局 `fill` 不属于公开合同。
 
-### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::slice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, typename Context> Status npu_demo::slice(Context& ctx, Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
 
-- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::slice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, typename Context> Status npu_demo::slice(Context& ctx, Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
 - 参数：
+  - `ctx`：上下文对象；类型 `Context&`；无默认值，调用方必须显式提供；按引用传入，不由当前 helper 持有。
   - `target`：目标对象、目标名称或目标缓冲区，指定当前操作写入或作用的位置；类型 `Memory<TargetSpace, T>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `source`：源对象、源缓冲区或源文本，提供当前操作读取的数据来源；类型 `const Memory<SourceSpace, T>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `offset`：偏移序列或起始偏移，指定切片、访存或源码定位的起点；类型 `const Vector&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -120,33 +121,16 @@ Status status = npu_demo::fill<TSM, float>(target, 0.0f);
 - 使用示例：
 
   ```cpp
-Status status = npu_demo::slice(target, source, offset, size, stride);
+Status status = npu_demo::slice(ctx, target, source, offset, size, stride);
 ```
 - 功能说明：从 `source` 读取切片区域，并写入预分配的 `target`。
 - 注意事项：`target` 与 `source` 的元素类型必须一致；`offset/size/stride` 长度必须与 `source.rank()` 一致；`slice` 不隐式分配结果内存，未限定的全局 `slice` 不属于公开合同。
 
-### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::slice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
+### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, typename Context> Status npu_demo::deslice(Context& ctx, Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
 
-- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::slice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
+- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, typename Context> Status npu_demo::deslice(Context& ctx, Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
 - 参数：
-  - `target`：目标 memory；类型 `Memory<TargetSpace, T>&`；承接切片结果。
-  - `source`：源 memory；类型 `const Memory<SourceSpace, T>&`；提供读取数据。
-  - `offset`：切片起点；类型 `std::initializer_list<long long>`；长度必须与 rank 一致。
-  - `size`：切片大小；类型 `std::initializer_list<long long>`；长度必须与 `offset` 一致。
-  - `stride`：切片步长；类型 `std::initializer_list<long long>`；长度必须与 `offset` 一致。
-- 返回值：`Status`，表示执行状态。
-- 使用示例：
-
-  ```cpp
-Status status = npu_demo::slice(target, source, {0, 0}, {2, 4}, {1, 1});
-```
-- 功能说明：从 `source` 读取切片区域，并写入预分配的 `target`。
-- 注意事项：本 overload 是 generated source layout brace-list 的稳定入口；非法长度、非正 `size/stride` 或越界必须返回失败状态；生成源码必须保留 `{...} /*offset*/`、`{...} /*size*/`、`{...} /*stride*/` 形态，不得再生成 `Vector(...)` 或 layout buffer。
-
-### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::deslice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
-
-- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::deslice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
-- 参数：
+  - `ctx`：上下文对象；类型 `Context&`；无默认值，调用方必须显式提供；按引用传入，不由当前 helper 持有。
   - `target`：目标对象、目标名称或目标缓冲区，指定当前操作写入或作用的位置；类型 `Memory<TargetSpace, T>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `source`：源对象、源缓冲区或源文本，提供当前操作读取的数据来源；类型 `const Memory<SourceSpace, T>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `offset`：偏移序列或起始偏移，指定切片、访存或源码定位的起点；类型 `const Vector&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -156,33 +140,16 @@ Status status = npu_demo::slice(target, source, {0, 0}, {2, 4}, {1, 1});
 - 使用示例：
 
   ```cpp
-Status status = npu_demo::deslice(target, source, offset, size, stride);
+Status status = npu_demo::deslice(ctx, target, source, offset, size, stride);
 ```
 - 功能说明：将 `source` 块写回 `target` 的指定区域。
 - 注意事项：`deslice` 固定为 `target-first`；`source` 与 `target` 的元素类型必须一致；未限定的全局 `deslice` 与 `source-first deslice` 不属于公开合同。
 
-### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::deslice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
+### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::transpose(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& perm)`
 
-- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::deslice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
+- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::transpose(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& perm)`
 - 参数：
-  - `target`：目标 memory；类型 `Memory<TargetSpace, T>&`；承接写回结果。
-  - `source`：源 memory；类型 `const Memory<SourceSpace, T>&`；提供待写回数据。
-  - `offset`：写回起点；类型 `std::initializer_list<long long>`；长度必须与 rank 一致。
-  - `size`：写回区域大小；类型 `std::initializer_list<long long>`；长度必须与 `offset` 一致。
-  - `stride`：写回步长；类型 `std::initializer_list<long long>`；长度必须与 `offset` 一致。
-- 返回值：`Status`，表示执行状态。
-- 使用示例：
-
-  ```cpp
-Status status = npu_demo::deslice(target, source, {0, 0}, {2, 4}, {1, 1});
-```
-- 功能说明：将 `source` 块写回 `target` 的指定区域。
-- 注意事项：本 overload 是 generated source layout brace-list 的稳定入口；固定为 `target-first`；生成源码不得使用 `Vector(...)` 或 layout buffer 承接写回 layout。
-
-### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::transpose(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& perm)`
-
-- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::transpose(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& perm)`
-- 参数：
+  - `ctx`：上下文对象；类型 `Context&`；无默认值，调用方必须显式提供；按引用传入，不由当前 helper 持有。
   - `target`：目标对象、目标名称或目标缓冲区，指定当前操作写入或作用的位置；类型 `Memory<TargetSpace, TargetType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `source`：源对象、源缓冲区或源文本，提供当前操作读取的数据来源；类型 `const Memory<SourceSpace, SourceType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `perm`：维度排列序列，定义输出维度从输入维度读取的顺序；类型 `const Vector&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -190,74 +157,61 @@ Status status = npu_demo::deslice(target, source, {0, 0}, {2, 4}, {1, 1});
 - 使用示例：
 
   ```cpp
-Status status = npu_demo::transpose(target, source, Vector{1, 0});
+Status status = npu_demo::transpose(ctx, target, source, Vector{1, 0});
 ```
 - 功能说明：将 `source` 按 `perm` 物化转置到预分配 `target`。
 - 注意事项：`target.rank()` 必须等于 `source.rank()`；`target.get_shape(axis)` 必须等于 `source.get_shape(perm[axis])`；`perm[target_axis]` 表示 target 轴从 source 的哪一轴读取。
 
-### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::transpose(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> perm)`
+### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::store(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& offset, const Vector& size, const Vector& stride)`
 
-- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::transpose(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> perm)`
+- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::store(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& offset, const Vector& size, const Vector& stride)`
 - 参数：
-  - `target`：目标 memory；类型 `Memory<TargetSpace, TargetType>&`；承接转置结果。
-  - `source`：源 memory；类型 `const Memory<SourceSpace, SourceType>&`；提供读取数据。
-  - `perm`：维度排列序列；类型 `std::initializer_list<long long>`；长度必须与 rank 一致。
-- 返回值：`Status`，表示执行状态。
-- 使用示例：
-
-  ```cpp
-Status status = npu_demo::transpose(target, source, {1, 0});
-```
-- 功能说明：将 `source` 按 `perm` 物化转置到预分配 `target`。
-- 注意事项：initializer-list `perm` 与 Vector 版语义一致，非法 rank、重复轴或越界轴必须返回失败状态。
-
-### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::store(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
-
-- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::store(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
-- 参数：
+  - `ctx`：上下文对象；类型 `Context&`；无默认值，调用方必须显式提供；按引用传入，不由当前 helper 持有。
   - `target`：目标 memory；类型 `Memory<TargetSpace, TargetType>&`；承接写回结果。
   - `source`：源 memory；类型 `const Memory<SourceSpace, SourceType>&`；提供待写回数据。
-  - `offset`：写回起点；类型 `std::initializer_list<long long>`；长度必须与 rank 一致。
-  - `size`：写回区域大小；类型 `std::initializer_list<long long>`；长度必须与 `offset` 一致。
-  - `stride`：写回步长；类型 `std::initializer_list<long long>`；长度必须与 `offset` 一致。
+  - `offset`：写回起点；类型 `const Vector&`；长度必须与 rank 一致。
+  - `size`：写回区域大小；类型 `const Vector&`；长度必须与 `offset` 一致。
+  - `stride`：写回步长；类型 `const Vector&`；长度必须与 `offset` 一致。
 - 返回值：`Status`，表示执行状态。
 - 使用示例：
 
   ```cpp
-Status status = npu_demo::store(target, source, {0, 0}, {2, 4}, {1, 1});
+Status status = npu_demo::store(ctx, target, source, {0, 0}, {2, 4}, {1, 1});
 ```
 - 功能说明：以 generated source brace-list layout 将 `source` 写回 `target`。
-- 注意事项：该接口固定服务 `dma.store` generated source；不新增 Vector 版 `store` 公开签名。
+- 注意事项：该接口固定服务 `dma.store` generated source；rank 1..8 调用处可以用 `{...}` 构造临时 `Vector`，rank >8 按公开错误失败。
 
-### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::load(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
+### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::load(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& offset, const Vector& size, const Vector& stride)`
 
-- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::load(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
+- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::load(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& offset, const Vector& size, const Vector& stride)`
 - 参数：
+  - `ctx`：上下文对象；类型 `Context&`；无默认值，调用方必须显式提供；按引用传入，不由当前 helper 持有。
   - `target`：目标 memory；类型 `Memory<TargetSpace, TargetType>&`；承接读取结果。
   - `source`：源 memory；类型 `const Memory<SourceSpace, SourceType>&`；提供读取数据。
-  - `offset`：读取起点；类型 `std::initializer_list<long long>`；长度必须与 rank 一致。
-  - `size`：读取区域大小；类型 `std::initializer_list<long long>`；长度必须与 `offset` 一致。
-  - `stride`：读取步长；类型 `std::initializer_list<long long>`；长度必须与 `offset` 一致。
+  - `offset`：读取起点；类型 `const Vector&`；长度必须与 rank 一致。
+  - `size`：读取区域大小；类型 `const Vector&`；长度必须与 `offset` 一致。
+  - `stride`：读取步长；类型 `const Vector&`；长度必须与 `offset` 一致。
 - 返回值：`Status`，表示执行状态。
 - 使用示例：
 
   ```cpp
-Status status = npu_demo::load(target, source, {0, 0}, {2, 4}, {1, 1});
+Status status = npu_demo::load(ctx, target, source, {0, 0}, {2, 4}, {1, 1});
 ```
 - 功能说明：以 generated source brace-list layout 从 `source` 读取并写入 `target`。
-- 注意事项：该接口固定服务 `dma.load` generated source；不新增 Vector 版 `load` 公开签名。
+- 注意事项：该接口固定服务 `dma.load` generated source；rank 1..8 调用处可以用 `{...}` 构造临时 `Vector`，rank >8 按公开错误失败。
 
-### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::broadcast(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source)`
+### `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::broadcast(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source)`
 
-- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::broadcast(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source)`
+- api：`template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::broadcast(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source)`
 - 参数：
+  - `ctx`：上下文对象；类型 `Context&`；无默认值，调用方必须显式提供；按引用传入，不由当前 helper 持有。
   - `target`：目标对象、目标名称或目标缓冲区，指定当前操作写入或作用的位置；类型 `Memory<TargetSpace, TargetType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `source`：源对象、源缓冲区或源文本，提供当前操作读取的数据来源；类型 `const Memory<SourceSpace, SourceType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
 - 返回值：`Status`，表示执行状态。
 - 使用示例：
 
   ```cpp
-Status status = npu_demo::broadcast<TSM, TSM, float, float>(target, source);
+Status status = npu_demo::broadcast<TSM, TSM, float, float>(ctx, target, source);
 ```
 - 功能说明：将 `source` 按 trailing-dimension broadcast 规则物化到预分配 `target`。
 - 注意事项：`source.rank()` 必须小于或等于 `target.rank()`，并按尾部维度对齐；对齐后的每个源维度必须等于目标维度或等于 `1`。
@@ -283,9 +237,9 @@ Status status = npu_demo::broadcast<TSM, TSM, float, float>(target, source);
 
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
-| TC-INCLUDE-API-DMA-001 | 生成/编译 | `npu_demo::slice(target, source, ...)` 的最小目标式语义可工作。 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `API-DMA-001`。 | 生成源码、IR 文本或编译结果体现“`npu_demo::slice(target, source, ...)` 的最小目标式语义可工作。”场景。 | `API-DMA-001` |
-| TC-INCLUDE-API-DMA-002 | 生成/编译 | `npu_demo::deslice(target, source, ...)` 的最小目标式语义可工作。 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `API-DMA-002`。 | 生成源码、IR 文本或编译结果体现“`npu_demo::deslice(target, source, ...)` 的最小目标式语义可工作。”场景。 | `API-DMA-002` |
-| TC-INCLUDE-API-DMA-003 | 生成/编译 | `npu_demo::transpose(target, source, ...)` 的最小目标式语义可工作。 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `API-DMA-003`。 | 生成源码、IR 文本或编译结果体现“`npu_demo::transpose(target, source, ...)` 的最小目标式语义可工作。”场景。 | `API-DMA-003` |
-| TC-INCLUDE-API-DMA-003C | 生成/编译 | `slice/deslice/store/load/transpose` initializer-list layout overload 可工作。 | 准备公开 Memory/DMA 参数和 brace-list layout。 | 运行 `test_dma_initializer_list_layout_overloads`。 | 公开 overload 可编译运行，非法 layout 返回公开失败状态。 | `test_dma_initializer_list_layout_overloads` |
+| TC-INCLUDE-API-DMA-001 | 生成/编译 | `npu_demo::slice(ctx, target, source, ...)` 的最小目标式语义可工作。 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `API-DMA-001`。 | 生成源码、IR 文本或编译结果体现“`npu_demo::slice(ctx, target, source, ...)` 的最小目标式语义可工作。”场景。 | `API-DMA-001` |
+| TC-INCLUDE-API-DMA-002 | 生成/编译 | `npu_demo::deslice(ctx, target, source, ...)` 的最小目标式语义可工作。 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `API-DMA-002`。 | 生成源码、IR 文本或编译结果体现“`npu_demo::deslice(ctx, target, source, ...)` 的最小目标式语义可工作。”场景。 | `API-DMA-002` |
+| TC-INCLUDE-API-DMA-003 | 生成/编译 | `npu_demo::transpose(ctx, target, source, ...)` 的最小目标式语义可工作。 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `API-DMA-003`。 | 生成源码、IR 文本或编译结果体现“`npu_demo::transpose(ctx, target, source, ...)` 的最小目标式语义可工作。”场景。 | `API-DMA-003` |
+| TC-INCLUDE-API-DMA-003C | 生成/编译 | `slice/deslice/store/load/transpose` 的 rank 1..8 brace-list layout 可绑定 `Vector` 参数。 | 准备公开 Memory/DMA 参数和 brace-list layout。 | 运行 `test_dma_brace_layout_binds_vector_contract`。 | brace-list layout 经 `Vector` 参数可编译运行，非法 layout 返回公开失败状态。 | `test_dma_brace_layout_binds_vector_contract` |
 | TC-INCLUDE-API-DMA-004 | 内存/DMA | `npu_demo::fill/broadcast` 的最小目标式语义可工作。 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `API-DMA-003B`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`npu_demo::fill/broadcast` 的最小目标式语义可工作。”场景。 | `API-DMA-003B` |
 | TC-INCLUDE-API-DMA-005 | 公开入口 | `npu_demo::alloc/fill/slice/deslice/transpose/store/load/broadcast` 可经 `include/npu_demo/npu_demo.h` 正向编译运行，未限定的全局函数不作为成功路径。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `NPU-DEMO-PUBLIC-002`。 | 公开入口在“`npu_demo::alloc/fill/slice/deslice/transpose/store/load/broadcast` 可经 `include/npu_demo/npu_demo.h` 正向编译运行，未限定的全局函数不作为成功路径。”场景下可导入、构造、注册或按名称发现。 | `NPU-DEMO-PUBLIC-002` |

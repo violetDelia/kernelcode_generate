@@ -92,7 +92,7 @@ OutlineDeviceKernelPass().apply(Context(), module)
 
 - 公开 pass 名称固定为 `outline-device-kernel`。
 - 只接受零返回 / 已完成 out-param ABI 的输入函数。
-- 可 standalone 运行，也可作为 `npu-demo-lowering` 中 `launch-kernel-cost-func` 前的 outline 阶段运行。
+- 可 standalone 运行，也可作为 `npu-demo-lowering` 中的 outline 阶段运行。
 - `KernelCodeError` 仍是稳定错误类型，但它属于 `kernel_gen.passes` 共享公开 API，不新增为当前文件的独立公开入口。
 
 - 返回值：

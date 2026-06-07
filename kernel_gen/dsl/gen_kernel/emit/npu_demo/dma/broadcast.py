@@ -3,8 +3,8 @@
 
 功能说明:
 - 发射 npu_demo 目标下的 `dma.broadcast`。
-- memory source 发射为 `broadcast<...>(dst, source)`。
-- scalar source 发射为 `fill<...>(dst, value)`，保持 `dma.broadcast` 标量语义。
+- memory source 发射为 `broadcast<...>(ctx, dst, source)`。
+- scalar source 发射为 `fill<...>(ctx, dst, value)`，保持 `dma.broadcast` 标量语义。
 
 API 列表:
 - 无公开 API；通过 emit registry 注册 `DmaBroadcastOp` 的 npu_demo 发射器。
@@ -67,7 +67,8 @@ def _emit_npu_demo_dma_broadcast(op: DmaBroadcastOp, ctx) -> str:
     if not isinstance(op.target.type, NnMemoryType):
         raise ctx.emit_error(op.name, "unsupported op")
     dst_expr = emit_c_value(op.target, ctx)
-    target_type = _memory_element_cpp_type(op.target.type, ctx)
+    op.target.type.verify()
+    target_type = op.target.type.template_name.data or ctx.dispatch_type(op.target.type.element_type)
     if not isinstance(op.source.type, NnMemoryType):
         value_expr = emit_c_value(op.source, ctx)
         if value_expr == "inf":
@@ -77,11 +78,13 @@ def _emit_npu_demo_dma_broadcast(op: DmaBroadcastOp, ctx) -> str:
         return (
             f"{ctx.current_indent}fill<{ctx.dispatch_attr(op.target.type)}, "
             f"{target_type}>"
-            f"({dst_expr} /*dst*/, {value_expr} /*value*/);"
+            f"(ctx, {dst_expr} /*dst*/, {value_expr} /*value*/);"
         )
     src_expr = emit_c_value(op.source, ctx)
+    op.source.type.verify()
+    source_type = op.source.type.template_name.data or ctx.dispatch_type(op.source.type.element_type)
     return (
         f"{ctx.current_indent}broadcast<{ctx.dispatch_attr(op.target.type)}, {ctx.dispatch_attr(op.source.type)}, "
-        f"{target_type}, {_memory_element_cpp_type(op.source.type, ctx)}>"
-        f"({dst_expr} /*dst*/, {src_expr} /*source*/);"
+        f"{target_type}, {source_type}>"
+        f"(ctx, {dst_expr} /*dst*/, {src_expr} /*source*/);"
     )

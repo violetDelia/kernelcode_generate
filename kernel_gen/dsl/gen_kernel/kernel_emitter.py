@@ -273,8 +273,8 @@ class KernelEmitter:
         """生成带模板实参的函数名。
 
         功能说明:
-        - wrapper 调用 templated device body 时显式传递同名 template 参数。
-        - 无 template name 时返回原函数名。
+        - wrapper 调用 device body 时只显式传递业务 template 参数。
+        - 无业务 template name 时返回裸函数名，避免把 context 类型混入 launch name。
 
         使用示例:
         - callee = self._template_call_name("body", input_types)
@@ -285,10 +285,18 @@ class KernelEmitter:
         - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
         """
 
-        names = self._template_names_from_types(types)
+        names: list[str] = []
+        for attr in types:
+            if not isinstance(attr, NnMemoryType):
+                continue
+            attr.verify()
+            template_name = attr.template_name.data
+            if template_name and template_name not in names:
+                names.append(template_name)
         if not names:
             return func_name
-        return f"{func_name}<{', '.join(names)}>"
+        template_args = ", ".join(names)
+        return f"{func_name}<{template_args}>"
 
     def _template_instance_seed_fragment(self, text: str) -> str:
         """把函数名或 template name 转成 C++ alias 片段。
@@ -568,7 +576,186 @@ class KernelEmitter:
         if isinstance(op_or_func, ModuleOp):
             if not self.ctx.is_target("npu_demo"):
                 raise self.ctx.emit_error("builtin.module is only supported for target=npu_demo", "")
-            return self._emit_module(op_or_func)
+            plain_func = self._get_npu_demo_plain_func(op_or_func)
+            if plain_func is not None:
+                return self.emit_func(plain_func)
+
+            dispatcher_func = self._get_npu_demo_entry_dispatcher_func(op_or_func)
+            if dispatcher_func is not None:
+                funcs = self._module_funcs(op_or_func)
+                callee_names: set[str] = set()
+                for op in self._walk_ops(dispatcher_func):
+                    if isinstance(op, ArchLaunchOp):
+                        callee_names.add(self._launch_callee_name(op, dispatcher_func.sym_name.data))
+                emitted_sources: list[str] = []
+                for func_op in funcs:
+                    if func_op is dispatcher_func:
+                        continue
+                    if func_op.sym_name.data in callee_names:
+                        func_name = func_op.sym_name.data
+                        input_types = list(func_op.function_type.inputs.data)
+                        result_types = list(func_op.function_type.outputs.data)
+                        if result_types:
+                            raise self._error(func_name, "npu_demo entry dispatcher launch body must not return values")
+                        arg_names = self._arg_names(func_op)
+                        params: list[str] = ["npu_demo::KernelContext& ctx"]
+                        for arg_name, arg_type, arg_value in zip(arg_names, input_types, func_op.args, strict=True):
+                            self.ctx.bind_name(arg_value, arg_name)
+                            if isinstance(arg_type, NnMemoryType):
+                                params.append(f"{self._type_to_c(arg_type)}& {arg_name}")
+                                continue
+                            params.append(f"{self._type_to_c(arg_type)} {arg_name}")
+                        template_prefix = self._template_prefix_from_types(input_types)
+                        signature = f"{template_prefix}void {func_name}({', '.join(params)})"
+                        self.ctx.push_indent()
+                        body = self._emit_default_function_body(func_op)
+                        self.ctx.pop_indent()
+                        if body:
+                            source = self._prepend_template_instance_seed_lines(func_op, f"{signature} {{\n{body}\n}}")
+                        else:
+                            source = self._prepend_template_instance_seed_lines(func_op, f"{signature} {{\n}}")
+                        metadata_comment = self._allow_absent_memory_metadata_comment(func_op)
+                        if metadata_comment:
+                            emitted_sources.append(f"{metadata_comment}\n{source}")
+                        else:
+                            emitted_sources.append(source)
+                        continue
+                    emitted_sources.append(self.emit_func(func_op))
+                emitted_sources.append(self.emit_func(dispatcher_func))
+                return "\n\n".join(emitted_sources)
+
+            body_func, wrapper_func = self._classify_npu_demo_launch_module(op_or_func)
+            body_input_types, body_arg_offset = self._validate_npu_demo_launch_body_signature(body_func)
+            body_arg_names = self._arg_names(body_func)[body_arg_offset:]
+            body_params: list[str] = ["npu_demo::KernelContext& ctx"]
+            for arg_name, arg_type in zip(body_arg_names, body_input_types, strict=True):
+                if isinstance(arg_type, NnMemoryType):
+                    body_params.append(f"{self._type_to_c(arg_type)}& {arg_name}")
+                    continue
+                if isinstance(arg_type, SymbolValueType):
+                    body_params.append(f"{self._type_to_c(arg_type)} {arg_name}")
+                    continue
+            if len(body_params) != len(body_input_types) + 1:
+                raise self._error(body_func.sym_name.data, "unsupported npu_demo launch body signature")
+            body_template_prefix = self._template_prefix_from_types(body_input_types)
+            body_signature = f"{body_template_prefix}static void {body_func.sym_name.data}({', '.join(body_params)})"
+
+            emitted: list[str] = [self._prepend_template_instance_seed_lines(body_func, f"{body_signature};")]
+            for top_op in op_or_func.ops:
+                if top_op is body_func:
+                    arg_names = self._arg_names(body_func)
+                    for arg_name, arg_value in zip(arg_names, body_func.args, strict=True):
+                        self.ctx.bind_name(arg_value, arg_name)
+                    self.ctx.push_indent()
+                    lines: list[str] = []
+                    last_memory_result_name: str | None = None
+                    for op in body_func.body.block.ops:
+                        if self._bind_transparent_unrealized_conversion_cast(op):
+                            continue
+                        if op.name == "test.fake_symbol_value":
+                            if not op.results or not isinstance(op.results[0].type, SymbolValueType):
+                                raise self._error(body_func.sym_name.data, "unsupported npu_demo launch body helper op")
+                            expr = op.results[0].type.expr.expr.data
+                            expr = expr.replace("thread_num", "npu_demo::thread_num()")
+                            expr = expr.replace("thread_id", "npu_demo::thread_id()")
+                            self.ctx.bind_name(op.results[0], expr)
+                            continue
+                        if isinstance(op, func.ReturnOp):
+                            self._emit_return_statement(body_func, op)
+                            continue
+                        if isinstance(op, ArchBarrierOp):
+                            lines.append(self._format_npu_demo_barrier_stmt(op, body_func.sym_name.data))
+                            continue
+                        if (
+                            op.name in {
+                                "nn.add",
+                                "kernel.matmul",
+                                "kernel.binary_elewise",
+                                "kernel.exp",
+                                "kernel.reduce",
+                                "kernel.reduce_min",
+                                "kernel.img2col1d",
+                                "kernel.img2col2d",
+                                "kernel.select",
+                            }
+                            and len(op.results) == 1
+                            and isinstance(op.results[0].type, NnMemoryType)
+                            and self.ctx.lookup_name(op.results[0]) is None
+                            and last_memory_result_name is not None
+                        ):
+                            self.ctx.bind_name(op.results[0], last_memory_result_name)
+                        stmt = self.emit_op(op)
+                        if stmt:
+                            stmt = self._normalize_npu_demo_stmt(stmt)
+                            lines.append(stmt)
+                        if len(op.results) == 1 and isinstance(op.results[0].type, NnMemoryType):
+                            bound_name = self.ctx.lookup_name(op.results[0])
+                            if bound_name is not None:
+                                last_memory_result_name = bound_name
+                    body = "\n".join(lines)
+                    self.ctx.pop_indent()
+                    if body:
+                        source = self._prepend_template_instance_seed_lines(
+                            body_func,
+                            f"{body_signature} {{\n{body}\n}}",
+                        )
+                    else:
+                        source = self._prepend_template_instance_seed_lines(body_func, f"{body_signature} {{\n}}")
+                    emitted.append(source)
+                    continue
+                if top_op is wrapper_func:
+                    wrapper_body_input_types, wrapper_body_arg_offset = self._validate_npu_demo_launch_wrapper_signature(
+                        wrapper_func,
+                        body_func,
+                    )
+                    arg_names = self._arg_names(wrapper_func)
+                    launch_op = self._filtered_launch_ops(wrapper_func)[0]
+                    block_extent, thread_extent, subthread_extent, shared_memory_size_extent = (
+                        self._launch_extents_from_wrapper(launch_op, wrapper_func.sym_name.data)
+                    )
+                    params: list[str] = []
+                    for arg_name, arg_type in zip(arg_names, wrapper_func.function_type.inputs.data, strict=True):
+                        if isinstance(arg_type, NnMemoryType):
+                            params.append(self._normalize_memory_stmt(f"{self._type_to_c(arg_type)}& {arg_name}"))
+                            continue
+                        if isinstance(arg_type, SymbolValueType):
+                            params.append(f"{self._signature_type_to_c(arg_type)} {arg_name}")
+                            continue
+                    if len(params) != len(wrapper_func.function_type.inputs.data):
+                        raise self._error(wrapper_func.sym_name.data, "unsupported npu_demo launch wrapper signature")
+                    template_prefix = self._template_prefix_from_types(list(wrapper_func.function_type.inputs.data))
+                    signature = f"{template_prefix}void {wrapper_func.sym_name.data}({', '.join(params)})"
+                    self.ctx.push_indent()
+                    extent_lines: list[str] = []
+                    for extent in (block_extent, thread_extent, subthread_extent, shared_memory_size_extent):
+                        extent_name = self.ctx.allocate_name("c_")
+                        extent_lines.append(f"{self.ctx.current_indent}constexpr S_INT {extent_name} = {extent};")
+                    call_args = ", ".join(arg_names)
+                    body_callee = self._template_call_name(body_func.sym_name.data, wrapper_body_input_types)
+                    context_line = f"{self.ctx.current_indent}npu_demo::KernelContext ctx;"
+                    launch_line = (
+                        f"{self.ctx.current_indent}npu_demo::launch<"
+                        f"{block_extent}, {thread_extent}, {subthread_extent}, {shared_memory_size_extent}, "
+                        f"{body_callee}>(ctx, {call_args});"
+                        if call_args
+                        else f"{self.ctx.current_indent}npu_demo::launch<"
+                        f"{block_extent}, {thread_extent}, {subthread_extent}, {shared_memory_size_extent}, "
+                        f"{body_callee}>(ctx);"
+                    )
+                    body = "\n".join([*extent_lines, context_line, launch_line])
+                    self.ctx.pop_indent()
+                    source = self._prepend_template_instance_seed_lines(wrapper_func, f"{signature} {{\n{body}\n}}")
+                    metadata_comment = self._allow_absent_memory_metadata_comment(
+                        body_func,
+                        body_arg_offset=wrapper_body_arg_offset,
+                    )
+                    if metadata_comment:
+                        emitted.append(f"{metadata_comment}\n{source}")
+                    else:
+                        emitted.append(source)
+                    continue
+                emitted.append(self.emit_func(top_op))
+            return "\n\n".join(emitted)
         if isinstance(op_or_func, func.FuncOp):
             return self.emit_func(op_or_func)
         if isinstance(op_or_func, SSAValue):
@@ -578,54 +765,6 @@ class KernelEmitter:
         if isinstance(op_or_func, Operation):
             return self.emit_op(op_or_func)
         return self.emit_attr(op_or_func)
-
-    def _emit_module(self, module_op: ModuleOp) -> str:
-        """发射 `target=npu_demo` 的受控 `builtin.module` 双函数源码。
-
-
-        功能说明:
-        - 对非 `npu_demo` target，仅支持按 module 顶层顺序发射 `func.func`。
-        - 仅对 `target="npu_demo"` 放行受控 `builtin.module` 子集。
-        - 允许 module 携带 helper `func.func`，并按 module 中的出现顺序输出源码。
-        - wrapper 仍必须能被唯一 `arch.launch` 识别，body / wrapper 之外的 helper 继续走通用函数发射。
-
-        使用示例:
-        - source = self._emit_module(module_op)
-
-        关联文件:
-        - spec: spec/dsl/gen_kernel/gen_kernel.md
-        - test: test/dsl/gen_kernel/test_gen_kernel.py
-        - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
-        """
-
-        if not self.ctx.is_target("npu_demo"):
-            funcs = self._module_funcs(module_op)
-            if any(any(isinstance(inner, ArchLaunchOp) for inner in top_op.body.block.ops) for top_op in funcs):
-                raise self.ctx.emit_error("builtin.module is only supported for target=npu_demo", "")
-            return "\n\n".join(self.emit_func(top_op) for top_op in funcs)
-
-        plain_func = self._get_npu_demo_plain_func(module_op)
-        if plain_func is not None:
-            return self.emit_func(plain_func)
-
-        dispatcher_func = self._get_npu_demo_entry_dispatcher_func(module_op)
-        if dispatcher_func is not None:
-            funcs = self._module_funcs(module_op)
-            emitted_funcs = [func_op for func_op in funcs if func_op is not dispatcher_func]
-            emitted_funcs.append(dispatcher_func)
-            return "\n\n".join(self.emit_func(func_op) for func_op in emitted_funcs)
-
-        body_func, wrapper_func = self._classify_npu_demo_launch_module(module_op)
-        emitted: list[str] = [self._emit_npu_demo_launch_body_declaration(body_func)]
-        for top_op in module_op.ops:
-            if top_op is body_func:
-                emitted.append(self._emit_npu_demo_launch_body_function(body_func))
-                continue
-            if top_op is wrapper_func:
-                emitted.append(self._emit_npu_demo_launch_wrapper_function(wrapper_func, body_func))
-                continue
-            emitted.append(self.emit_func(top_op))
-        return "\n\n".join(emitted)
 
     def _module_funcs(self, module_op: ModuleOp) -> list[func.FuncOp]:
         top_ops = list(module_op.ops)
@@ -734,21 +873,113 @@ class KernelEmitter:
         return dispatcher
 
     def emit_func(self, func_op: func.FuncOp) -> str:
+        body_arg_offset = 0
         if self._is_npu_demo_body_level_kernel(func_op):
-            signature = self._emit_npu_demo_body_level_kernel_signature(func_op)
+            source_type, out_type = self._get_npu_demo_body_level_kernel_types(func_op)
+            arg_names = self._arg_names(func_op)
+            for arg_name, arg_value in zip(arg_names, func_op.args, strict=True):
+                self.ctx.bind_name(arg_value, arg_name)
+            source_name = self.ctx.lookup_name(func_op.args[1]) or arg_names[1]
+            source_type_text = self._normalize_memory_stmt(f"{self._type_to_c(source_type)}& {source_name}")
+            out_type_text = self._normalize_memory_stmt(f"{self._type_to_c(out_type)}& out")
+            template_prefix = self._template_prefix_from_types([source_type, out_type])
+            signature = (
+                f"{template_prefix}void {func_op.sym_name.data}"
+                f"(npu_demo::KernelContext& ctx, {source_type_text}, {out_type_text})"
+            )
             self.ctx.push_indent()
-            body = self._emit_npu_demo_body_level_kernel_body(func_op)
+            self._validate_npu_demo_body_level_kernel_body(func_op)
+            element_type = self._type_to_c(out_type.element_type)
+            source_view_accessor = "template view" if source_type.template_name.data else "view"
+            lines = [
+                f"{self.ctx.current_indent}S_INT tid = npu_demo::thread_id();",
+                f"{self.ctx.current_indent}S_INT tnum = npu_demo::thread_num();",
+                "",
+                (
+                    f"{self.ctx.current_indent}Memory<MemorySpace::TSM, {element_type}> tsm = "
+                    f"npu_demo::get_dynamic_memory<MemorySpace::TSM>();"
+                ),
+                (
+                    f"{self.ctx.current_indent}Memory<MemorySpace::TLM1, {element_type}> tlm = "
+                    f"npu_demo::get_dynamic_memory<MemorySpace::TLM1>();"
+                ),
+                "",
+                f"{self.ctx.current_indent}auto src_view = {source_name}.{source_view_accessor}<{element_type}>"
+                f"({{tid * 16}} /*offset*/, {{16}} /*size*/, {{1}} /*stride*/);",
+                f"{self.ctx.current_indent}auto work_tile = tsm.view<{element_type}>"
+                f"({{0}} /*offset*/, {{16}} /*size*/, {{1}} /*stride*/);",
+                f"{self.ctx.current_indent}auto out_tile = tsm.view<{element_type}>"
+                f"({{0}} /*offset*/, {{16}} /*size*/, {{1}} /*stride*/);",
+                "",
+                f"{self.ctx.current_indent}slice(ctx, work_tile, src_view, {{0}} /*offset*/, "
+                f"{{16}} /*size*/, {{1}} /*stride*/);",
+                f"{self.ctx.current_indent}add<MemorySpace::TSM, {element_type}, {element_type}>"
+                f"(ctx, out_tile, work_tile, work_tile);",
+                f"{self.ctx.current_indent}deslice(ctx, out, out_tile, {{tid * 16}} /*offset*/, "
+                f"{{16}} /*size*/, {{1}} /*stride*/);",
+            ]
+            body = "\n".join(lines)
             self.ctx.pop_indent()
+            body_arg_offset = 1
         else:
-            signature = self._emit_default_signature(func_op)
+            include_context = False
+            context_arg_offset = 0
+            if self.ctx.is_target("npu_demo"):
+                include_context = not any(isinstance(op, ArchLaunchOp) for op in self._walk_ops(func_op))
+            if include_context:
+                func_name = func_op.sym_name.data
+                input_types = list(func_op.function_type.inputs.data)
+                result_types = list(func_op.function_type.outputs.data)
+                if len(result_types) > 1:
+                    raise self._error(func_name, "unsupported return form")
+                if result_types and isinstance(result_types[0], NnMemoryType):
+                    raise self._error(
+                        func_name,
+                        "legacy memory return ABI is not supported; run BufferResultsToOutParamsPass first",
+                    )
+                if result_types:
+                    result_type = result_types[0]
+                    if isinstance(result_type, SymbolValueType) and not (
+                        self.ctx.is_target("cpu") or self.ctx.is_target("npu_demo")
+                    ):
+                        raise self._error(func_name, "symbol scalar return is only supported on cpu and npu_demo")
+                    self._type_to_c(result_type)
+                arg_names = self._arg_names(func_op)
+                if input_types and arg_names and arg_names[0] == "ctx":
+                    context_arg_offset = 1
+                params: list[str] = []
+                if context_arg_offset == 0:
+                    params.append("Context& ctx")
+                for index, (arg_name, arg_type, arg_value) in enumerate(
+                    zip(arg_names, input_types, func_op.args, strict=True)
+                ):
+                    self.ctx.bind_name(arg_value, arg_name)
+                    if context_arg_offset == 1 and index == 0:
+                        params.append("Context& ctx")
+                        continue
+                    if isinstance(arg_type, NnMemoryType):
+                        params.append(f"{self._type_to_c(arg_type)}& {arg_name}")
+                    else:
+                        params.append(f"{self._type_to_c(arg_type)} {arg_name}")
+                return_type = "void"
+                if result_types:
+                    return_type = self._type_to_c(result_types[0])
+                template_names = self._template_names_from_types([*input_types[context_arg_offset:], *result_types])
+                if "Context" not in template_names:
+                    template_names.append("Context")
+                template_prefix = f"template <{', '.join(f'typename {name}' for name in template_names)}>\n"
+                signature = f"{template_prefix}{return_type} {func_name}({', '.join(params)})"
+            else:
+                signature = self._emit_default_signature(func_op)
             self.ctx.push_indent()
             body = self._emit_default_function_body(func_op)
             self.ctx.pop_indent()
+            body_arg_offset = context_arg_offset
         if body:
             source = self._prepend_template_instance_seed_lines(func_op, f"{signature} {{\n{body}\n}}")
         else:
             source = self._prepend_template_instance_seed_lines(func_op, f"{signature} {{\n}}")
-        metadata_comment = self._allow_absent_memory_metadata_comment(func_op)
+        metadata_comment = self._allow_absent_memory_metadata_comment(func_op, body_arg_offset=body_arg_offset)
         if metadata_comment:
             return f"{metadata_comment}\n{source}"
         return source
@@ -966,207 +1197,6 @@ class KernelEmitter:
                 return False
         return True
 
-    def _emit_npu_demo_launch_body_function(self, func_op: func.FuncOp) -> str:
-        """生成 npu_demo launch body 函数源码。
-
-
-        功能说明:
-        - 输出 `static` body 签名，并按 lowered IR 的实际 op 顺序逐条发射源码。
-        - 允许 body 中保留 `arch.barrier`、`dma.alloc`、`dma.view`、`dma.slice`、`dma.deslice` 等公开合同。
-        - 不再依赖冻结 add/barrier 子集，body 形态由唯一 wrapper + lowered IR 共同决定。
-
-        使用示例:
-        - source = self._emit_npu_demo_launch_body_function(body_func)
-
-        关联文件:
-        - spec: spec/dsl/gen_kernel/gen_kernel.md
-        - test: test/dsl/gen_kernel/test_gen_kernel.py
-        - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
-        """
-
-        body_input_types, body_arg_offset = self._validate_npu_demo_launch_body_signature(func_op)
-        func_name = func_op.sym_name.data
-        arg_names = self._arg_names(func_op)
-        for arg_name, arg_value in zip(arg_names, func_op.args, strict=True):
-            self.ctx.bind_name(arg_value, arg_name)
-
-        signature = self._emit_npu_demo_launch_body_signature(func_op, body_input_types, body_arg_offset)
-
-        lines: list[str] = []
-        last_memory_result_name: str | None = None
-        for op in func_op.body.block.ops:
-            if self._bind_transparent_unrealized_conversion_cast(op):
-                continue
-            if op.name == "test.fake_symbol_value":
-                if not op.results or not isinstance(op.results[0].type, SymbolValueType):
-                    raise self._error(func_name, "unsupported npu_demo launch body helper op")
-                expr = op.results[0].type.expr.expr.data
-                expr = expr.replace("thread_num", "npu_demo::thread_num()")
-                expr = expr.replace("thread_id", "npu_demo::thread_id()")
-                self.ctx.bind_name(op.results[0], expr)
-                continue
-            if isinstance(op, func.ReturnOp):
-                self._emit_return_statement(func_op, op)
-                continue
-            if isinstance(op, ArchBarrierOp):
-                lines.append(self._format_npu_demo_barrier_stmt(op, func_name))
-                continue
-            if (
-                op.name in {
-                    "nn.add",
-                    "kernel.matmul",
-                    "kernel.binary_elewise",
-                    "kernel.exp",
-                    "kernel.reduce",
-                    "kernel.reduce_min",
-                    "kernel.img2col1d",
-                    "kernel.img2col2d",
-                    "kernel.select",
-                }
-                and len(op.results) == 1
-                and isinstance(op.results[0].type, NnMemoryType)
-                and self.ctx.lookup_name(op.results[0]) is None
-                and last_memory_result_name is not None
-            ):
-                self.ctx.bind_name(op.results[0], last_memory_result_name)
-            stmt = self.emit_op(op)
-            if stmt:
-                stmt = self._normalize_npu_demo_stmt(stmt)
-                lines.append(stmt)
-            if len(op.results) == 1 and isinstance(op.results[0].type, NnMemoryType):
-                bound_name = self.ctx.lookup_name(op.results[0])
-                if bound_name is not None:
-                    last_memory_result_name = bound_name
-        body = "\n".join(lines)
-        if body:
-            return f"{signature} {{\n{body}\n}}"
-        return f"{signature} {{\n}}"
-
-    def _emit_npu_demo_launch_body_declaration(self, func_op: func.FuncOp) -> str:
-        """生成 npu_demo launch body 的前置声明。
-
-
-        功能说明:
-        - 为 `npu_demo` launch module 提供与定义完全一致的 body 前置声明。
-        - 解决 outline 后 wrapper 先于 body 出现时的函数可见性问题，避免 wrapper 调用未声明的 body。
-
-        使用示例:
-        - decl = self._emit_npu_demo_launch_body_declaration(body_func)
-
-        关联文件:
-        - spec: spec/dsl/gen_kernel/gen_kernel.md
-        - test: test/dsl/gen_kernel/test_gen_kernel.py
-        - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
-        """
-
-        body_input_types, body_arg_offset = self._validate_npu_demo_launch_body_signature(func_op)
-        declaration = f"{self._emit_npu_demo_launch_body_signature(func_op, body_input_types, body_arg_offset)};"
-        return self._prepend_template_instance_seed_lines(func_op, declaration)
-
-    def _emit_npu_demo_launch_body_signature(
-        self,
-        func_op: func.FuncOp,
-        body_input_types: list[NnMemoryType],
-        body_arg_offset: int,
-    ) -> str:
-        """生成 npu_demo launch body 的函数签名。
-
-
-        功能说明:
-        - 统一构造不显式暴露 `KernelContext` 的 `static void <body>(...)` 签名。
-        - 供 body 定义与前置声明共享，避免两处拼接逻辑不一致。
-        - 三个 memory 参数后允许继续透传 `SymbolValueType` 参数，保持 tile / shape 公开链路。
-
-        使用示例:
-        - signature = self._emit_npu_demo_launch_body_signature(func_op, body_input_types, body_arg_offset)
-
-        关联文件:
-        - spec: spec/dsl/gen_kernel/gen_kernel.md
-        - test: test/dsl/gen_kernel/test_gen_kernel.py
-        - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
-        """
-
-        func_name = func_op.sym_name.data
-        arg_names = self._arg_names(func_op)
-        body_arg_names = arg_names[body_arg_offset:]
-        params: list[str] = []
-        for arg_name, arg_type in zip(body_arg_names, body_input_types, strict=True):
-            if isinstance(arg_type, NnMemoryType):
-                params.append(f"{self._type_to_c(arg_type)}& {arg_name}")
-                continue
-            if isinstance(arg_type, SymbolValueType):
-                params.append(f"{self._type_to_c(arg_type)} {arg_name}")
-                continue
-        if len(params) != len(body_input_types):
-            raise self._error(func_name, "unsupported npu_demo launch body signature")
-        template_prefix = self._template_prefix_from_types(body_input_types)
-        return f"{template_prefix}static void {func_name}({', '.join(params)})"
-
-    def _emit_npu_demo_launch_wrapper_function(self, wrapper_func: func.FuncOp, body_func: func.FuncOp) -> str:
-        """生成 npu_demo wrapper 函数源码。
-
-
-        功能说明:
-        - wrapper 负责把 `lhs/rhs/out` 与 trailing `!symbol.int` 参数原样透传给
-          `npu_demo::launch<block, thread, subthread, shared_memory_size>(body, ...)`。
-        - launch extent 对应 wrapper IR 中的独立 `symbol.const`；源码保留
-          `constexpr S_INT` 诊断变量，同时 `npu_demo::launch<...>` 使用整数字面量满足 C++ 模板参数约束。
-        - wrapper 与 body 均不显式暴露 `KernelContext` 参数，body 通过 npu_demo free helper 读取活动上下文。
-
-        使用示例:
-        - source = self._emit_npu_demo_launch_wrapper_function(wrapper_func, body_func)
-
-        关联文件:
-        - spec: spec/dsl/gen_kernel/gen_kernel.md
-        - test: test/dsl/gen_kernel/test_gen_kernel.py
-        - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
-        """
-
-        body_input_types, _body_arg_offset = self._validate_npu_demo_launch_wrapper_signature(wrapper_func, body_func)
-        arg_names = self._arg_names(wrapper_func)
-        launch_op = self._filtered_launch_ops(wrapper_func)[0]
-        block_extent, thread_extent, subthread_extent, shared_memory_size_extent = self._launch_extents_from_wrapper(
-            launch_op,
-            wrapper_func.sym_name.data,
-        )
-        params: list[str] = []
-        for index, (arg_name, arg_type) in enumerate(zip(arg_names, wrapper_func.function_type.inputs.data, strict=True)):
-            if isinstance(arg_type, NnMemoryType):
-                params.append(self._normalize_memory_stmt(f"{self._type_to_c(arg_type)}& {arg_name}"))
-                continue
-            if isinstance(arg_type, SymbolValueType):
-                params.append(f"{self._signature_type_to_c(arg_type)} {arg_name}")
-                continue
-        if len(params) != len(wrapper_func.function_type.inputs.data):
-            raise self._error(wrapper_func.sym_name.data, "unsupported npu_demo launch wrapper signature")
-        template_prefix = self._template_prefix_from_types(list(wrapper_func.function_type.inputs.data))
-        signature = f"{template_prefix}void {wrapper_func.sym_name.data}({', '.join(params)})"
-        self.ctx.push_indent()
-        extent_names: list[str] = []
-        extent_lines: list[str] = []
-        for extent in (block_extent, thread_extent, subthread_extent, shared_memory_size_extent):
-            extent_name = self.ctx.allocate_name("c_")
-            extent_names.append(extent_name)
-            extent_lines.append(f"{self.ctx.current_indent}constexpr S_INT {extent_name} = {extent};")
-        call_args = ", ".join(arg_names)
-        body_callee = self._template_call_name(body_func.sym_name.data, body_input_types)
-        block_text = str(block_extent)
-        thread_text = str(thread_extent)
-        subthread_text = str(subthread_extent)
-        shared_memory_size_text = str(shared_memory_size_extent)
-        launch_line = (
-            f"{self.ctx.current_indent}npu_demo::launch<{block_text}, {thread_text}, {subthread_text}, {shared_memory_size_text}>({body_callee}, {call_args});"
-            if call_args
-            else f"{self.ctx.current_indent}npu_demo::launch<{block_text}, {thread_text}, {subthread_text}, {shared_memory_size_text}>({body_callee});"
-        )
-        body = "\n".join([*extent_lines, launch_line])
-        self.ctx.pop_indent()
-        source = self._prepend_template_instance_seed_lines(wrapper_func, f"{signature} {{\n{body}\n}}")
-        metadata_comment = self._allow_absent_memory_metadata_comment(body_func, body_arg_offset=_body_arg_offset)
-        if metadata_comment:
-            return f"{metadata_comment}\n{source}"
-        return source
-
     def _get_npu_demo_body_level_kernel_types(self, func_op: func.FuncOp) -> tuple[NnMemoryType, NnMemoryType]:
         func_name = func_op.sym_name.data
         input_types = list(func_op.function_type.inputs.data)
@@ -1195,72 +1225,6 @@ class KernelEmitter:
             func_op.sym_name.data,
             f"unsupported npu_demo body-level kernel body op {first_op.name}",
         )
-
-    def _emit_npu_demo_body_level_kernel_signature(self, func_op: func.FuncOp) -> str:
-        source_type, out_type = self._get_npu_demo_body_level_kernel_types(func_op)
-        arg_names = self._arg_names(func_op)
-        for arg_name, arg_value in zip(arg_names, func_op.args, strict=True):
-            self.ctx.bind_name(arg_value, arg_name)
-        source_name = self.ctx.lookup_name(func_op.args[1]) or arg_names[1]
-        source_type_text = self._normalize_memory_stmt(f"{self._type_to_c(source_type)}& {source_name}")
-        out_type_text = self._normalize_memory_stmt(f"{self._type_to_c(out_type)}& out")
-        return (
-            f"{self._template_prefix_from_types([source_type, out_type])}void {func_op.sym_name.data}({source_type_text}, "
-            f"{out_type_text})"
-        )
-
-    def _emit_npu_demo_body_level_kernel_body(self, func_op: func.FuncOp) -> str:
-        """生成 npu_demo body-level kernel 的固定函数体骨架。
-
-
-        功能说明:
-        - 输出 `thread_id/thread_num -> get_dynamic_memory -> view/slice/add/deslice` 的受控顺序。
-        - 仅接受冻结子集，遇到非法 body 结构时必须显式失败。
-
-        使用示例:
-        - body = self._emit_npu_demo_body_level_kernel_body(func_op)
-
-        关联文件:
-        - spec: spec/dsl/gen_kernel/gen_kernel.md
-        - test: test/dsl/gen_kernel/test_gen_kernel.py
-        - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
-        """
-
-        self._validate_npu_demo_body_level_kernel_body(func_op)
-        source_type, out_type = self._get_npu_demo_body_level_kernel_types(func_op)
-        arg_names = self._arg_names(func_op)
-        for arg_name, arg_value in zip(arg_names, func_op.args, strict=True):
-            if self.ctx.lookup_name(arg_value) is None:
-                self.ctx.bind_name(arg_value, arg_name)
-        source_name = self.ctx.lookup_name(func_op.args[1]) or arg_names[1]
-        element_type = self._type_to_c(out_type.element_type)
-        source_view_accessor = "template view" if source_type.template_name.data else "view"
-        lines = [
-            f"{self.ctx.current_indent}S_INT tid = npu_demo::thread_id();",
-            f"{self.ctx.current_indent}S_INT tnum = npu_demo::thread_num();",
-            "",
-            (
-                f"{self.ctx.current_indent}Memory<MemorySpace::TSM, {element_type}> tsm = "
-                f"npu_demo::get_dynamic_memory<MemorySpace::TSM>();"
-            ),
-            (
-                f"{self.ctx.current_indent}Memory<MemorySpace::TLM1, {element_type}> tlm = "
-                f"npu_demo::get_dynamic_memory<MemorySpace::TLM1>();"
-            ),
-            "",
-            f"{self.ctx.current_indent}auto src_view = {source_name}.{source_view_accessor}<{element_type}>"
-            f"({{tid * 16}} /*offset*/, {{16}} /*size*/, {{1}} /*stride*/);",
-            f"{self.ctx.current_indent}auto work_tile = tsm.view<{element_type}>"
-            f"({{0}} /*offset*/, {{16}} /*size*/, {{1}} /*stride*/);",
-            f"{self.ctx.current_indent}auto out_tile = tsm.view<{element_type}>"
-            f"({{0}} /*offset*/, {{16}} /*size*/, {{1}} /*stride*/);",
-            "",
-            f"{self.ctx.current_indent}slice(work_tile, src_view, {{0}} /*offset*/, {{16}} /*size*/, {{1}} /*stride*/);",
-            f"{self.ctx.current_indent}add<MemorySpace::TSM, {element_type}, {element_type}>"
-            f"(out_tile, work_tile, work_tile);",
-            f"{self.ctx.current_indent}deslice(out, out_tile, {{tid * 16}} /*offset*/, {{16}} /*size*/, {{1}} /*stride*/);",
-        ]
-        return "\n".join(lines)
 
     def _format_npu_demo_barrier_stmt(self, barrier_op: ArchBarrierOp, func_name: str) -> str:
         if barrier_op.scope.scope.data != "block":

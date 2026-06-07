@@ -2,7 +2,7 @@
 
 功能说明:
 - 将 `arch.launch<block, thread, subthread, shared_memory_size>(@callee, args...)`
-  发射为 `npu_demo::launch<...>(callee, args...)`。
+  发射为 `npu_demo::KernelContext ctx; npu_demo::launch<..., callee>(ctx, args...)`。
 - 仅承接 outline 后的 host dispatcher / wrapper 启动语义。
 
 API 列表:
@@ -27,31 +27,6 @@ from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp
 
 from ...register import emit_c_impl
-
-
-def _template_call_name(func_name: str, args: tuple[SSAValue, ...]) -> str:
-    """生成 launch callee 的模板实参文本。
-
-    功能说明:
-    - 从 `arch.launch` args 的 `NnMemoryType.template_name` 中按出现顺序去重。
-    - 无 template name 时返回原函数名。
-
-    使用示例:
-    - name = _template_call_name("kernel_device", args)
-    """
-
-    names: list[str] = []
-    for arg in args:
-        arg_type = arg.type
-        if not isinstance(arg_type, NnMemoryType):
-            continue
-        arg_type.verify()
-        template_name = arg_type.template_name.data
-        if template_name and template_name not in names:
-            names.append(template_name)
-    if not names:
-        return func_name
-    return f"{func_name}<{', '.join(names)}>"
 
 
 def _generic_op_name(op: Operation) -> str:
@@ -130,14 +105,44 @@ def _emit_npu_demo_arch_launch(op: ArchLaunchOp, ctx) -> str:
     if not callee_name or len(op.callee.nested_references.data) != 0:
         raise ctx.emit_error("arch.launch", "callee must be flat @symbol")
     launch_args = tuple(SSAValue.get(arg) for arg in op.args)
-    callee = _template_call_name(callee_name, launch_args)
-    block = _launch_template_arg(op.block, ctx)
-    thread = _launch_template_arg(op.thread, ctx)
-    subthread = _launch_template_arg(op.subthread, ctx)
-    shared_memory_size = _launch_template_arg(op.shared_memory_size, ctx)
+    template_names: list[str] = []
+    for arg in launch_args:
+        arg_type = arg.type
+        if not isinstance(arg_type, NnMemoryType):
+            continue
+        arg_type.verify()
+        template_name = arg_type.template_name.data
+        if template_name and template_name not in template_names:
+            template_names.append(template_name)
+    callee = callee_name
+    if template_names:
+        callee = f"{callee_name}<{', '.join(template_names)}>"
+    template_args: list[str] = []
+    for extent_value in (op.block, op.thread, op.subthread, op.shared_memory_size):
+        owner = extent_value.owner
+        if isinstance(owner, SymbolConstOp):
+            template_args.append(str(owner.value.data))
+            continue
+        op_name_attr = owner.attributes.get("op_name__")
+        op_name = op_name_attr.data if isinstance(op_name_attr, StringAttr) else owner.name
+        if op_name != "symbol.const":
+            raise ctx.emit_error("arch.launch", "launch extent must be symbol.const")
+        value_attr = owner.attributes.get("value")
+        if isinstance(value_attr, IntAttr):
+            template_args.append(str(value_attr.data))
+            continue
+        if isinstance(value_attr, IntegerAttr):
+            template_args.append(str(value_attr.value.data))
+            continue
+        raise ctx.emit_error("arch.launch", "launch extent must be symbol.const")
+    block, thread, subthread, shared_memory_size = template_args
     arg_text = ", ".join(emit_c_value(arg, ctx) for arg in launch_args)
-    call_args = f"{callee}, {arg_text}" if arg_text else callee
+    call_args = f"ctx, {arg_text}" if arg_text else "ctx"
+    nested_indent = f"{ctx.current_indent}    "
     return (
-        f"{ctx.current_indent}npu_demo::launch<{block}, {thread}, {subthread}, {shared_memory_size}>"
-        f"({call_args});"
+        f"{ctx.current_indent}{{\n"
+        f"{nested_indent}npu_demo::KernelContext ctx;\n"
+        f"{nested_indent}npu_demo::launch<{block}, {thread}, {subthread}, {shared_memory_size}, {callee}>"
+        f"({call_args});\n"
+        f"{ctx.current_indent}}}"
     )

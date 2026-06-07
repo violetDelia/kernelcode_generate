@@ -171,7 +171,7 @@ def _emit_npu_demo_dma_alloc(op: DmaAllocOp, ctx) -> str:
     """发射 npu_demo `dma.alloc` C++ 语句。
 
     功能说明:
-    - 根据 `DmaAllocOp` 的 memory type、dynamic shape 与 stride 生成 `alloc<...>(...)` 语句。
+    - 根据 `DmaAllocOp` 的 memory type、dynamic shape 与 stride 生成 `alloc<...>(ctx, ...)` 语句。
     - 仅作为当前文件内注册实现使用，不作为跨文件公开 API。
 
     使用示例:
@@ -192,19 +192,52 @@ def _emit_npu_demo_dma_alloc(op: DmaAllocOp, ctx) -> str:
             value_expr = value_type.expr.expr.data
             value_name = emit_c_value(value, ctx)
             dynamic_shape_values.append(value_name)
-            _bind_symbol_expr(symbol_bindings, value_expr, value_name)
+            stripped = value_expr.strip()
+            compact = stripped.replace(" ", "")
+            for expr_key in (stripped, f"({stripped})", compact, f"({compact})"):
+                symbol_bindings[expr_key] = value_name
             public_value = value_type.get_value()
             if isinstance(public_value, str):
-                _bind_symbol_expr(symbol_bindings, public_value, value_name)
-    shape_values = _format_full_rank_dynamic_shape_values(op, dynamic_shape_values) or _format_shape_values(
-        op, symbol_bindings, ctx
-    )
-    stride_values = _default_stride_values(shape_values)
+                stripped = public_value.strip()
+                compact = stripped.replace(" ", "")
+                for expr_key in (stripped, f"({stripped})", compact, f"({compact})"):
+                    symbol_bindings[expr_key] = value_name
+    if len(dynamic_shape_values) == len(result_type.shape.data):
+        shape_values = list(dynamic_shape_values)
+    else:
+        shape_values = []
+        for value in result_type.shape.data:
+            if isinstance(value, SymbolExprAttr):
+                expr = value.expr.data
+                stripped = expr.strip()
+                compact = stripped.replace(" ", "")
+                mapped = None
+                for expr_key in (stripped, f"({stripped})", compact, f"({compact})"):
+                    mapped = symbol_bindings.get(expr_key)
+                    if mapped is not None:
+                        break
+                shape_values.append(mapped if mapped is not None else expr)
+                continue
+            raise ctx.emit_error(op.name, "unsupported alloc layout value")
+    stride_values: list[str] = []
+    running_terms: list[str] = []
+    for value in reversed(shape_values):
+        stride_values.append("*".join(running_terms) if running_terms else "1")
+        if value != "1":
+            term = value if value.isidentifier() or value.isdecimal() else f"({value})"
+            running_terms.insert(0, term)
+    stride_values.reverse()
     space_expr = ctx.dispatch_attr(result_type)
-    element_type = _actual_memory_element_cpp_type(result_type, ctx)
+    element_type = ctx.dispatch_type(result_type.element_type)
+    rank = len(shape_values)
+    if rank == 0:
+        raise ctx.emit_error(op.name, "layout rank mismatch")
+    if rank > 8:
+        raise ctx.emit_error(op.name, "layout rank exceeds Vector brace-list capacity")
     shape_text = ", ".join(shape_values)
     stride_text = ", ".join(stride_values)
     return (
         f"{ctx.current_indent}Memory<{space_expr}, {element_type}> {result_name} = "
-        f"alloc<{space_expr}, {element_type}>({{{shape_text}}} /*shape*/, {{{stride_text}}} /*stride*/);"
+        f"alloc<{space_expr}, {element_type}>(ctx, {{{shape_text}}} /*shape*/, "
+        f"{{{stride_text}}} /*stride*/);"
     )

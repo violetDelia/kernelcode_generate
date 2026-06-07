@@ -38,7 +38,6 @@ from pathlib import Path
 import re
 from typing import Protocol, TypeAlias
 
-from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp
 
@@ -891,36 +890,6 @@ def _validate_dsl_cost_kind(cost_kind: str) -> None:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, DSL_COST_KIND_ERROR)
 
 
-def _append_cost_pass_for_named_npu_demo_pipeline(
-    pipeline: str | PassManager,
-    module: ModuleOp,
-    cost_kind: str,
-) -> ModuleOp:
-    """为命名 npu-demo pipeline 追加 cost sibling 生成 pass。
-
-
-    功能说明:
-    - `npu-demo-lowering` 正向 pipeline 不默认携带成本 sibling。
-    - `dsl_cost_run(...)` 使用该命名 pipeline 时，按公开 `LaunchKernelCostFuncPass` 补生成请求的 cost kind。
-    - 调用方显式传入 `PassManager` 时不追加，保留缺 sibling 必须失败的公开边界。
-
-    使用示例:
-    - lowered = _append_cost_pass_for_named_npu_demo_pipeline("npu-demo-lowering", lowered, "DMA1")
-
-    关联文件:
-    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
-    - test: [test/tools/test_dsl_cost_run.py](test/tools/test_dsl_cost_run.py)
-    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
-    """
-
-    if pipeline != "npu-demo-lowering":
-        return module
-    from kernel_gen.passes.tuning import LaunchKernelCostFuncPass
-
-    LaunchKernelCostFuncPass(cost_kind=cost_kind).apply(Context(), module)
-    return module
-
-
 def _find_cost_func_by_sym_name(module: ModuleOp, sym_name: str) -> func.FuncOp:
     """按公开 cost function 符号名查找 `func.func`。
 
@@ -1374,7 +1343,6 @@ def dsl_cost_run(
     lowered_module = _run_pipeline_with_optional_dump(resolved_pipeline, module, dump_kernel_dir)
     if not isinstance(lowered_module, ModuleOp):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInternalError: pipeline must return builtin.module")
-    lowered_module = _append_cost_pass_for_named_npu_demo_pipeline(pipeline, lowered_module, cost_kind)
 
     source_snapshot = snapshot_config()
     try:

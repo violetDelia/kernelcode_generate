@@ -24,24 +24,6 @@ from kernel_gen.dialect.nn import NnMemoryType
 from ...register import emit_c_impl
 
 
-def _memory_element_cpp_type(memory_type: NnMemoryType, ctx) -> str:
-    """返回当前文件发射 dma.view 所需的 C++ element type。
-
-    功能说明:
-    - 优先使用 `NnMemoryType.template_name` 作为模板 dtype。
-    - 未携带 template name 时通过 `ctx.dispatch_type(...)` 发射真实 element type。
-
-    使用示例:
-    - element_type = _memory_element_cpp_type(memory_type, ctx)
-    """
-
-    memory_type.verify()
-    template_name = memory_type.template_name.data
-    if template_name:
-        return template_name
-    return ctx.dispatch_type(memory_type.element_type)
-
-
 @emit_c_impl(DmaViewOp, target="npu_demo")
 def _emit_npu_demo_dma_view(op: DmaViewOp, ctx) -> str:
     """发射 npu_demo `dma.view` C++ 语句。
@@ -60,7 +42,8 @@ def _emit_npu_demo_dma_view(op: DmaViewOp, ctx) -> str:
     source_expr = emit_c_value(op.source, ctx)
     result_name = ctx.create_or_get_name(op.result)
     result_type = ctx.dispatch_type(op.result.type)
-    element_type = _memory_element_cpp_type(op.result.type, ctx)
+    op.result.type.verify()
+    element_type = op.result.type.template_name.data or ctx.dispatch_type(op.result.type.element_type)
     view_accessor = "view"
     if isinstance(op.source.type, NnMemoryType) and op.source.type.template_name.data:
         view_accessor = "template view"

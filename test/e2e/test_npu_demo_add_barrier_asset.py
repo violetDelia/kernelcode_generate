@@ -300,19 +300,21 @@ static void slow_barrier_probe(
     npu_demo::KernelContext& ctx,
     std::atomic<long long>* entered,
     long long* after_values) {
-    const long long bid = ctx.block_id();
+    (void)ctx;
+    const long long bid = npu_demo::block_id();
     if (bid == 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     entered->fetch_add(1);
-    ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
+    npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
     after_values[bid] = entered->load();
 }
 """
         barrier_assert = r"""
     std::atomic<long long> entered(0);
     long long after_values[2] = {-1, -1};
-    if (npu_demo::launch<2, 1, 1, 0>(slow_barrier_probe, &entered, after_values) != StatusCode::kOk) {
+    npu_demo::KernelContext probe_ctx;
+    if (npu_demo::launch<2, 1, 1, 0, slow_barrier_probe>(probe_ctx, &entered, after_values) != StatusCode::kOk) {
         return fail(4);
     }
     for (long long i = 0; i < 2; ++i) {
@@ -336,16 +338,14 @@ int main() {{
     float lhs_data[64];
     float rhs_data[64];
     float out_data[64] = {{0}};
-    long long shape[1] = {{64}};
-    long long stride[1] = {{1}};
     for (int i = 0; i < 64; ++i) {{
         lhs_data[i] = static_cast<float>(i + 1);
         rhs_data[i] = static_cast<float>(100 + i);
     }}
 
-    Memory<MemorySpace::GM, float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm);
-    Memory<MemorySpace::GM, float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm);
-    Memory<MemorySpace::GM, float> out(out_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> lhs(lhs_data, {{64}}, {{1}}, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> rhs(rhs_data, {{64}}, {{1}}, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> out(out_data, {{64}}, {{1}}, MemoryFormat::Norm);
     auto generated_entry = &add_barrier;
     auto generated_body = &add_barrier_body;
     if (generated_entry == nullptr || generated_body == nullptr) {{

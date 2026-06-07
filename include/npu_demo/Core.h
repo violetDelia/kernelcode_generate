@@ -8,12 +8,15 @@ API 列表:
 - `using Status = StatusCode`
 - `using S_INT = long long`
 - `class Vector`
-- `Vector::Vector(long long* data, unsigned long long size)`
-- `Vector::Vector(const long long* data, unsigned long long size)`
+- `template <typename Pointer> explicit Vector::Vector(Pointer data, unsigned long long size)`
 - `Vector::Vector(long long value0)`
 - `Vector::Vector(long long value0, long long value1)`
 - `Vector::Vector(long long value0, long long value1, long long value2)`
 - `Vector::Vector(long long value0, long long value1, long long value2, long long value3)`
+- `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4)`
+- `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5)`
+- `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5, long long value6)`
+- `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5, long long value6, long long value7)`
 - `Vector::Vector(const Vector& other)`
 - `Vector::operator=(const Vector& other) -> Vector&`
 - `Vector::size() const -> unsigned long long`
@@ -58,25 +61,9 @@ helper 清单:
 - test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
-inline Vector::Vector(long long* data, unsigned long long size)
-    : inline_data_{0, 0, 0, 0}, data_(data), size_(size) {}
-
-/*
-功能说明:
-- 使用只读连续缓冲区与元素个数构造 Vector 视图。
-
-使用示例:
-- const long long coords_buf[3] = {5, 0, 7};
-- Vector coords(coords_buf, 3);
-
-
-关联文件:
-- spec: spec/include/api/Core.md
-- test: test/include/api/core.py
-- 功能实现: include/npu_demo/Core.h
-*/
-inline Vector::Vector(const long long* data, unsigned long long size)
-    : inline_data_{0, 0, 0, 0}, data_(data), size_(size) {}
+template <typename Pointer, typename>
+inline Vector::Vector(Pointer data, unsigned long long size)
+    : inline_data_{0, 0, 0, 0, 0, 0, 0, 0}, data_(data), size_(size) {}
 
 /*
 功能说明:
@@ -92,7 +79,7 @@ inline Vector::Vector(const long long* data, unsigned long long size)
 - 功能实现: include/npu_demo/Core.h
 */
 inline Vector::Vector(long long value0)
-    : inline_data_{value0, 0, 0, 0}, data_(inline_data_), size_(1) {}
+    : inline_data_{value0, 0, 0, 0, 0, 0, 0, 0}, data_(inline_data_), size_(1) {}
 
 /*
 功能说明:
@@ -108,7 +95,7 @@ inline Vector::Vector(long long value0)
 - 功能实现: include/npu_demo/Core.h
 */
 inline Vector::Vector(long long value0, long long value1)
-    : inline_data_{value0, value1, 0, 0}, data_(inline_data_), size_(2) {}
+    : inline_data_{value0, value1, 0, 0, 0, 0, 0, 0}, data_(inline_data_), size_(2) {}
 
 /*
 功能说明:
@@ -124,7 +111,7 @@ inline Vector::Vector(long long value0, long long value1)
 - 功能实现: include/npu_demo/Core.h
 */
 inline Vector::Vector(long long value0, long long value1, long long value2)
-    : inline_data_{value0, value1, value2, 0}, data_(inline_data_), size_(3) {}
+    : inline_data_{value0, value1, value2, 0, 0, 0, 0, 0}, data_(inline_data_), size_(3) {}
 
 /*
 功能说明:
@@ -140,7 +127,92 @@ inline Vector::Vector(long long value0, long long value1, long long value2)
 - 功能实现: include/npu_demo/Core.h
 */
 inline Vector::Vector(long long value0, long long value1, long long value2, long long value3)
-    : inline_data_{value0, value1, value2, value3}, data_(inline_data_), size_(4) {}
+    : inline_data_{value0, value1, value2, value3, 0, 0, 0, 0}, data_(inline_data_), size_(4) {}
+
+/*
+功能说明:
+- 使用 5 个 `long long` 值构造自有存储 Vector。
+
+使用示例:
+- Vector dims{1, 2, 3, 4, 5};
+
+
+关联文件:
+- spec: spec/include/api/Core.md
+- test: test/include/api/core.py
+- 功能实现: include/npu_demo/Core.h
+*/
+inline Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4)
+    : inline_data_{value0, value1, value2, value3, value4, 0, 0, 0}, data_(inline_data_), size_(5) {}
+
+/*
+功能说明:
+- 使用 6 个 `long long` 值构造自有存储 Vector。
+
+使用示例:
+- Vector dims{1, 2, 3, 4, 5, 6};
+
+
+关联文件:
+- spec: spec/include/api/Core.md
+- test: test/include/api/core.py
+- 功能实现: include/npu_demo/Core.h
+*/
+inline Vector::Vector(
+    long long value0,
+    long long value1,
+    long long value2,
+    long long value3,
+    long long value4,
+    long long value5)
+    : inline_data_{value0, value1, value2, value3, value4, value5, 0, 0}, data_(inline_data_), size_(6) {}
+
+/*
+功能说明:
+- 使用 7 个 `long long` 值构造自有存储 Vector。
+
+使用示例:
+- Vector dims{1, 2, 3, 4, 5, 6, 7};
+
+
+关联文件:
+- spec: spec/include/api/Core.md
+- test: test/include/api/core.py
+- 功能实现: include/npu_demo/Core.h
+*/
+inline Vector::Vector(
+    long long value0,
+    long long value1,
+    long long value2,
+    long long value3,
+    long long value4,
+    long long value5,
+    long long value6)
+    : inline_data_{value0, value1, value2, value3, value4, value5, value6, 0}, data_(inline_data_), size_(7) {}
+
+/*
+功能说明:
+- 使用 8 个 `long long` 值构造自有存储 Vector。
+
+使用示例:
+- Vector dims{1, 2, 3, 4, 5, 6, 7, 8};
+
+
+关联文件:
+- spec: spec/include/api/Core.md
+- test: test/include/api/core.py
+- 功能实现: include/npu_demo/Core.h
+*/
+inline Vector::Vector(
+    long long value0,
+    long long value1,
+    long long value2,
+    long long value3,
+    long long value4,
+    long long value5,
+    long long value6,
+    long long value7)
+    : inline_data_{value0, value1, value2, value3, value4, value5, value6, value7}, data_(inline_data_), size_(8) {}
 
 /*
 功能说明:
@@ -156,7 +228,15 @@ inline Vector::Vector(long long value0, long long value1, long long value2, long
 - 功能实现: include/npu_demo/Core.h
 */
 inline Vector::Vector(const Vector& other)
-    : inline_data_{other.inline_data_[0], other.inline_data_[1], other.inline_data_[2], other.inline_data_[3]},
+    : inline_data_{
+          other.inline_data_[0],
+          other.inline_data_[1],
+          other.inline_data_[2],
+          other.inline_data_[3],
+          other.inline_data_[4],
+          other.inline_data_[5],
+          other.inline_data_[6],
+          other.inline_data_[7]},
       data_(other.data_ == other.inline_data_ ? inline_data_ : other.data_),
       size_(other.size_) {}
 
@@ -182,6 +262,10 @@ inline Vector& Vector::operator=(const Vector& other) {
     inline_data_[1] = other.inline_data_[1];
     inline_data_[2] = other.inline_data_[2];
     inline_data_[3] = other.inline_data_[3];
+    inline_data_[4] = other.inline_data_[4];
+    inline_data_[5] = other.inline_data_[5];
+    inline_data_[6] = other.inline_data_[6];
+    inline_data_[7] = other.inline_data_[7];
     data_ = other.data_ == other.inline_data_ ? inline_data_ : other.data_;
     size_ = other.size_;
     return *this;

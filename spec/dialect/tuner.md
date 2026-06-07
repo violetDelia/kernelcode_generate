@@ -22,13 +22,12 @@
 - `功能实现`：[`kernel_gen/dialect/tuner/`](../../kernel_gen/dialect/tuner/)
 - `test`：
   - [`test/dialect/tuner/`](../../test/dialect/tuner/)
-  - [`test/passes/tuning/test_launch_kernel_cost_func.py`](../../test/passes/tuning/test_launch_kernel_cost_func.py)
 
 ## 依赖
 
 - [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)：提供符号整数标量语义；`!symbol.int<#symbol.expr<name>>` 作为超参数标量类型由 `symbol dialect` 维护。
 - [`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)：定义 `SymbolDim` 的运行时语义边界，供超参数标量语义对齐。
-- [`spec/pass/tuning/launch_kernel_cost_func.md`](../pass/tuning/launch_kernel_cost_func.md)：消费 `tuner.cost` 作为 launch kernel cost function 的局部成本节点。
+- `LaunchKernelCostFuncPass` 已下线；`tuner.cost` 当前仅作为 dialect 层公开 IR 节点保留。
 
 ## 目标
 
@@ -160,16 +159,13 @@
 
 - 测试文件：
   - `test/dialect/tuner/`
-  - `test/passes/tuning/test_launch_kernel_cost_func.py`
 - 执行命令：
   - `pytest -q test/dialect/tuner/ -k "tuner_cost"`
-  - `pytest -q test/passes/tuning/test_launch_kernel_cost_func.py -k "launch_kernel_cost_func"`
 
 ### 测试目标
 
 - 验证 `tuner.cost` 的 parse/print、operand 透传、`!symbol.int<#symbol.expr<...>>` 结果类型、open-kind verifier 与错误路径。
 - 验证 `tuner.select` 的 `patterns`、`pattern_id` 结果类型与 `tuner.launch` 的 flat callee、arg type list、空 result 边界。
-- 验证 `launch-kernel-cost-func` 消费 `tuner.cost` 时的 kind 口径与错误路径一致。
 
 ### 功能与用例清单
 

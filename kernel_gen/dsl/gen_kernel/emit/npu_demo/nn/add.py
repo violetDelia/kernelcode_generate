@@ -46,7 +46,7 @@ def _emit_npu_demo_nn_add(op: NnAddOp, ctx) -> str:
     """发射 npu_demo `nn.add` C++ 语句。
 
     功能说明:
-    - 根据 `NnAddOp` 的 lhs/rhs/result memory 生成 `add<...>(...)` 语句。
+    - 根据 `NnAddOp` 的 lhs/rhs/result memory 生成 `add<...>(ctx, ...)` 语句。
     - memory dtype 模板参数由当前文件内 helper 读取 template name 或真实 dtype。
 
     使用示例:
@@ -63,9 +63,11 @@ def _emit_npu_demo_nn_add(op: NnAddOp, ctx) -> str:
     lhs_expr = emit_c_value(op.lhs, ctx)
     rhs_expr = emit_c_value(op.rhs, ctx)
     space_expr = ctx.dispatch_attr(op.result.type)
-    input_type = _memory_element_cpp_type(op.lhs.type, ctx)
-    output_type = _memory_element_cpp_type(op.result.type, ctx)
+    op.lhs.type.verify()
+    input_type = op.lhs.type.template_name.data or ctx.dispatch_type(op.lhs.type.element_type)
+    op.result.type.verify()
+    output_type = op.result.type.template_name.data or ctx.dispatch_type(op.result.type.element_type)
     return (
         f"{ctx.current_indent}add<{space_expr}, {input_type}, {output_type}>"
-        f"({result_name} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
+        f"(ctx, {result_name} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
     )

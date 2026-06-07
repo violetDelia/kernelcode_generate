@@ -7,12 +7,15 @@ API 列表:
 - `using Status = StatusCode`
 - `using S_INT = long long`
 - `class Vector`
-- `Vector::Vector(long long* data, unsigned long long size)`
-- `Vector::Vector(const long long* data, unsigned long long size)`
+- `template <typename Pointer> explicit Vector::Vector(Pointer data, unsigned long long size)`
 - `Vector::Vector(long long value0)`
 - `Vector::Vector(long long value0, long long value1)`
 - `Vector::Vector(long long value0, long long value1, long long value2)`
 - `Vector::Vector(long long value0, long long value1, long long value2, long long value3)`
+- `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4)`
+- `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5)`
+- `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5, long long value6)`
+- `Vector::Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5, long long value6, long long value7)`
 - `Vector::Vector(const Vector& other)`
 - `Vector::operator=(const Vector& other) -> Vector&`
 - `Vector::size() const -> unsigned long long`
@@ -39,6 +42,8 @@ helper 清单:
 
 #ifndef KERNELCODE_GENERATE_INCLUDE_API_CORE_H_
 #define KERNELCODE_GENERATE_INCLUDE_API_CORE_H_
+
+#include <type_traits>
 
 /*
 功能说明:
@@ -91,7 +96,7 @@ using S_INT = long long;
 /*
 功能说明:
 - 轻量坐标/索引向量视图，封装调用方提供的连续 int64 缓冲区。
-- 支持 1..4 个 `long long` 值的花括号构造，并把值复制到对象内联存储。
+- 支持 1..8 个 `long long` 值的花括号构造，并把值复制到对象内联存储。
 
 使用示例:
 - long long coords_buf[3] = {5, 0, 7};
@@ -120,23 +125,12 @@ public:
     - test: test/include/api/core.py
     - 功能实现: include/npu_demo/Core.h
     */
-    Vector(long long* data, unsigned long long size);
-
-    /*
-    功能说明:
-    - 使用只读连续缓冲区与元素个数构造 Vector 视图。
-
-    使用示例:
-    - const long long coords_buf[3] = {5, 0, 7};
-    - Vector coords(coords_buf, 3);
-
-
-    关联文件:
-    - spec: spec/include/api/Core.md
-    - test: test/include/api/core.py
-    - 功能实现: include/npu_demo/Core.h
-    */
-    Vector(const long long* data, unsigned long long size);
+    template <
+        typename Pointer,
+        typename = std::enable_if_t<
+            std::is_pointer<Pointer>::value &&
+            std::is_same<std::remove_cv_t<std::remove_pointer_t<Pointer>>, long long>::value>>
+    explicit Vector(Pointer data, unsigned long long size);
 
     /*
     功能说明:
@@ -197,6 +191,81 @@ public:
     - 功能实现: include/npu_demo/Core.h
     */
     Vector(long long value0, long long value1, long long value2, long long value3);
+
+    /*
+    功能说明:
+    - 使用 5 个 `long long` 值构造自有存储 Vector。
+
+    使用示例:
+    - Vector dims{1, 2, 3, 4, 5};
+
+
+    关联文件:
+    - spec: spec/include/api/Core.md
+    - test: test/include/api/core.py
+    - 功能实现: include/npu_demo/Core.h
+    */
+    Vector(long long value0, long long value1, long long value2, long long value3, long long value4);
+
+    /*
+    功能说明:
+    - 使用 6 个 `long long` 值构造自有存储 Vector。
+
+    使用示例:
+    - Vector dims{1, 2, 3, 4, 5, 6};
+
+
+    关联文件:
+    - spec: spec/include/api/Core.md
+    - test: test/include/api/core.py
+    - 功能实现: include/npu_demo/Core.h
+    */
+    Vector(long long value0, long long value1, long long value2, long long value3, long long value4, long long value5);
+
+    /*
+    功能说明:
+    - 使用 7 个 `long long` 值构造自有存储 Vector。
+
+    使用示例:
+    - Vector dims{1, 2, 3, 4, 5, 6, 7};
+
+
+    关联文件:
+    - spec: spec/include/api/Core.md
+    - test: test/include/api/core.py
+    - 功能实现: include/npu_demo/Core.h
+    */
+    Vector(
+        long long value0,
+        long long value1,
+        long long value2,
+        long long value3,
+        long long value4,
+        long long value5,
+        long long value6);
+
+    /*
+    功能说明:
+    - 使用 8 个 `long long` 值构造自有存储 Vector。
+
+    使用示例:
+    - Vector dims{1, 2, 3, 4, 5, 6, 7, 8};
+
+
+    关联文件:
+    - spec: spec/include/api/Core.md
+    - test: test/include/api/core.py
+    - 功能实现: include/npu_demo/Core.h
+    */
+    Vector(
+        long long value0,
+        long long value1,
+        long long value2,
+        long long value3,
+        long long value4,
+        long long value5,
+        long long value6,
+        long long value7);
 
     /*
     功能说明:
@@ -305,7 +374,7 @@ public:
     const long long& operator[](unsigned long long index) const;
 
 private:
-    long long inline_data_[4];
+    long long inline_data_[8];
     const long long* data_;
     unsigned long long size_;
 };

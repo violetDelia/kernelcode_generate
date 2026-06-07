@@ -1291,11 +1291,13 @@ def test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain(
     assert ", S_INT arg3, S_INT arg4" in source
     assert "void matmul_kernel_pattern0_device(" in source
     assert "void matmul_kernel_pattern1_device(" in source
-    assert "npu_demo::KernelContext& ctx" not in source
+    assert "npu_demo::KernelContext& ctx" in source
+    assert "template <typename Context>" not in source
+    assert "<npu_demo::KernelContext>" not in source
     assert ", S_INT arg3, S_INT arg4" in source
     assert "npu_demo::launch<" in source
-    assert "(matmul_kernel_pattern0_device<" in source
-    assert "(matmul_kernel_pattern1_device<" in source
-    assert "arg0, arg1, arg2, arg3, arg4);" in source
+    assert "npu_demo::launch<2, 1, 1, 0, matmul_kernel_pattern0_device<" in source
+    assert "npu_demo::launch<2, 1, 1, 0, matmul_kernel_pattern1_device<" in source
+    assert "(ctx, arg0, arg1, arg2, arg3, arg4);" in source
     assert "get_dynamic_memory" in source
     assert "reinterpret_cast" in source

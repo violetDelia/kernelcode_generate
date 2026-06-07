@@ -174,7 +174,7 @@ def _compile_only(source: str) -> None:
 
 
 # API-ARCH-001
-# 测试目的: 验证 `BarrierScope` 与 `launch<block, thread, subthread, shared_memory_size>(callee, args...)` 的公开接口面可配合后端实现编译运行。
+# 测试目的: 验证 `BarrierScope` 与 `launch<block, thread, subthread, shared_memory_size, name>(ctx, args...)` 的公开接口面可配合后端实现编译运行。
 # 使用示例: `pytest -q test/include/api/test_arch.py -k test_include_api_arch_exports_public_launch_and_scope_contract`
 # 对应功能实现文件路径: `include/npu_demo/Arch.h`
 # 对应 spec 文件路径: `spec/include/api/Arch.md`
@@ -189,14 +189,13 @@ static int fail(int code) { return code; }
 static void kernel_body(
     npu_demo::KernelContext& ctx,
     long long* seen_block_ids,
-    long long* seen_block_nums,
     long long* seen_thread_ids,
     long long* seen_thread_nums) {
-    ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
+    (void)ctx;
+    npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
     const long long bid = block_id();
     const long long tid = thread_id();
     seen_block_ids[bid] = bid;
-    seen_block_nums[bid] = ctx.block_num();
     seen_thread_ids[bid] = tid;
     seen_thread_nums[bid] = thread_num();
 }
@@ -216,13 +215,12 @@ int main() {
     }
 
     long long seen_block_ids[2] = {-1, -1};
-    long long seen_block_nums[2] = {0, 0};
     long long seen_thread_ids[2] = {-1, -1};
     long long seen_thread_nums[2] = {0, 0};
-    Status status = launch<2, 1, 1, 0>(
-        kernel_body,
+    npu_demo::KernelContext ctx;
+    Status status = launch<2, 1, 1, 0, kernel_body>(
+        ctx,
         seen_block_ids,
-        seen_block_nums,
         seen_thread_ids,
         seen_thread_nums);
     if (status != StatusCode::kOk) {
@@ -231,9 +229,6 @@ int main() {
     for (long long i = 0; i < 2; ++i) {
         if (seen_block_ids[i] != i) {
             return fail(6);
-        }
-        if (seen_block_nums[i] != 2) {
-            return fail(7);
         }
         if (seen_thread_ids[i] != 0) {
             return fail(8);
@@ -260,8 +255,12 @@ def test_include_api_arch_rejects_string_callee_contract() -> None:
 #include "include/api/Arch.h"
 #include "include/npu_demo/Arch.h"
 
+extern const char kernel_name[];
+const char kernel_name[] = "kernel_name";
+
 int main() {
-    return launch<2, 1, 1, 0>("kernel_name");
+    npu_demo::KernelContext ctx;
+    return launch<2, 1, 1, 0, kernel_name>(ctx) == StatusCode::kOk ? 0 : 1;
 }
 """
     )
@@ -281,16 +280,14 @@ def test_include_api_arch_keeps_backend_impl_out_of_api_header() -> None:
     assert "enum class BarrierVisibility" in header
     assert "enum class BarrierScope" in header
     assert "class KernelContext" in header
-    assert "virtual long long block_id() const = 0;" in header
-    assert "virtual long long block_num() const = 0;" in header
-    assert "virtual long long thread_id() const = 0;" in header
-    assert "virtual long long thread_num() const = 0;" in header
+    assert "block_id() const" not in header
+    assert "block_num() const" not in header
+    assert "thread_id() const" not in header
+    assert "thread_num() const" not in header
+    assert "get_dynamic_memory() const" not in header
     assert "S_INT block_id();" in header
     assert "S_INT thread_id();" in header
     assert "S_INT thread_num();" in header
-    assert "std::initializer_list<BarrierVisibility> visibility" in header
-    assert "BarrierScope scope" in header
-    assert "Memory<Space, T> get_dynamic_memory() const;" in header
     assert "class DynamicMemoryRef" in header
     assert "DynamicMemoryRef<Space> get_dynamic_memory();" in header
     assert "SUBTHREAD" in header
@@ -336,7 +333,7 @@ int main() {
 
 
 # API-ARCH-005
-# 测试目的: 验证 `include/api/Arch.h` 已显式声明抽象 `KernelContext` 接口面，且源码侧可在不引入后端实现的前提下引用这些公开声明。
+# 测试目的: 验证 `include/api/Arch.h` 已显式声明 opaque `KernelContext` 接口面，且源码侧可在不引入后端实现的前提下引用这些公开声明。
 # 使用示例: `pytest -q test/include/api/test_arch.py -k test_include_api_arch_declares_public_kernel_context_surface`
 # 对应功能实现文件路径: `include/api/Arch.h`
 # 对应 spec 文件路径: `spec/include/api/Arch.md`
@@ -347,14 +344,10 @@ def test_include_api_arch_declares_public_kernel_context_surface() -> None:
 
 #include "include/api/Arch.h"
 
-static_assert(std::is_abstract<KernelContext>::value, "KernelContext must stay abstract in include/api");
+static_assert(!std::is_abstract<KernelContext>::value, "KernelContext must be opaque but instantiable in include/api");
 
 void inspect(KernelContext& ctx) {
-    (void)ctx.block_id();
-    (void)ctx.block_num();
-    (void)ctx.thread_id();
-    (void)ctx.thread_num();
-    ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
+    (void)ctx;
     (void)block_id();
     (void)thread_id();
     (void)thread_num();

@@ -33,12 +33,12 @@ _MEM_TYPE = "!nn.memory<[#symbol.expr<4>], [#symbol.expr<1>], f32, #nn.space<glo
 
 
 # TC-EMITC-CASE-RUNNER-001
-# 功能说明: 验证 helper 可把 `tuner.cost(kernel.add)` expectation case 执行到 npu_demo 源码文本。
+# 功能说明: 验证 helper 对旧 `tuner.cost(kernel.add)` expectation case 按 npu_demo unsupported 路径失败。
 # 使用示例: pytest -q test/tools/test_emitc_case_runner.py -k test_run_emitc_case_lowers_npu_demo_tuner_cost_kernel_add
 # 对应功能实现文件路径: kernel_gen/tools/emitc_case_runner.py
 # 对应 spec 文件路径: spec/tools/emitc_case_runner.md
 # 对应测试文件路径: test/tools/test_emitc_case_runner.py
-def test_run_emitc_case_lowers_npu_demo_tuner_cost_kernel_add() -> None:
+def test_run_emitc_case_rejects_npu_demo_tuner_cost_kernel_add() -> None:
     case_text = f"""// COMPILE_ARGS: --pass no-op
 // CHECK: void cost_add_case(
 
@@ -54,21 +54,17 @@ builtin.module {{
   }}
 }}"""
 
-    source = run_emitc_case(
-        case_text,
-        source_path="inline#kernel_add",
-        expected_snippets=[
-            '#include "include/npu_demo/npu_demo.h"',
-            "S_INT cost0 = cost::add<GM, float, float, VECTOR1>(arg0 /*out*/, arg1 /*lhs*/, arg2 /*rhs*/);",
-            "S_INT v0 = (cost0 + cost0);",
-        ],
-        forbidden_snippets=[
-            "tuner.cost(",
-            '"kernel.add"',
-        ],
-    )
-
-    assert "void cost_add_case(" in source
+    with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op"):
+        run_emitc_case(
+            case_text,
+            source_path="inline#kernel_add",
+            expected_snippets=[
+                '#include "include/npu_demo/npu_demo.h"',
+            ],
+            forbidden_snippets=[
+                "cost::",
+            ],
+        )
 
 
 # TC-EMITC-CASE-RUNNER-002
@@ -120,14 +116,14 @@ builtin.module {
         source_path="inline#plain_symbol_cast",
         op_name="symbol.cast",
         expected_snippets=[
-            "void symbol_cast_case()",
+            "template <typename Context>\nvoid symbol_cast_case(Context& ctx)",
             "S_INT c_0 = 9;",
             "int32_t c_0_cast_int32_t = c_0;",
         ],
         forbidden_snippets=["launch<", "arch.launch"],
     )
 
-    assert "void symbol_cast_case()" in source
+    assert "void symbol_cast_case(Context& ctx)" in source
 
 
 # TC-EMITC-CASE-RUNNER-003A
@@ -153,12 +149,12 @@ builtin.module {
         expected_snippets=[
             '#include "include/npu_demo/npu_demo.h"',
             "using namespace npu_demo;",
-            "void npu_demo_header_case()",
+            "template <typename Context>\nvoid npu_demo_header_case(Context& ctx)",
         ],
         forbidden_snippets=["launch<", "arch.launch"],
     )
 
-    assert "void npu_demo_header_case()" in source
+    assert "void npu_demo_header_case(Context& ctx)" in source
 
 
 # TC-EMITC-CASE-RUNNER-003B
@@ -186,13 +182,13 @@ builtin.module {
         expected_snippets=[
             '#include "include/npu_demo/npu_demo.h"',
             "using namespace npu_demo;",
-            "void npu_demo_header_case()",
+            "template <typename Context>\nvoid npu_demo_header_case(Context& ctx)",
             "S_INT c_0 = 0;",
         ],
         forbidden_snippets=["launch<", "arch.launch"],
     )
 
-    assert "void npu_demo_header_case()" in source
+    assert "void npu_demo_header_case(Context& ctx)" in source
 
 
 # TC-EMITC-CASE-RUNNER-004
@@ -219,7 +215,10 @@ builtin.module {
         forbidden_snippets=["dma.cast"],
     )
 
-    assert "void dma_cast_case(Memory<GM, int32_t>& arg0, Memory<GM, float>& arg1)" in source
+    assert (
+        "template <typename Context>\n"
+        "void dma_cast_case(Context& ctx, Memory<GM, int32_t>& arg0, Memory<GM, float>& arg1)"
+    ) in source
 
 
 # TC-EMITC-CASE-RUNNER-005
@@ -249,4 +248,4 @@ builtin.module {
         forbidden_snippets=["kernel.exp"],
     )
 
-    assert "exp<GM, float, float>(arg1 /*out*/, arg0 /*input*/);" in source
+    assert "exp<GM, float, float>(ctx, arg1 /*out*/, arg0 /*input*/);" in source

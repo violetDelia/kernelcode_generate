@@ -29,7 +29,7 @@ def _emit_npu_demo_kernel_matmul(op: KernelMatmulOp, ctx) -> str:
     """发射 npu_demo `kernel.matmul` C++ 语句。
 
     功能说明:
-    - 根据 `KernelMatmulOp` 的 lhs/rhs/out memory 生成 `matmul<...>(...)` 语句。
+    - 根据 `KernelMatmulOp` 的 lhs/rhs/out memory 生成 `matmul<...>(ctx, ...)` 语句。
     - 静态 acc 使用 `true/false` 字面量，动态 acc operand 使用对应 C++ 表达式。
     - 仅作为当前文件内注册实现使用，不作为跨文件公开 API。
 
@@ -80,6 +80,6 @@ def _emit_npu_demo_kernel_matmul(op: KernelMatmulOp, ctx) -> str:
             acc_literal = "true"
     return (
         f"{ctx.current_indent}matmul<{lhs_space}, {rhs_space}, {out_space}, "
-        f"{lhs_type}, {rhs_type}, {out_type}>({out_expr} /*out*/, {lhs_expr} /*lhs*/, "
+        f"{lhs_type}, {rhs_type}, {out_type}>(ctx, {out_expr} /*out*/, {lhs_expr} /*lhs*/, "
         f"{rhs_expr} /*rhs*/, {acc_literal} /*acc*/);"
     )

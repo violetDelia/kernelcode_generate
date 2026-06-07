@@ -6,7 +6,7 @@
 
 API 列表:
 - `namespace npu_demo`
-- `template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args> Status npu_demo::launch(Callable&& callee, Args&&... args)`
+- `template <long long block, long long thread, long long subthread, long long shared_memory_size, auto name, typename Context, typename... Args> Status npu_demo::launch(Context& ctx, Args&&... args)`
 - `class npu_demo::KernelContext`
 - `npu_demo::block_id() -> S_INT`
 - `npu_demo::thread_id() -> S_INT`
@@ -14,26 +14,21 @@ API 列表:
 - `npu_demo::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) -> void`
 - `template <MemorySpace Space> npu_demo::get_dynamic_memory() -> DynamicMemoryRef<Space>`
 - `void npu_demo::build_contiguous_stride(const long long* shape, unsigned long long rank, long long* out_stride)`
-- `template <MemorySpace Space, typename T> Memory<Space, T> npu_demo::alloc(std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
-- `template <MemorySpace Space, typename T> Status npu_demo::fill(Memory<Space, T>& target, const T& value)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::slice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::slice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::deslice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::deslice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::transpose(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& perm)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::transpose(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> perm)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::store(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::load(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::broadcast(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::min(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename T, typename Context> Memory<Space, T> npu_demo::alloc(Context& ctx, const Vector& shape, const Vector& stride, MemoryFormat format = MemoryFormat::Norm)`
+- `template <MemorySpace Space, typename T, typename Context> Status npu_demo::fill(Context& ctx, Memory<Space, T>& target, const T& value)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, typename Context> Status npu_demo::slice(Context& ctx, Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, typename Context> Status npu_demo::deslice(Context& ctx, Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::transpose(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& perm)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::store(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::load(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType, typename Context> Status npu_demo::broadcast(Context& ctx, Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::min(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::max(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType, cost::CostKind Kind> S_INT npu_demo::cost::min(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType, cost::CostKind Kind> S_INT npu_demo::cost::max(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, cost::CostKind Kind> S_INT npu_demo::cost::copy(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, cost::CostKind Kind> S_INT npu_demo::cost::slice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, cost::CostKind Kind> S_INT npu_demo::cost::slice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, cost::CostKind Kind> S_INT npu_demo::cost::deslice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
-- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, cost::CostKind Kind> S_INT npu_demo::cost::deslice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
 - `namespace npu_demo::cost`
 - `namespace kernelcode::trance`
 
@@ -42,7 +37,8 @@ helper 清单:
 
 使用示例:
 - #include "include/npu_demo/npu_demo.h"
-- Status status = npu_demo::launch<2, 1, 1, 0>(kernel_body, output);
+- npu_demo::KernelContext ctx;
+- Status status = npu_demo::launch<2, 1, 1, 0, kernel_body>(ctx, output);
 
 
 关联文件:

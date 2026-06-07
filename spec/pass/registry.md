@@ -34,8 +34,6 @@
 - pipeline 目录与默认 pipeline：
   - [`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)
   - [`spec/pass/pipeline/npu_demo_lowering.md`](../../spec/pass/pipeline/npu_demo_lowering.md)
-- standalone tuning pass：
-  - [`spec/pass/tuning/launch_kernel_cost_func.md`](../../spec/pass/tuning/launch_kernel_cost_func.md)
 - standalone arch pass：
   - [`spec/pass/arch_parallelize.md`](../../spec/pass/arch_parallelize.md)
 
@@ -87,8 +85,7 @@
   - `kernel-decompose`：在 source/emit 前把 `kernel.matmul_fusion` 分解为动态 acc `kernel.matmul`。
   - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 pytest 与工具层统一解析。
   - `template-name-infer`：npu-demo lowering 末尾的非语义 template name 注解 pass。
-- tuning pass `launch-kernel-cost-func` 可通过 pass registry 显式启用，但不自动进入 `default-lowering` 或 `npu-demo-lowering`。
-- `launch-kernel-cost-func` 默认 `cost_kind="DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2"`，并接受该七值集合的去重子集，例如 `options={"cost_kind": "DMA1|MAC|VECTOR1"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
+- `launch-kernel-cost-func` 已下线，不属于内置 pass 注册表；调用 `build_registered_pass("launch-kernel-cost-func", ...)` 必须按 unknown pass 失败。
 - `lower-dma-memory-hierarchy` 接受 pass 专属 `options={"apply_op": "matmul{[\\"\\", \\"tlm1\\", \\"tlm2\\"]}"}`；registry 只负责透传该 option，规则语法与错误语义由 `LowerDmaMemoryHierarchyPass.from_options(...)` 承载。
 - `memory-pool` 接受 pass 专属 `options={"rewrite": "true|false", "alignment": "<non-negative-int>"}`；`fold` 仍由 registry 通用 option 处理。`rewrite` 非 bool、`alignment` 负数或非整数、未知 option 必须由 `MemoryPoolPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'memory-pool' option error: <原因>`。
 - `memory-plan` 接受 pass 专属 `options={"insert-free": "true|false|1|0|yes|no|on|off", "reuse": "true|false|1|0|yes|no|on|off", "auto-pad": "true|false|1|0|yes|no|on|off"}`；`fold` 仍由 registry 通用 option 处理。`insert-free` / `reuse` / `auto-pad` 非 bool 或未知 option 必须由 `MemoryPlanPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'memory-plan' option error: <原因>`。
@@ -309,9 +306,7 @@ pass_obj = build_registered_pass("tile-reduce")
 inline_pass = build_registered_pass("inline")
 attach_pass = build_registered_pass("attach-arch-information")
 hoist_pass = build_registered_pass("symbol-buffer-hoist")
-cost_pass = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "DMA1|MAC|VECTOR1"})
 memory_pool_pass = build_registered_pass("memory-pool", {"rewrite": "true", "fold": "false", "alignment": "0"})
-default_cost_pass = build_registered_pass("launch-kernel-cost-func")
 ```
 
 - 注意事项：
@@ -570,9 +565,7 @@ names = list_registered_passes()
 | TC-PASS-REGISTRY-011 | 公开入口 | build registered tile elewise pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_tile_elewise_pass`。 | 公开入口在“build registered tile elewise pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_tile_elewise_pass` |
 | TC-PASS-REGISTRY-012 | 公开入口 | registry surviving public paths match consumer matrix | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_registry_surviving_public_paths_match_consumer_matrix`。 | 公开入口在“registry surviving public paths match consumer matrix”场景下可导入、构造、注册或按名称发现。 | `test_registry_surviving_public_paths_match_consumer_matrix` |
 | TC-PASS-REGISTRY-013 | 公开入口 | build registered NN lowering pass is module pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_nn_lowering_pass_is_module_pass`。 | 公开入口在“build registered NN lowering pass is module pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_nn_lowering_pass_is_module_pass` |
-| TC-PASS-REGISTRY-014 | 公开入口 | build registered launch kernel cost func pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_launch_kernel_cost_func_pass`。 | 公开入口在“build registered launch kernel cost func pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_launch_kernel_cost_func_pass` |
-| TC-PASS-REGISTRY-015 | 公开入口 | build registered launch kernel cost func default kind | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_launch_kernel_cost_func_default_kind`。 | 公开入口在“build registered launch kernel cost func default kind”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_launch_kernel_cost_func_default_kind` |
-| TC-PASS-REGISTRY-016 | 边界/异常 | build registered launch kernel cost func rejects invalid kind | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_build_registered_launch_kernel_cost_func_rejects_invalid_kind`。 | “build registered launch kernel cost func rejects invalid kind”场景按公开错误语义失败或被拒绝。 | `test_build_registered_launch_kernel_cost_func_rejects_invalid_kind` |
+| TC-PASS-REGISTRY-014 | 边界/异常 | launch kernel cost func removed | 加载内置 pass。 | 运行 `test_build_registered_launch_kernel_cost_func_is_removed`。 | `list_registered_passes()` 不包含 `launch-kernel-cost-func`，构造旧名称按 unknown pass 失败。 | `test_build_registered_launch_kernel_cost_func_is_removed` |
 | TC-PASS-REGISTRY-017 | 公开入口 | build registered module pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_module_pass`。 | 公开入口在“build registered module pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_module_pass` |
 | TC-PASS-REGISTRY-018 | 公开入口 | build registered module pass with options | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_module_pass_with_options`。 | 公开入口在“build registered module pass with options”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_module_pass_with_options` |
 | TC-PASS-REGISTRY-019 | 公开入口 | build registered buffer results to out params pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_buffer_results_to_out_params_pass`。 | 公开入口在“build registered buffer results to out params pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_buffer_results_to_out_params_pass` |
