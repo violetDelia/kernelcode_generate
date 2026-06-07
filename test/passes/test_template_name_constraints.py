@@ -154,7 +154,6 @@ def test_template_name_default_constraints_register_dma_ring_ops_verify_only() -
         create_ssa_value(_byte_pool_type()),
         create_ssa_value(SymbolValueType.from_expr("3")),
         create_ssa_value(SymbolValueType.from_expr("16")),
-        create_ssa_value(SymbolValueType.from_expr("12")),
         ring_type,
     )
     current = DmaCurrentRingOp(make_ring.result)

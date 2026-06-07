@@ -1396,8 +1396,8 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
 
 
 # EC-I3-001A2
-# 功能说明: 验证 target=npu_demo 下 `dma.make_ring/current_ring/advance_ring` 的 serial ring 发射合同。
-# 测试目的: 锁定 `dma.make_ring` 不生成 runtime helper，current/advance 使用 backing memory 的固定 `{0}` typed view。
+# 功能说明: 验证 target=npu_demo 下 `dma.make_ring/current_ring/advance_ring` 的 runtime ring 发射合同。
+# 测试目的: 锁定 `dma.make_ring` 生成 `npu_demo::make_ring<SlotT>`，current/advance 使用 runtime ring 成员函数。
 # 使用示例: pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_ring_contract
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/npu_demo/dma/ring.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/emit/npu_demo/dma/__init__.md
@@ -1408,22 +1408,17 @@ def test_emit_c_lowers_npu_demo_dma_ring_contract() -> None:
     backing = DmaAllocOp([], backing_type)
     num = SymbolConstOp(4)
     offset = SymbolConstOp(24)
-    shape_bytes = SymbolConstOp(24)
-    make_ring = DmaMakeRingOp(backing.result, num.result, offset.result, shape_bytes.result, DmaRingType(slot_type))
+    make_ring = DmaMakeRingOp(backing.result, num.result, offset.result, DmaRingType(slot_type))
     current = DmaCurrentRingOp(make_ring.result)
     advance = DmaAdvanceRingOp(make_ring.result)
     ctx = _npu_ctx()
     ctx.bind_name(backing.result, "ring_backing")
 
-    assert emit_c_op(make_ring, ctx) == ""
-    assert emit_c_op(current, ctx) == (
-        "Memory<TLM1, float> ring_slot_0 = ring_backing.view<float>({0} /*offset*/, {(2) * (3)} /*size*/, {1} /*stride*/);\n"
-        "Memory<TLM1, float> v0 = ring_slot_0.reshape({2, 3} /*shape*/);"
+    assert emit_c_op(make_ring, ctx) == (
+        "auto v0 = npu_demo::make_ring<float>(ring_backing /*backing*/, 4 /*num*/, 24 /*offset_bytes*/, {2, 3} /*shape*/, {3, 1} /*stride*/);"
     )
-    assert emit_c_op(advance, ctx) == (
-        "Memory<TLM1, float> ring_slot_1 = ring_backing.view<float>({0} /*offset*/, {(2) * (3)} /*size*/, {1} /*stride*/);\n"
-        "Memory<TLM1, float> v1 = ring_slot_1.reshape({2, 3} /*shape*/);"
-    )
+    assert emit_c_op(current, ctx) == "Memory<TLM1, float> v1 = v0.current();"
+    assert emit_c_op(advance, ctx) == "v0.advance();"
 
 
 # EC-I3-001B

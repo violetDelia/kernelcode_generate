@@ -1126,12 +1126,16 @@ def test_build_registered_multi_buffer_options() -> None:
     load_builtin_passes()
     multi_buffer_module = importlib.import_module("kernel_gen.passes.multi_buffer")
 
-    pass_obj = build_registered_pass("multi-buffer", {"memory-stage": "3", "target": "npu_demo", "fold": "false"})
+    default_pass = build_registered_pass("multi-buffer")
+    pass_obj = build_registered_pass("multi-buffer", {"memory-stage": "4", "target": "npu_demo", "fold": "false"})
     single_stage_pass = build_registered_pass("multi-buffer", {"memory-stage": "1"})
 
+    assert isinstance(default_pass, multi_buffer_module.MultiBufferPass)
+    assert default_pass.memory_stage == 2
+    assert default_pass.target is None
     assert isinstance(pass_obj, multi_buffer_module.MultiBufferPass)
     assert pass_obj.name == "multi-buffer"
-    assert pass_obj.memory_stage == 3
+    assert pass_obj.memory_stage == 4
     assert pass_obj.target == "npu_demo"
     assert pass_obj.fold is False
     assert isinstance(single_stage_pass, multi_buffer_module.MultiBufferPass)

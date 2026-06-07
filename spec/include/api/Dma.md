@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 include/api 层统一对外 DMA 操作 API 头文件规范（`include/api/Dma.h`），当前公共层收口 `npu_demo::alloc`、`npu_demo::fill`、`npu_demo::slice`、`npu_demo::deslice`、`npu_demo::transpose`、`npu_demo::store`、`npu_demo::load` 与 `npu_demo::broadcast` public function，面向后端无关的 `Memory<Space, T>`、`Vector` 与 generated source brace-list layout 抽象。
+定义 include/api 层统一对外 DMA 操作 API 头文件规范（`include/api/Dma.h`），当前公共层收口 `npu_demo::alloc`、`npu_demo::fill`、`npu_demo::slice`、`npu_demo::deslice`、`npu_demo::transpose`、`npu_demo::store`、`npu_demo::load`、`npu_demo::broadcast` public function 以及 `npu_demo::DmaRing` / `npu_demo::make_ring` runtime ring API，面向后端无关的 `Memory<Space, T>`、`Vector` 与 generated source brace-list layout 抽象。
 
 - `npu_demo::alloc<Space, T>(ctx, shape, stride, format)`：定义创建 DMA 临时 `Memory<Space, T>` 视图的公开接口。
 - `npu_demo::fill(ctx, target, value)`：定义按标量填充目标块全部逻辑元素的公开接口。
@@ -12,12 +12,17 @@
 - `npu_demo::store(ctx, target, source, offset, size, stride)`：定义 generated source 写回接口，layout 参数类型为 `Vector`。
 - `npu_demo::load(ctx, target, source, offset, size, stride)`：定义 generated source 读取接口，layout 参数类型为 `Vector`。
 - `npu_demo::broadcast(ctx, target, source)`：定义按 trailing-dimension 规则把 `source` 物化扩张到预分配 `target` 的公开接口。
+- `npu_demo::DmaRing` / `npu_demo::make_ring(...)`：定义 runtime multi-buffer ring 对象、当前 slot 查询与 cursor advance 的公开接口。
 - `view` 与 `reshape` 已移动到 `Memory` 的成员接口，不再保留以 `source` 为首参的公共层自由函数。
 - 本规范只冻结统一 API 名称、参数形态、输入约束与错误边界；不绑定任何具体后端实现。
 
 ## API 列表
 
 - `template <MemorySpace Space, typename T, typename Context> Memory<Space, T> npu_demo::alloc(Context& ctx, const Vector& shape, const Vector& stride, MemoryFormat format = MemoryFormat::Norm)`
+- `template <MemorySpace Space, typename SlotT, typename BackingT> class npu_demo::DmaRing`
+- `npu_demo::DmaRing.current() const -> Memory<Space, SlotT>`
+- `npu_demo::DmaRing.advance() -> Memory<Space, SlotT>`
+- `template <typename SlotT, MemorySpace Space, typename BackingT> DmaRing<Space, SlotT, BackingT> npu_demo::make_ring(Memory<Space, BackingT>& backing, S_INT num, S_INT offset_bytes, std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
 - `template <MemorySpace Space, typename T, typename Context> Status npu_demo::fill(Context& ctx, Memory<Space, T>& target, const T& value)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, typename Context> Status npu_demo::slice(Context& ctx, Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, typename Context> Status npu_demo::deslice(Context& ctx, Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
@@ -48,7 +53,7 @@
 
 - 为跨后端代码生成提供统一、稳定的 DMA 公开 API。
 - 统一手写兼容路径与 generated source 的 `shape/offset/size/stride/perm` 公开参数类型为 [`spec/include/api/Core.md`](../../../spec/include/api/Core.md) 中的 `Vector`。
-- 明确 DMA public function 的成功调用入口统一为 `npu_demo::alloc(...)`、`npu_demo::fill(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)`、`npu_demo::transpose(...)`、`npu_demo::store(...)`、`npu_demo::load(...)`、`npu_demo::broadcast(...)`。
+- 明确 DMA public function 的成功调用入口统一为 `npu_demo::alloc(...)`、`npu_demo::fill(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)`、`npu_demo::transpose(...)`、`npu_demo::store(...)`、`npu_demo::load(...)`、`npu_demo::broadcast(...)`，并补充 `npu_demo::DmaRing` / `npu_demo::make_ring(...)` runtime ring API。
 - 明确 `slice/deslice` 的输入约束、返回语义与错误边界。
 - 明确删旧边界：`view` / `reshape` 不再属于 DMA 公共层；`source-first deslice`、无 `ctx` helper 与 DMA helper `std::initializer_list<long long>` overload 旧形态退出本轮稳定口径。
 - 为后续 `spec/operation/dma.md`、`spec/dialect/dma.md`、`spec/dsl/ast/mlir_gen.md`、`spec/dsl/gen_kernel/emit.md`、`spec/dsl/gen_kernel/gen_kernel.md` 提供统一收敛目标。
@@ -59,8 +64,8 @@
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 本规范不定义 DMA 硬件调度、异步执行、带宽模型、barrier、launch、host wrapper 或后端私有运行时。
-- 本规范只定义 `npu_demo::alloc`、`npu_demo::fill`、`npu_demo::slice`、`npu_demo::deslice`、`npu_demo::transpose`、`npu_demo::store`、`npu_demo::load`、`npu_demo::broadcast` DMA public function；`free/copy/cast` 等语义若实现暂存，也不属于本轮稳定公共层。
-- `shape/offset/size/stride/perm` 的公开参数类型为 `Vector`；不得把 `std::initializer_list<long long>`、`std::vector<long long>`、`std::array<long long, N>`、裸 `long long[N]` 直接暴露成稳定公开签名。
+- 本规范只定义 `npu_demo::alloc`、`npu_demo::fill`、`npu_demo::slice`、`npu_demo::deslice`、`npu_demo::transpose`、`npu_demo::store`、`npu_demo::load`、`npu_demo::broadcast` DMA public function，以及 `DmaRing` / `make_ring` runtime ring API；`free/copy/cast` 等语义若实现暂存，也不属于本轮稳定公共层。
+- 除 `make_ring(...)` 已确认的 slot `shape/stride` 外，普通 DMA helper 的 `shape/offset/size/stride/perm` 公开参数类型为 `Vector`；不得把 `std::initializer_list<long long>`、`std::vector<long long>`、`std::array<long long, N>`、裸 `long long[N]` 直接暴露成普通 DMA helper 的稳定公开签名。
 - generated source 的 rank 1..8 layout 参数可发射为 `{...} /*name*/` 并绑定到 `Vector` 参数；rank >8 必须按公开错误失败。
 - `alloc/slice/deslice` 的接口面向 `Memory<Space, T>`；不使用 `memory<rank, type>`、`memory<float>` 之类模板占位语言作为公开契约描述。
 - `view` 与 `reshape` 已在 `Memory` 公共层收口；`Dma` 不再公开以 `source` 为首参的 `view` 自由函数。
@@ -90,6 +95,66 @@ auto tile = npu_demo::alloc<TSM, float>(ctx, {16}, {1}, MemoryFormat::Norm);
 ```
 - 功能说明：按给定 `shape/stride/format` 创建 DMA 临时 `Memory<Space, T>` 视图。
 - 注意事项：`shape` 与 `stride` 的长度必须一致，且元素值必须满足 `Memory` 视图合同；rank 1..8 调用处可以用 `{...}` 构造临时 `Vector`，rank >8 按公开错误失败；成功调用入口固定为 `npu_demo::alloc(...)`，未限定的全局 `alloc` 不属于公开合同。
+
+### `template <MemorySpace Space, typename SlotT, typename BackingT> class npu_demo::DmaRing`
+
+- api：`template <MemorySpace Space, typename SlotT, typename BackingT> class npu_demo::DmaRing`
+- 参数：模板参数 `Space` 为 slot/backing 所在 memory space，`SlotT` 为 slot 元素类型，`BackingT` 为 backing byte element 类型。
+- 返回值：类型定义；对象由 `npu_demo::make_ring(...)` 返回。
+- 使用示例：
+
+  ```cpp
+std::int8_t storage[128] = {};
+Memory<TLM1, std::int8_t> backing(storage, {128}, {1});
+auto ring = npu_demo::make_ring<float>(backing, 2, 64, {4, 4}, {4, 1});
+```
+- 功能说明：表示 runtime DMA ring，持有 backing memory、cursor、stage byte offset 与单 slot layout。
+- 注意事项：公开方法只包含 `current()` 与 `advance()`；直接构造、默认构造、读取 cursor 或修改内部状态都不是公开 API。
+
+### `npu_demo::DmaRing.current() const -> Memory<Space, SlotT>`
+
+- api：`npu_demo::DmaRing.current() const -> Memory<Space, SlotT>`
+- 参数：无。
+- 返回值：当前 cursor 对应的 `Memory<Space, SlotT>` slot view。
+- 使用示例：
+
+  ```cpp
+Memory<TLM1, float> cur = ring.current();
+```
+- 功能说明：读取当前 ring slot，不推进 cursor。
+- 注意事项：返回 view 的 data 指针按 `cursor * offset_bytes` 做 byte offset，shape/stride/format 与 `make_ring` 输入一致。
+
+### `npu_demo::DmaRing.advance() -> Memory<Space, SlotT>`
+
+- api：`npu_demo::DmaRing.advance() -> Memory<Space, SlotT>`
+- 参数：无。
+- 返回值：推进后的 `Memory<Space, SlotT>` slot view。
+- 使用示例：
+
+  ```cpp
+Memory<TLM1, float> next = ring.advance();
+```
+- 功能说明：将 cursor 推进到下一 stage，按 `num` 回绕，并返回推进后的 slot。
+- 注意事项：`advance()` 是有状态操作；调用方不得把它当作纯查询。
+
+### `template <typename SlotT, MemorySpace Space, typename BackingT> DmaRing<Space, SlotT, BackingT> npu_demo::make_ring(Memory<Space, BackingT>& backing, S_INT num, S_INT offset_bytes, std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
+
+- api：`template <typename SlotT, MemorySpace Space, typename BackingT> DmaRing<Space, SlotT, BackingT> npu_demo::make_ring(Memory<Space, BackingT>& backing, S_INT num, S_INT offset_bytes, std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
+- 参数：
+  - `backing`：一维 byte backing memory；类型 `Memory<Space, BackingT>&`。
+  - `num`：ring stage 数；类型 `S_INT`；必须为正数。
+  - `offset_bytes`：相邻 stage 的 byte 间距；类型 `S_INT`；必须为正数。
+  - `shape`：单个 typed slot 的 shape；类型 `std::initializer_list<long long>`。
+  - `stride`：单个 typed slot 的 stride；类型 `std::initializer_list<long long>`。
+  - `format`：slot view 的 memory format；类型 `MemoryFormat`；默认值 `MemoryFormat::Norm`。
+- 返回值：`DmaRing<Space, SlotT, BackingT>`。
+- 使用示例：
+
+  ```cpp
+auto ring = npu_demo::make_ring<float>(backing, 2, 64, {4, 4}, {4, 1});
+```
+- 功能说明：从一维 byte backing memory 创建 runtime DMA ring。
+- 注意事项：`BackingT` 必须是 1 byte 类型；`shape/stride` rank 必须一致且每维为正；按 padded layout 计算的 slot span bytes 必须小于等于 `offset_bytes`，且 `num * offset_bytes` 必须不超过 backing 可访问字节数；非法输入必须显式失败，不允许静默截断或 wrap。
 
 ### `template <MemorySpace Space, typename T, typename Context> Status npu_demo::fill(Context& ctx, Memory<Space, T>& target, const T& value)`
 
@@ -243,3 +308,4 @@ Status status = npu_demo::broadcast<TSM, TSM, float, float>(ctx, target, source)
 | TC-INCLUDE-API-DMA-003C | 生成/编译 | `slice/deslice/store/load/transpose` 的 rank 1..8 brace-list layout 可绑定 `Vector` 参数。 | 准备公开 Memory/DMA 参数和 brace-list layout。 | 运行 `test_dma_brace_layout_binds_vector_contract`。 | brace-list layout 经 `Vector` 参数可编译运行，非法 layout 返回公开失败状态。 | `test_dma_brace_layout_binds_vector_contract` |
 | TC-INCLUDE-API-DMA-004 | 内存/DMA | `npu_demo::fill/broadcast` 的最小目标式语义可工作。 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `API-DMA-003B`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`npu_demo::fill/broadcast` 的最小目标式语义可工作。”场景。 | `API-DMA-003B` |
 | TC-INCLUDE-API-DMA-005 | 公开入口 | `npu_demo::alloc/fill/slice/deslice/transpose/store/load/broadcast` 可经 `include/npu_demo/npu_demo.h` 正向编译运行，未限定的全局函数不作为成功路径。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `NPU-DEMO-PUBLIC-002`。 | 公开入口在“`npu_demo::alloc/fill/slice/deslice/transpose/store/load/broadcast` 可经 `include/npu_demo/npu_demo.h` 正向编译运行，未限定的全局函数不作为成功路径。”场景下可导入、构造、注册或按名称发现。 | `NPU-DEMO-PUBLIC-002` |
+| TC-INCLUDE-API-DMA-006 | 内存/DMA | `npu_demo::DmaRing` runtime cursor ring API。 | 准备一维 byte backing、合法 slot shape/stride、非法 num/offset/backing 边界。 | 运行 `test_dma_runtime_ring_current_advance_byte_offset_contract`。 | `make_ring` 返回 runtime ring；`current()` 不推进，`advance()` 按 byte offset 推进并回绕；非法 ring 参数显式失败。 | `test_dma_runtime_ring_current_advance_byte_offset_contract` |

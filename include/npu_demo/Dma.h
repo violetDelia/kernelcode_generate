@@ -1,9 +1,14 @@
 /*
 功能说明:
 - 提供 npu_demo 后端的 `alloc/fill/slice/deslice/transpose/store/load/broadcast` 轻量实现，并复用 `Memory` 的成员式 `view/reshape` 接口。
+- 提供 runtime `DmaRing` 与 `make_ring`，供 EmitC multi-buffer ring 使用 cursor-bearing slot view。
 
 API 列表:
 - `npu_demo::alloc<Space, T, Context>(Context& ctx, const Vector& shape, const Vector& stride, MemoryFormat format = MemoryFormat::Norm) -> Memory<Space, T>`
+- `template <MemorySpace Space, typename SlotT, typename BackingT> class npu_demo::DmaRing`
+- `npu_demo::DmaRing.current() const -> Memory<Space, SlotT>`
+- `npu_demo::DmaRing.advance() -> Memory<Space, SlotT>`
+- `npu_demo::make_ring<SlotT, Space, BackingT>(Memory<Space, BackingT>& backing, S_INT num, S_INT offset_bytes, std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm) -> DmaRing<Space, SlotT, BackingT>`
 - `npu_demo::fill<Space, T, Context>(Context& ctx, Memory<Space, T>& target, const T& value) -> Status`
 - `npu_demo::slice<TargetSpace, SourceSpace, T, Context>(Context& ctx, Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride) -> Status`
 - `npu_demo::deslice<TargetSpace, SourceSpace, T, Context>(Context& ctx, Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride) -> Status`
@@ -26,6 +31,7 @@ API 列表:
 #ifndef KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_DMA_H_
 #define KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_DMA_H_
 
+#include <initializer_list>
 #include <limits>
 #include <stdexcept>
 
@@ -65,6 +71,178 @@ inline bool dma_checked_add_non_negative(long long lhs, long long rhs, long long
 }
 
 }  // namespace detail
+
+/*
+功能说明:
+- 初始化 runtime DmaRing 私有状态；调用方只能通过 `make_ring(...)` 获得对象。
+- shape/stride 已由 factory 校验，构造函数只复制短生命周期布局数组。
+
+使用示例:
+- auto ring = npu_demo::make_ring<float>(backing, 2, 64, {4, 4}, {4, 1});
+
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace Space, typename SlotT, typename BackingT>
+inline DmaRing<Space, SlotT, BackingT>::DmaRing(
+    BackingT* backing_data,
+    S_INT num,
+    S_INT offset_bytes,
+    const long long* shape,
+    const long long* stride,
+    unsigned long long rank,
+    MemoryFormat format)
+    : backing_data_(backing_data),
+      num_(num),
+      offset_bytes_(offset_bytes),
+      shape_{0, 0, 0, 0, 0, 0, 0, 0},
+      stride_{0, 0, 0, 0, 0, 0, 0, 0},
+      rank_(rank),
+      format_(format),
+      cursor_(0) {
+    for (unsigned long long i = 0; i < rank_; ++i) {
+        shape_[i] = shape[i];
+        stride_[i] = stride[i];
+    }
+}
+
+/*
+功能说明:
+- 返回当前 cursor 对应的 typed slot view。
+- slot 起点按 byte pointer arithmetic 计算，避免 `Memory::view<T>` 的 element-offset 语义误用于 byte offset。
+
+使用示例:
+- Memory<TLM1, float> cur = ring.current();
+
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace Space, typename SlotT, typename BackingT>
+inline Memory<Space, SlotT> DmaRing<Space, SlotT, BackingT>::current() const {
+    unsigned char* base = reinterpret_cast<unsigned char*>(backing_data_);
+    SlotT* slot_data = reinterpret_cast<SlotT*>(base + cursor_ * offset_bytes_);
+    return Memory<Space, SlotT>(slot_data, shape_, stride_, rank_, format_);
+}
+
+/*
+功能说明:
+- 推进 cursor 并返回推进后的 typed slot view。
+- `num` 由 `make_ring(...)` 保证为正数，因此 modulo 不会除零。
+
+使用示例:
+- Memory<TLM1, float> next = ring.advance();
+
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace Space, typename SlotT, typename BackingT>
+inline Memory<Space, SlotT> DmaRing<Space, SlotT, BackingT>::advance() {
+    cursor_ = (cursor_ + 1) % num_;
+    return current();
+}
+
+/*
+功能说明:
+- 从一维 byte backing memory 创建 runtime DmaRing。
+- 校验 num、offset、slot layout、slot span 与 backing storage 范围；失败时抛出 `std::runtime_error`。
+
+使用示例:
+- auto ring = npu_demo::make_ring<float>(backing, 2, 64, {4, 4}, {4, 1});
+
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <typename SlotT, MemorySpace Space, typename BackingT>
+inline DmaRing<Space, SlotT, BackingT> make_ring(
+    Memory<Space, BackingT>& backing,
+    S_INT num,
+    S_INT offset_bytes,
+    std::initializer_list<long long> shape,
+    std::initializer_list<long long> stride,
+    MemoryFormat format) {
+    static_assert(sizeof(BackingT) == 1, "dma.make_ring backing element must be byte-sized");
+    const unsigned long long rank = shape.size();
+    if (rank == 0 || rank != stride.size() || rank > npu_demo::detail::kMaxDmaRank) {
+        throw std::runtime_error("dma.make_ring: invalid slot layout");
+    }
+    if (backing.data() == nullptr || backing.rank() != 1 || backing.get_shape(0) <= 0 || backing.get_stride(0) <= 0) {
+        throw std::runtime_error("dma.make_ring: invalid backing memory");
+    }
+    if (num <= 0 || offset_bytes <= 0) {
+        throw std::runtime_error("dma.make_ring: invalid ring parameters");
+    }
+
+    long long shape_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    long long stride_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    long long max_slot_linear_offset = 0;
+    auto shape_it = shape.begin();
+    auto stride_it = stride.begin();
+    for (unsigned long long i = 0; i < rank; ++i, ++shape_it, ++stride_it) {
+        if (*shape_it <= 0 || *stride_it <= 0) {
+            throw std::runtime_error("dma.make_ring: invalid slot layout");
+        }
+        shape_buf[i] = *shape_it;
+        stride_buf[i] = *stride_it;
+        long long axis_span = 0;
+        if (!npu_demo::detail::dma_checked_mul_non_negative(shape_buf[i] - 1, stride_buf[i], &axis_span)) {
+            throw std::runtime_error("dma.make_ring: slot span overflow");
+        }
+        if (!npu_demo::detail::dma_checked_add_non_negative(
+                max_slot_linear_offset, axis_span, &max_slot_linear_offset)) {
+            throw std::runtime_error("dma.make_ring: slot span overflow");
+        }
+    }
+
+    long long slot_element_span = 0;
+    if (!npu_demo::detail::dma_checked_add_non_negative(max_slot_linear_offset, 1, &slot_element_span)) {
+        throw std::runtime_error("dma.make_ring: slot span overflow");
+    }
+    long long slot_span_bytes = 0;
+    if (!npu_demo::detail::dma_checked_mul_non_negative(
+            slot_element_span, static_cast<long long>(sizeof(SlotT)), &slot_span_bytes)) {
+        throw std::runtime_error("dma.make_ring: slot span overflow");
+    }
+    if (slot_span_bytes > offset_bytes) {
+        throw std::runtime_error("dma.make_ring: slot span exceeds offset");
+    }
+
+    long long backing_last_offset = 0;
+    if (!npu_demo::detail::dma_checked_mul_non_negative(
+            backing.get_shape(0) - 1, backing.get_stride(0), &backing_last_offset)) {
+        throw std::runtime_error("dma.make_ring: backing span overflow");
+    }
+    long long backing_bytes = 0;
+    if (!npu_demo::detail::dma_checked_add_non_negative(backing_last_offset, 1, &backing_bytes)) {
+        throw std::runtime_error("dma.make_ring: backing span overflow");
+    }
+    long long required_bytes = 0;
+    if (!npu_demo::detail::dma_checked_mul_non_negative(num, offset_bytes, &required_bytes)) {
+        throw std::runtime_error("dma.make_ring: backing range overflow");
+    }
+    if (required_bytes > backing_bytes) {
+        throw std::runtime_error("dma.make_ring: backing memory too small");
+    }
+    return DmaRing<Space, SlotT, BackingT>(
+        backing.data(),
+        num,
+        offset_bytes,
+        shape_buf,
+        stride_buf,
+        rank,
+        format);
+}
 
 /*
 功能说明:

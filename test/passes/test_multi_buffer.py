@@ -323,7 +323,7 @@ def _symbol_expr(value: SSAValue) -> str:
     """读取公开 `!symbol.int` value 的表达式文本。
 
     功能说明:
-    - 用于断言 `num/offset/shape_bytes` operands 的公开类型语义。
+    - 用于断言 `num/offset` operands 的公开类型语义。
 
     使用示例:
     - expr = _symbol_expr(make_ring.num)
@@ -334,15 +334,19 @@ def _symbol_expr(value: SSAValue) -> str:
     - 功能实现: kernel_gen/passes/multi_buffer.py
     """
 
-    assert isinstance(value.type, SymbolValueType)
-    return value.type.expr.expr.data
+    symbol_value = SSAValue.get(value)
+    value_type = symbol_value.type
+    assert isinstance(value_type, SymbolValueType)
+    expr_attr = value_type.expr
+    assert isinstance(expr_attr, SymbolExprAttr)
+    return expr_attr.expr.data
 
 
 def _symbol_const_value(value: SSAValue) -> int:
     """读取 `symbol.const` SSA value 的整数值。
 
     功能说明:
-    - 用于静态 ring num/offset/shape_bytes 的精确断言。
+    - 用于静态 ring num/offset 的精确断言。
 
     使用示例:
     - num = _symbol_const_value(make_ring.num)
@@ -353,9 +357,13 @@ def _symbol_const_value(value: SSAValue) -> int:
     - 功能实现: kernel_gen/passes/multi_buffer.py
     """
 
-    owner = SSAValue.get(value).owner
+    symbol_value = SSAValue.get(value)
+    owner = symbol_value.owner
     assert isinstance(owner, SymbolConstOp)
-    return int(owner.value.data)
+    raw_value = owner.value.data
+    parsed_value = int(raw_value)
+    assert parsed_value == int(raw_value)
+    return parsed_value
 
 
 def _static_memory_bytes(memory_type: NnMemoryType) -> int:
@@ -384,7 +392,7 @@ def _backing_bytes(make_ring: DmaMakeRingOp) -> int:
     """读取 make_ring backing memory 的静态 byte pool 大小。
 
     功能说明:
-    - 用于断言 backing bytes 为 `num * shape_bytes`。
+    - 用于断言 backing bytes 为 `num * offset`。
 
     使用示例:
     - assert _backing_bytes(make_ring) == 72
@@ -406,7 +414,7 @@ def _assert_static_ring(make_ring: DmaMakeRingOp, slot_type: NnMemoryType, num: 
     """断言静态 ring operands 与 result type。
 
     功能说明:
-    - 锁定 `num/offset/shape_bytes` operands、backing bytes 与新 `DmaRingType(slot_type)`。
+    - 锁定 `num/offset` operands、backing bytes 与新 `DmaRingType(slot_type)`。
 
     使用示例:
     - _assert_static_ring(make_ring, slot_type, 2)
@@ -417,11 +425,22 @@ def _assert_static_ring(make_ring: DmaMakeRingOp, slot_type: NnMemoryType, num: 
     - 功能实现: kernel_gen/passes/multi_buffer.py
     """
 
-    slot_bytes = _static_memory_bytes(slot_type)
-    assert _symbol_const_value(make_ring.num) == num
-    assert _symbol_const_value(make_ring.offset) == slot_bytes
-    assert _symbol_const_value(make_ring.shape_bytes) == slot_bytes
-    assert _backing_bytes(make_ring) == num * slot_bytes
+    slot_numel = 1
+    for dim in slot_type.shape.data:
+        assert isinstance(dim, SymbolExprAttr)
+        slot_numel *= int(dim.expr.data)
+    slot_bytes = slot_numel * 4
+    num_owner = SSAValue.get(make_ring.num).owner
+    offset_owner = SSAValue.get(make_ring.offset).owner
+    assert isinstance(num_owner, SymbolConstOp)
+    assert isinstance(offset_owner, SymbolConstOp)
+    assert int(num_owner.value.data) == num
+    assert int(offset_owner.value.data) == slot_bytes
+    backing_type = make_ring.memory.type
+    assert isinstance(backing_type, NnMemoryType)
+    backing_dim = backing_type.shape.data[0]
+    assert isinstance(backing_dim, SymbolExprAttr)
+    assert int(backing_dim.expr.data) == num * slot_bytes
     assert isinstance(make_ring.result.type, DmaRingType)
     assert make_ring.result.type.memory_type == slot_type
 
@@ -461,14 +480,19 @@ def _insert_existing_ring_operand(top_block: Block, loop_op: SymbolForOp, loop_b
 
     lhs_slot_type = SSAValue.get(matmul.operands[1]).type
     assert isinstance(lhs_slot_type, NnMemoryType)
-    backing = DmaAllocOp([], _make_byte_pool_type(bytes_count=72, space=lhs_slot_type.space.space.data))
+    backing_type = NnMemoryType(
+        ArrayAttr([SymbolExprAttr.from_expr("72")]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
+        i8,
+        NnMemorySpaceAttr.from_name(lhs_slot_type.space.space.data),
+    )
+    backing = DmaAllocOp([], backing_type)
     num = SymbolConstOp(3)
     offset = SymbolConstOp(24)
-    shape_bytes = SymbolConstOp(24)
-    make_ring = DmaMakeRingOp(backing.result, num.result, offset.result, shape_bytes.result, DmaRingType(lhs_slot_type))
+    make_ring = DmaMakeRingOp(backing.result, num.result, offset.result, DmaRingType(lhs_slot_type))
     current = DmaCurrentRingOp(make_ring.result)
 
-    top_block.insert_ops_before([backing, num, offset, shape_bytes, make_ring], loop_op)
+    top_block.insert_ops_before([backing, num, offset, make_ring], loop_op)
     loop_block.insert_ops_before([current], matmul)
     matmul.operands[1] = current.result
 
@@ -514,6 +538,8 @@ def test_multi_buffer_public_options() -> None:
     assert pass_obj.target == "npu_demo"
     assert pass_obj.fold is False
     assert MultiBufferPass(memory_stage=1).memory_stage == 1
+    assert MultiBufferPass().memory_stage == 2
+    assert MultiBufferPass.from_options({}).memory_stage == 2
     assert MultiBufferPass.from_options({"memory-stage": "1"}).memory_stage == 1
     assert MultiBufferPass.from_options({"memory-stage": "5", "target": "npu_demo"}).target == "npu_demo"
     with pytest.raises(KernelCodeError, match="memory_stage must be positive"):
@@ -539,11 +565,11 @@ def test_multi_buffer_public_options() -> None:
 def test_multi_buffer_registry_options() -> None:
     load_builtin_passes()
 
-    pass_obj = build_registered_pass("multi-buffer", {"memory-stage": "3", "target": "npu_demo", "fold": "false"})
+    pass_obj = build_registered_pass("multi-buffer", {"memory-stage": "4", "target": "npu_demo", "fold": "false"})
 
     assert isinstance(pass_obj, MultiBufferPass)
     assert isinstance(pass_obj, ModulePass)
-    assert pass_obj.memory_stage == 3
+    assert pass_obj.memory_stage == 4
     assert pass_obj.target == "npu_demo"
     assert pass_obj.fold is False
 
@@ -557,7 +583,7 @@ def test_multi_buffer_registry_options() -> None:
 def test_multi_buffer_rewrites_matmul_lhs_rhs_pair() -> None:
     module, top_block, _loop_op, loop_block, matmul, lhs_slot_type, rhs_slot_type = _build_loop_matmul_module()
 
-    MultiBufferPass(memory_stage=3).apply(Context(), module)
+    MultiBufferPass().apply(Context(), module)
 
     make_rings = _walk_ops(module, DmaMakeRingOp)
     currents = _walk_ops(module, DmaCurrentRingOp)
@@ -565,8 +591,8 @@ def test_multi_buffer_rewrites_matmul_lhs_rhs_pair() -> None:
     assert len(make_rings) == 2
     assert len(currents) == 2
     assert len(advances) == 2
-    _assert_static_ring(make_rings[0], lhs_slot_type, 3)
-    _assert_static_ring(make_rings[1], rhs_slot_type, 3)
+    _assert_static_ring(make_rings[0], lhs_slot_type, 2)
+    _assert_static_ring(make_rings[1], rhs_slot_type, 2)
     assert not any(isinstance(op, DmaFreeOp) for op in top_block.ops)
     assert not any(isinstance(op, DmaAllocOp) for op in loop_block.ops)
     assert len([op for op in top_block.ops if isinstance(op, DmaAllocOp)]) == 2
@@ -594,7 +620,7 @@ def test_multi_buffer_keeps_missing_free_noop() -> None:
     module, top_block, _loop_op, _loop_block, matmul, _lhs_slot_type, _rhs_slot_type = _build_loop_matmul_module(lhs_free=False)
     original_operands = list(matmul.operands)
 
-    MultiBufferPass(memory_stage=3).apply(Context(), module)
+    MultiBufferPass().apply(Context(), module)
 
     _assert_no_new_ring_rewrite(module)
     assert list(matmul.operands) == original_operands
@@ -613,7 +639,7 @@ def test_multi_buffer_keeps_free_before_loop_noop() -> None:
     module, top_block, _loop_op, _loop_block, matmul, _lhs_slot_type, _rhs_slot_type = _build_loop_matmul_module(free_before_loop=True)
     original_operands = list(matmul.operands)
 
-    MultiBufferPass(memory_stage=3).apply(Context(), module)
+    MultiBufferPass().apply(Context(), module)
 
     _assert_no_new_ring_rewrite(module)
     assert list(matmul.operands) == original_operands
@@ -631,7 +657,7 @@ def test_multi_buffer_keeps_loop_internal_alloc_noop() -> None:
     module, _top_block, _loop_op, loop_block, matmul, _lhs_slot_type, _rhs_slot_type = _build_loop_matmul_module(alloc_inside_loop=True)
     original_operands = list(matmul.operands)
 
-    MultiBufferPass(memory_stage=3).apply(Context(), module)
+    MultiBufferPass().apply(Context(), module)
 
     _assert_no_new_ring_rewrite(module)
     assert list(matmul.operands) == original_operands
@@ -650,7 +676,7 @@ def test_multi_buffer_keeps_alias_escape_noop() -> None:
     module, _top_block, _loop_op, loop_block, matmul, _lhs_slot_type, _rhs_slot_type = _build_loop_matmul_module(alias_escape=True)
     original_operands = list(matmul.operands)
 
-    MultiBufferPass(memory_stage=3).apply(Context(), module)
+    MultiBufferPass().apply(Context(), module)
 
     _assert_no_new_ring_rewrite(module)
     assert list(matmul.operands) == original_operands
@@ -668,7 +694,7 @@ def test_multi_buffer_keeps_multiple_free_noop() -> None:
     module, top_block, _loop_op, _loop_block, matmul, _lhs_slot_type, _rhs_slot_type = _build_loop_matmul_module(extra_lhs_free=True)
     original_operands = list(matmul.operands)
 
-    MultiBufferPass(memory_stage=3).apply(Context(), module)
+    MultiBufferPass().apply(Context(), module)
 
     _assert_no_new_ring_rewrite(module)
     assert list(matmul.operands) == original_operands
@@ -687,7 +713,7 @@ def test_multi_buffer_keeps_existing_ring_noop() -> None:
     _insert_existing_ring_operand(top_block, loop_op, loop_block, matmul)
     operands_before_pass = list(matmul.operands)
 
-    MultiBufferPass(memory_stage=3).apply(Context(), module)
+    MultiBufferPass().apply(Context(), module)
 
     _assert_no_new_ring_rewrite(module, initial_ring_count=1)
     assert list(matmul.operands) == operands_before_pass
@@ -707,7 +733,7 @@ def test_multi_buffer_keeps_partial_pair_noop(operand_index: int, source_arg_ind
     matmul.operands[operand_index] = top_block.args[source_arg_index]
     operands_before_pass = list(matmul.operands)
 
-    MultiBufferPass(memory_stage=3).apply(Context(), module)
+    MultiBufferPass().apply(Context(), module)
 
     _assert_no_new_ring_rewrite(module)
     assert list(matmul.operands) == operands_before_pass
@@ -725,7 +751,7 @@ def test_multi_buffer_keeps_nested_region_use_noop() -> None:
     nested_loop = _insert_nested_symbol_for_use(top_block, loop_block, matmul)
     operands_before_pass = list(matmul.operands)
 
-    MultiBufferPass(memory_stage=3).apply(Context(), module)
+    MultiBufferPass().apply(Context(), module)
 
     _assert_no_new_ring_rewrite(module)
     assert list(matmul.operands) == operands_before_pass
@@ -798,10 +824,8 @@ def test_multi_buffer_target_dynamic_same_space_num() -> None:
 
     make_rings = _walk_ops(module, DmaMakeRingOp)
     assert len(make_rings) == 2
-    assert _symbol_expr(make_rings[0].shape_bytes) == "4*S1*S2"
-    assert _symbol_expr(make_rings[1].shape_bytes) == "4*S2*S3"
-    assert _same_value(make_rings[0].offset, make_rings[0].shape_bytes)
-    assert _same_value(make_rings[1].offset, make_rings[1].shape_bytes)
+    assert _symbol_expr(make_rings[0].offset) == "4*S1*S2"
+    assert _symbol_expr(make_rings[1].offset) == "4*S2*S3"
     assert _same_value(make_rings[0].num, make_rings[1].num)
     assert _symbol_expr(make_rings[0].num) == "524288 floordiv (4*S1*S2 + 4*S2*S3)"
     assert not any(op.name == "symbol.get_dim" for op in module.walk())

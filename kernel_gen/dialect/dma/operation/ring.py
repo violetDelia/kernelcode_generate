@@ -4,12 +4,12 @@
 - 定义 `dma.make_ring`、`dma.current_ring` 与 `dma.advance_ring`。
 
 API 列表:
-- `class DmaMakeRingOp(memory: SSAValue | Operation, num: SSAValue | Operation, offset: SSAValue | Operation, shape_bytes: SSAValue | Operation, result_type: DmaRingType)`
+- `class DmaMakeRingOp(memory: SSAValue | Operation, num: SSAValue | Operation, offset: SSAValue | Operation, result_type: DmaRingType)`
 - `class DmaCurrentRingOp(ring: SSAValue | Operation, result_type: NnMemoryType | None = None)`
 - `class DmaAdvanceRingOp(ring: SSAValue | Operation, result_type: NnMemoryType | None = None)`
 
 使用示例:
-- `DmaMakeRingOp(memory, num, offset, shape_bytes, ring_type)`
+- `DmaMakeRingOp(memory, num, offset, ring_type)`
 
 关联文件:
 - spec: spec/dialect/dma.md
@@ -294,7 +294,6 @@ class DmaMakeRingOp (IRDLOperation ):
     memory =operand_def (NnMemoryType )
     num =operand_def (SymbolValueType )
     offset =operand_def (SymbolValueType )
-    shape_bytes =operand_def (SymbolValueType )
     result =result_def (DmaRingType )
 
     def __init__ (
@@ -302,7 +301,6 @@ class DmaMakeRingOp (IRDLOperation ):
     memory :SSAValue |Operation ,
     num :SSAValue |Operation ,
     offset :SSAValue |Operation ,
-    shape_bytes :SSAValue |Operation ,
     result_type :DmaRingType ,
     )->None :
         """初始化 dma.make_ring。
@@ -311,7 +309,7 @@ class DmaMakeRingOp (IRDLOperation ):
         - 创建 ring buffer 描述，result type 记录 slot memory type。
 
         使用示例:
-        - DmaMakeRingOp(storage, num, offset, shape_bytes, ring_type)
+        - DmaMakeRingOp(storage, num, offset, ring_type)
 
         关联文件:
         - spec: spec/dialect/dma.md
@@ -319,14 +317,15 @@ class DmaMakeRingOp (IRDLOperation ):
         - 功能实现: kernel_gen/dialect/dma/
         """
 
-        super ().__init__ (operands =[memory ,num ,offset ,shape_bytes ],result_types =[result_type ])
+        super ().__init__ (operands =[memory ,num ,offset ],result_types =[result_type ])
 
     def verify_ (self )->None :
         """校验 dma.make_ring。
 
         功能说明:
         - backing memory 必须是一维 i8 memory。
-        - num/offset/shape_bytes 必须为 `!symbol.int`，静态可判定时满足正数与容量关系。
+        - num/offset 必须为 `!symbol.int`，静态可判定时满足正数与容量关系。
+        - slot span bytes 从 result ring slot type 的 shape/stride/element type 推导。
         - result ring 的 slot space 必须与 backing memory 一致。
 
         使用示例:
@@ -347,9 +346,42 @@ class DmaMakeRingOp (IRDLOperation ):
         ring_type .verify ()
         count_int =_DmaRingHelpers .verify_positive_static_operand (self .num ,"count")
         offset_int =_DmaRingHelpers .verify_positive_static_operand (self .offset ,"offset")
-        shape_bytes_int =_DmaRingHelpers .verify_positive_static_operand (self .shape_bytes ,"shape_bytes")
-        if offset_int is not None and shape_bytes_int is not None and shape_bytes_int >offset_int :
-            raise kernel_code_error (ErrorKind .VERIFY ,ErrorModule .DIALECT ,"shape_bytes must be <= offset")
+        element_size =None
+        element_type =ring_type .memory_type .element_type
+        if isinstance (element_type ,IntegerType ):
+            width =int (element_type .width .data )
+            if width in {1 ,8 }:
+                element_size =1
+            elif width ==16 :
+                element_size =2
+            elif width ==32 :
+                element_size =4
+            elif width ==64 :
+                element_size =8
+        elif isinstance (element_type ,(Float16Type ,BFloat16Type )):
+            element_size =2
+        elif isinstance (element_type ,Float32Type ):
+            element_size =4
+        elif isinstance (element_type ,Float64Type ):
+            element_size =8
+        slot_span_bytes =None
+        if element_size is not None :
+            max_linear_offset =0
+            all_static_layout =True
+            for shape_dim ,stride_dim in zip (ring_type .memory_type .shape .data ,ring_type .memory_type .stride .data ,strict =True ):
+                shape_value =_DmaRingHelpers .static_int_from_dim (shape_dim )
+                stride_value =_DmaRingHelpers .static_int_from_dim (stride_dim )
+                if shape_value is None or stride_value is None :
+                    all_static_layout =False
+                    break
+                if shape_value <=0 or stride_value <=0 :
+                    all_static_layout =False
+                    break
+                max_linear_offset +=(shape_value -1 )*stride_value
+            if all_static_layout :
+                slot_span_bytes =(max_linear_offset +1 )*element_size
+        if offset_int is not None and slot_span_bytes is not None and slot_span_bytes >offset_int :
+            raise kernel_code_error (ErrorKind .VERIFY ,ErrorModule .DIALECT ,"slot span bytes must be <= offset")
         backing_bytes =_DmaRingHelpers .maybe_numel (memory_type .shape )
         if backing_bytes is not None and count_int is not None and offset_int is not None :
             if backing_bytes <count_int *offset_int :

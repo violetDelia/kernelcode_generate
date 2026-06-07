@@ -94,7 +94,7 @@
 - 执行命令：
   - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/passes/test_transform_apply.py`
   - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/passes/test_registry.py -k 'kernel_pattern_passes'`
-  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k 'pass_order or transform_apply or kernel_pattern_attach or static_dump_uses_pool_without_multi_buffer'`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k 'pass_order or transform_apply or kernel_pattern_attach or static_dump_runs_multi_buffer_before_pool'`
   - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=<taskwt>:/home/lfr/kernelcode_generate python3 -m expectation.pass.transform_apply`
 
 ### 测试目标

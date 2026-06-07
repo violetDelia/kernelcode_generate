@@ -15,6 +15,10 @@ API 列表:
 - `template <MemorySpace Space> npu_demo::get_dynamic_memory() -> DynamicMemoryRef<Space>`
 - `void npu_demo::build_contiguous_stride(const long long* shape, unsigned long long rank, long long* out_stride)`
 - `template <MemorySpace Space, typename T, typename Context> Memory<Space, T> npu_demo::alloc(Context& ctx, const Vector& shape, const Vector& stride, MemoryFormat format = MemoryFormat::Norm)`
+- `template <MemorySpace Space, typename SlotT, typename BackingT> class npu_demo::DmaRing`
+- `npu_demo::DmaRing.current() const -> Memory<Space, SlotT>`
+- `npu_demo::DmaRing.advance() -> Memory<Space, SlotT>`
+- `template <typename SlotT, MemorySpace Space, typename BackingT> DmaRing<Space, SlotT, BackingT> npu_demo::make_ring(Memory<Space, BackingT>& backing, S_INT num, S_INT offset_bytes, std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
 - `template <MemorySpace Space, typename T, typename Context> Status npu_demo::fill(Context& ctx, Memory<Space, T>& target, const T& value)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, typename Context> Status npu_demo::slice(Context& ctx, Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, typename Context> Status npu_demo::deslice(Context& ctx, Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`

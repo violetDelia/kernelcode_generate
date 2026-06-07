@@ -194,6 +194,18 @@ int main() {
         return fail(23);
     }
 
+    int8_t backing_data[32] = {0};
+    Memory<TLM1, int8_t> backing(backing_data, {32}, {1}, MemoryFormat::Norm);
+    auto ring = npu_demo::make_ring<float>(backing, 2, 16, {2}, {1});
+    Memory<TLM1, float> current = ring.current();
+    Memory<TLM1, float> next = ring.advance();
+    if (current.data() != reinterpret_cast<float*>(backing_data)) {
+        return fail(24);
+    }
+    if (reinterpret_cast<int8_t*>(next.data()) != backing_data + 16) {
+        return fail(25);
+    }
+
     long long block_ids[2] = {-1, -1};
     long long thread_nums[2] = {0, 0};
     Status launch_status = npu_demo::launch<2, 1, 1, 0, kernel_body>(ctx, &block_ids[0], &thread_nums[0]);

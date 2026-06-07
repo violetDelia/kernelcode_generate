@@ -7,13 +7,13 @@
 - 对不满足公开边界的 IR 保持 no-op，不引入宽泛 alias 或跨 region 推断。
 
 API 列表:
-- `class MultiBufferPass(memory_stage: int = 3, fold: bool = True, target: str | None = None)`
+- `class MultiBufferPass(memory_stage: int = 2, fold: bool = True, target: str | None = None)`
 - `MultiBufferPass.from_options(options: dict[str, str]) -> MultiBufferPass`
 - `MultiBufferPass.apply(ctx: Context, module: ModuleOp) -> None`
 
 使用示例:
 - from kernel_gen.passes.multi_buffer import MultiBufferPass
-- MultiBufferPass(memory_stage=3).apply(Context(), module)
+- MultiBufferPass(memory_stage=2).apply(Context(), module)
 
 关联文件:
 - spec: spec/pass/multi_buffer.md
@@ -22,8 +22,6 @@ API 列表:
 """
 
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 from xdsl.context import Context
 from xdsl.dialects.builtin import (
@@ -57,34 +55,9 @@ from kernel_gen.passes.pass_manager import Pass
 from kernel_gen.target.registry import get_target_hardware
 
 
-@dataclass(frozen=True)
-class _SymbolExprValue:
-    """当前文件内的 symbol value 计划片段。"""
-
-    value: SSAValue
-    expr: str
-    static_value: int | None
-
-
-@dataclass(frozen=True)
-class _StagingCandidate:
-    """单个 matmul staging buffer 的 ring 化候选。"""
-
-    alloc_op: DmaAllocOp
-    copy_op: DmaCopyOp
-    free_op: DmaFreeOp
-    matmul_op: KernelMatmulOp
-    operand_index: int
-    slot_type: NnMemoryType
-    slot_bytes: int | None
-
-
-@dataclass(frozen=True)
-class _RingRewriteOps:
-    """当前文件内的单个 ring 改写 op 计划。"""
-
-    current: DmaCurrentRingOp
-    advance: DmaAdvanceRingOp
+_SymbolExprValue = tuple[SSAValue, str, int | None]
+_StagingCandidate = tuple[DmaAllocOp, DmaCopyOp, DmaFreeOp, KernelMatmulOp, int, NnMemoryType, int | None]
+_RingRewriteOps = tuple[DmaCurrentRingOp, DmaAdvanceRingOp]
 
 
 def _parse_memory_stage_option(value: str) -> int:
@@ -127,7 +100,7 @@ def _rewrite_matmul_if_pair(
     - lhs/rhs 任一缺失或失败时整对 no-op，避免 partial ring。
 
     使用示例:
-    - changed = _rewrite_matmul_if_pair(symbol_for, matmul, 3, None)
+    - changed = _rewrite_matmul_if_pair(symbol_for, matmul, 2, None)
 
     关联文件:
     - spec: spec/pass/multi_buffer.md
@@ -228,42 +201,34 @@ def _rewrite_matmul_if_pair(
                 slot_bytes = numel * element_size
         if slot_bytes is not None and slot_bytes <= 0:
             return False
-        candidates.append(
-            _StagingCandidate(
-                alloc_op=alloc_op,
-                copy_op=copy_op,
-                free_op=free_op,
-                matmul_op=matmul,
-                operand_index=operand_index,
-                slot_type=alloc_op.result.type,
-                slot_bytes=slot_bytes,
-            )
-        )
+        candidates.append((alloc_op, copy_op, free_op, matmul, operand_index, alloc_op.result.type, slot_bytes))
 
-    if len(candidates) != 2 or candidates[0].alloc_op is candidates[1].alloc_op:
+    if len(candidates) != 2 or candidates[0][0] is candidates[1][0]:
         return False
     candidate_pair = (candidates[0], candidates[1])
 
     pre_loop_ops: list[Operation] = []
     rewrite_ops: list[_RingRewriteOps] = []
-    if all(candidate.slot_bytes is not None for candidate in candidate_pair):
+    if all(candidate[6] is not None for candidate in candidate_pair):
         if target is None:
             nums = (memory_stage, memory_stage)
         else:
             totals: dict[str, int] = {}
             capacities: dict[str, int] = {}
             for candidate in candidate_pair:
-                if candidate.slot_bytes is None:
+                _alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, slot_bytes = candidate
+                if slot_bytes is None:
                     return False
-                space = candidate.slot_type.space.space.data
-                totals[space] = totals.get(space, 0) + candidate.slot_bytes
+                space = slot_type.space.space.data
+                totals[space] = totals.get(space, 0) + slot_bytes
                 capacity = get_target_hardware(target, f"{space}_memory_size")
                 if capacity is None or capacity <= 0:
                     return False
                 capacities[space] = capacity
             computed_nums: list[int] = []
             for candidate in candidate_pair:
-                space = candidate.slot_type.space.space.data
+                _alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, _slot_bytes = candidate
+                space = slot_type.space.space.data
                 total = totals[space]
                 if total <= 0:
                     return False
@@ -274,7 +239,7 @@ def _rewrite_matmul_if_pair(
             nums = (computed_nums[0], computed_nums[1])
 
         for candidate, num in zip(candidate_pair, nums, strict=True):
-            slot_bytes = candidate.slot_bytes
+            _alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, slot_bytes = candidate
             if slot_bytes is None:
                 return False
             backing_bytes = num * slot_bytes
@@ -282,35 +247,34 @@ def _rewrite_matmul_if_pair(
                 ArrayAttr([SymbolExprAttr.from_expr(str(backing_bytes))]),
                 ArrayAttr([SymbolExprAttr.from_expr("1")]),
                 i8,
-                candidate.slot_type.space,
+                slot_type.space,
             )
             backing = DmaAllocOp([], backing_type)
             num_op = SymbolConstOp(num)
             offset = SymbolConstOp(slot_bytes)
-            shape_bytes = SymbolConstOp(slot_bytes)
             make_ring = DmaMakeRingOp(
                 backing.result,
                 num_op.result,
                 offset.result,
-                shape_bytes.result,
-                DmaRingType(candidate.slot_type),
+                DmaRingType(slot_type),
             )
             current = DmaCurrentRingOp(make_ring.result)
             advance = DmaAdvanceRingOp(make_ring.result)
-            pre_loop_ops.extend([backing, num_op, offset, shape_bytes, make_ring])
-            rewrite_ops.append(_RingRewriteOps(current=current, advance=advance))
+            pre_loop_ops.extend([backing, num_op, offset, make_ring])
+            rewrite_ops.append((current, advance))
     else:
         element_values: list[_SymbolExprValue] = []
         element_sizes: list[int] = []
         for candidate in candidate_pair:
-            if candidate.slot_bytes is not None:
-                const_op = SymbolConstOp(candidate.slot_bytes)
+            alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, slot_bytes = candidate
+            if slot_bytes is not None:
+                const_op = SymbolConstOp(slot_bytes)
                 pre_loop_ops.append(const_op)
-                element_values.append(_SymbolExprValue(const_op.result, str(candidate.slot_bytes), candidate.slot_bytes))
+                element_values.append((const_op.result, str(slot_bytes), slot_bytes))
                 element_sizes.append(1)
                 continue
 
-            element_type = candidate.slot_type.element_type
+            element_type = slot_type.element_type
             element_size = None
             if isinstance(element_type, IntegerType):
                 width = int(element_type.width.data)
@@ -331,8 +295,8 @@ def _rewrite_matmul_if_pair(
             if element_size is None or element_size <= 0:
                 return False
 
-            dims = list(candidate.slot_type.shape.data)
-            operands = list(candidate.alloc_op.dynamic_shape)
+            dims = list(slot_type.shape.data)
+            operands = list(alloc_op.dynamic_shape)
             if not operands:
                 return False
             dim_values: list[_SymbolExprValue] = []
@@ -349,7 +313,7 @@ def _rewrite_matmul_if_pair(
                     if SymbolExprAttr.from_expr(value_expr).expr.data != SymbolExprAttr.from_expr(dim_expr).expr.data:
                         return False
                     static_value = int(dim_expr) if dim_expr.isdecimal() else None
-                    dim_values.append(_SymbolExprValue(operand, dim_expr, static_value))
+                    dim_values.append((operand, dim_expr, static_value))
             else:
                 non_static_dims: list[Attribute] = []
                 for dim in dims:
@@ -364,7 +328,7 @@ def _rewrite_matmul_if_pair(
                     if static_dim is not None and static_dim > 0:
                         dim_const = SymbolConstOp(static_dim)
                         pre_loop_ops.append(dim_const)
-                        dim_values.append(_SymbolExprValue(dim_const.result, str(static_dim), static_dim))
+                        dim_values.append((dim_const.result, str(static_dim), static_dim))
                         continue
                     if not isinstance(dim, SymbolExprAttr) or operand_cursor >= len(operands):
                         return False
@@ -378,22 +342,24 @@ def _rewrite_matmul_if_pair(
                     value_expr = operand.type.expr.expr.data
                     if SymbolExprAttr.from_expr(value_expr).expr.data != SymbolExprAttr.from_expr(dim_expr).expr.data:
                         return False
-                    dim_values.append(_SymbolExprValue(operand, dim_expr, None))
+                    dim_values.append((operand, dim_expr, None))
 
             if not dim_values:
                 return False
             elements = dim_values[0]
             for dim_value in dim_values[1:]:
-                result_expr = f"{elements.expr}*{dim_value.expr}"
-                if elements.static_value is not None and dim_value.static_value is not None:
-                    value = elements.static_value * dim_value.static_value
+                elements_value, elements_expr, elements_static = elements
+                dim_result, dim_expr, dim_static = dim_value
+                result_expr = f"{elements_expr}*{dim_expr}"
+                if elements_static is not None and dim_static is not None:
+                    value = elements_static * dim_static
                     const_op = SymbolConstOp(value)
                     pre_loop_ops.append(const_op)
-                    elements = _SymbolExprValue(const_op.result, str(value), value)
+                    elements = (const_op.result, str(value), value)
                 else:
-                    mul_op = SymbolMulOp(elements.value, dim_value.value, SymbolValueType.from_expr(result_expr))
+                    mul_op = SymbolMulOp(elements_value, dim_result, SymbolValueType.from_expr(result_expr))
                     pre_loop_ops.append(mul_op)
-                    elements = _SymbolExprValue(mul_op.result, result_expr, None)
+                    elements = (mul_op.result, result_expr, None)
             element_values.append(elements)
             element_sizes.append(element_size)
 
@@ -405,6 +371,7 @@ def _rewrite_matmul_if_pair(
 
         shape_values: list[_SymbolExprValue] = []
         for elements, element_size in zip(element_values, element_sizes, strict=True):
+            elements_value, elements_expr, elements_static = elements
             if element_size == 1:
                 shape_values.append(elements)
                 continue
@@ -412,69 +379,75 @@ def _rewrite_matmul_if_pair(
             if bpe is None:
                 bpe = SymbolConstOp(element_size)
                 pre_loop_ops.append(bpe)
-            bpe_value = _SymbolExprValue(bpe.result, str(element_size), element_size)
-            result_expr = f"{element_size}*{elements.expr}"
-            if elements.static_value is not None:
-                value = elements.static_value * element_size
+            bpe_value = (bpe.result, str(element_size), element_size)
+            result_expr = f"{element_size}*{elements_expr}"
+            if elements_static is not None:
+                value = elements_static * element_size
                 const_op = SymbolConstOp(value)
                 pre_loop_ops.append(const_op)
-                shape_values.append(_SymbolExprValue(const_op.result, str(value), value))
+                shape_values.append((const_op.result, str(value), value))
             else:
-                mul_op = SymbolMulOp(elements.value, bpe_value.value, SymbolValueType.from_expr(result_expr))
+                bpe_result, _bpe_expr, _bpe_static = bpe_value
+                mul_op = SymbolMulOp(elements_value, bpe_result, SymbolValueType.from_expr(result_expr))
                 pre_loop_ops.append(mul_op)
-                shape_values.append(_SymbolExprValue(mul_op.result, result_expr, None))
+                shape_values.append((mul_op.result, result_expr, None))
 
         if target is None:
             lhs_num = SymbolConstOp(memory_stage)
             rhs_num = SymbolConstOp(memory_stage)
             pre_loop_ops.extend([lhs_num, rhs_num])
             num_values = (
-                _SymbolExprValue(lhs_num.result, str(memory_stage), memory_stage),
-                _SymbolExprValue(rhs_num.result, str(memory_stage), memory_stage),
+                (lhs_num.result, str(memory_stage), memory_stage),
+                (rhs_num.result, str(memory_stage), memory_stage),
             )
         else:
             num_slots: list[_SymbolExprValue | None] = [None, None]
             groups: list[list[int]] = []
             spaces: list[str] = []
             for index, candidate in enumerate(candidate_pair):
-                space = candidate.slot_type.space.space.data
+                _alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, _slot_bytes = candidate
+                space = slot_type.space.space.data
                 if space in spaces:
                     groups[spaces.index(space)].append(index)
                     continue
                 spaces.append(space)
                 groups.append([index])
             for group in groups:
-                capacity = get_target_hardware(target, f"{candidate_pair[group[0]].slot_type.space.space.data}_memory_size")
+                group_slot_type = candidate_pair[group[0]][5]
+                capacity = get_target_hardware(target, f"{group_slot_type.space.space.data}_memory_size")
                 if capacity is None or capacity <= 0:
                     return False
                 total = shape_values[group[0]]
                 for index in group[1:]:
                     addend = shape_values[index]
-                    result_expr = f"{total.expr} + {addend.expr}"
-                    if total.static_value is not None and addend.static_value is not None:
-                        value = total.static_value + addend.static_value
+                    total_result, total_expr, total_static = total
+                    addend_result, addend_expr, addend_static = addend
+                    result_expr = f"{total_expr} + {addend_expr}"
+                    if total_static is not None and addend_static is not None:
+                        value = total_static + addend_static
                         const_op = SymbolConstOp(value)
                         pre_loop_ops.append(const_op)
-                        total = _SymbolExprValue(const_op.result, str(value), value)
+                        total = (const_op.result, str(value), value)
                     else:
-                        add_op = SymbolAddOp(total.value, addend.value, SymbolValueType.from_expr(result_expr))
+                        add_op = SymbolAddOp(total_result, addend_result, SymbolValueType.from_expr(result_expr))
                         pre_loop_ops.append(add_op)
-                        total = _SymbolExprValue(add_op.result, result_expr, None)
-                if total.static_value is not None:
-                    if total.static_value <= 0:
+                        total = (add_op.result, result_expr, None)
+                total_result, total_expr, total_static = total
+                if total_static is not None:
+                    if total_static <= 0:
                         return False
-                    num_value = capacity // total.static_value
+                    num_value = capacity // total_static
                     if num_value <= 0:
                         return False
                     num_const = SymbolConstOp(num_value)
                     pre_loop_ops.append(num_const)
-                    num = _SymbolExprValue(num_const.result, str(num_value), num_value)
+                    num = (num_const.result, str(num_value), num_value)
                 else:
                     capacity_const = SymbolConstOp(capacity)
-                    num_expr = f"{capacity} floordiv ({total.expr})"
-                    num_op = SymbolFloorDivOp(capacity_const.result, total.value, SymbolValueType.from_expr(num_expr))
+                    num_expr = f"{capacity} floordiv ({total_expr})"
+                    num_op = SymbolFloorDivOp(capacity_const.result, total_result, SymbolValueType.from_expr(num_expr))
                     pre_loop_ops.extend([capacity_const, num_op])
-                    num = _SymbolExprValue(num_op.result, num_expr, None)
+                    num = (num_op.result, num_expr, None)
                 for index in group:
                     num_slots[index] = num
             if num_slots[0] is None or num_slots[1] is None:
@@ -483,53 +456,61 @@ def _rewrite_matmul_if_pair(
 
         backing_values: list[_SymbolExprValue] = []
         for num_value, shape_value in zip(num_values, shape_values, strict=True):
-            result_expr = f"({num_value.expr})*({shape_value.expr})"
-            if num_value.static_value is not None and shape_value.static_value is not None:
-                value = num_value.static_value * shape_value.static_value
+            num_result, num_expr, num_static = num_value
+            shape_result, shape_expr, shape_static = shape_value
+            result_expr = f"({num_expr})*({shape_expr})"
+            if num_static is not None and shape_static is not None:
+                value = num_static * shape_static
                 const_op = SymbolConstOp(value)
                 pre_loop_ops.append(const_op)
-                backing_values.append(_SymbolExprValue(const_op.result, str(value), value))
+                backing_values.append((const_op.result, str(value), value))
             else:
-                mul_op = SymbolMulOp(num_value.value, shape_value.value, SymbolValueType.from_expr(result_expr))
+                mul_op = SymbolMulOp(num_result, shape_result, SymbolValueType.from_expr(result_expr))
                 pre_loop_ops.append(mul_op)
-                backing_values.append(_SymbolExprValue(mul_op.result, result_expr, None))
+                backing_values.append((mul_op.result, result_expr, None))
 
         for candidate, num_value, shape_value, backing_value in zip(candidate_pair, num_values, shape_values, backing_values, strict=True):
-            dynamic_shape = [] if backing_value.static_value is not None else [backing_value.value]
+            _alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, _slot_bytes = candidate
+            num_result, _num_expr, _num_static = num_value
+            shape_result, _shape_expr, _shape_static = shape_value
+            backing_result, backing_expr, backing_static = backing_value
+            dynamic_shape = [] if backing_static is not None else [backing_result]
             backing_type = NnMemoryType(
-                ArrayAttr([SymbolExprAttr.from_expr(backing_value.expr)]),
+                ArrayAttr([SymbolExprAttr.from_expr(backing_expr)]),
                 ArrayAttr([SymbolExprAttr.from_expr("1")]),
                 i8,
-                candidate.slot_type.space,
+                slot_type.space,
             )
             backing = DmaAllocOp(dynamic_shape, backing_type)
             make_ring = DmaMakeRingOp(
                 backing.result,
-                num_value.value,
-                shape_value.value,
-                shape_value.value,
-                DmaRingType(candidate.slot_type),
+                num_result,
+                shape_result,
+                DmaRingType(slot_type),
             )
             current = DmaCurrentRingOp(make_ring.result)
             advance = DmaAdvanceRingOp(make_ring.result)
             pre_loop_ops.extend([backing, make_ring])
-            rewrite_ops.append(_RingRewriteOps(current=current, advance=advance))
+            rewrite_ops.append((current, advance))
 
     parent_block.insert_ops_before(pre_loop_ops, symbol_for)
     for candidate, ops in zip(candidate_pair, rewrite_ops, strict=True):
-        loop_block.insert_ops_before([ops.current], candidate.copy_op)
-        for use in tuple(candidate.alloc_op.result.uses):
-            if use.operation is candidate.free_op:
+        alloc_op, copy_op, free_op, _matmul_op, _operand_index, _slot_type, _slot_bytes = candidate
+        current_op, _advance_op = ops
+        loop_block.insert_ops_before([current_op], copy_op)
+        for use in tuple(alloc_op.result.uses):
+            if use.operation is free_op:
                 continue
-            use.operation.operands[use.index] = ops.current.result
-    loop_block.insert_ops_after([rewrite_ops[0].advance, rewrite_ops[1].advance], matmul)
+            use.operation.operands[use.index] = current_op.result
+    loop_block.insert_ops_after([rewrite_ops[0][1], rewrite_ops[1][1]], matmul)
     for candidate in candidate_pair:
-        free_block = candidate.free_op.parent_block()
-        alloc_block = candidate.alloc_op.parent_block()
+        alloc_op, _copy_op, free_op, _matmul_op, _operand_index, _slot_type, _slot_bytes = candidate
+        free_block = free_op.parent_block()
+        alloc_block = alloc_op.parent_block()
         if free_block is not None:
-            free_block.erase_op(candidate.free_op)
+            free_block.erase_op(free_op)
         if alloc_block is not None:
-            alloc_block.erase_op(candidate.alloc_op)
+            alloc_block.erase_op(alloc_op)
     return True
 
 
@@ -538,11 +519,11 @@ class MultiBufferPass(Pass):
 
     功能说明:
     - 将可证明的 matmul lhs/rhs staging buffer 成对改写为 `dma.ring`。
-    - 默认 `memory_stage=3`，当 `target` 非空时优先按 target registry 容量计算 ring num。
+    - 默认 `memory_stage=2`，当 `target` 非空时优先按 target registry 容量计算 ring num。
     - 只处理同一 `symbol.for` 外 staging alloc/free、直接 body 内 copy/matmul 消费的公开模式。
 
     使用示例:
-    - MultiBufferPass(memory_stage=3, target="npu_demo").apply(Context(), module)
+    - MultiBufferPass(memory_stage=2, target="npu_demo").apply(Context(), module)
 
     关联文件:
     - spec: spec/pass/multi_buffer.md
@@ -552,14 +533,14 @@ class MultiBufferPass(Pass):
 
     name = "multi-buffer"
 
-    def __init__(self, memory_stage: int = 3, fold: bool = True, target: str | None = None) -> None:
+    def __init__(self, memory_stage: int = 2, fold: bool = True, target: str | None = None) -> None:
         """初始化 multi-buffer pass。
 
         功能说明:
         - 保存 ring stage 数、通用 fold 开关和可选 target 名称。
 
         使用示例:
-        - pass_obj = MultiBufferPass(memory_stage=3, fold=False, target="npu_demo")
+        - pass_obj = MultiBufferPass(memory_stage=2, fold=False, target="npu_demo")
 
         关联文件:
         - spec: spec/pass/multi_buffer.md
@@ -586,7 +567,7 @@ class MultiBufferPass(Pass):
         - `fold` 必须由 registry 通用选项处理，传到本方法时按未知 option 失败。
 
         使用示例:
-        - pass_obj = MultiBufferPass.from_options({"memory-stage": "3", "target": "npu_demo"})
+        - pass_obj = MultiBufferPass.from_options({"memory-stage": "2", "target": "npu_demo"})
 
         关联文件:
         - spec: spec/pass/multi_buffer.md
@@ -598,7 +579,7 @@ class MultiBufferPass(Pass):
         unknown = sorted(set(options) - allowed)
         if unknown:
             raise_pass_contract_error("MultiBufferOptionError", f"unknown option: {unknown[0]}")
-        memory_stage = 3
+        memory_stage = 2
         if "memory-stage" in options:
             memory_stage = _parse_memory_stage_option(options["memory-stage"])
         target = None

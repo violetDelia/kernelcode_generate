@@ -215,6 +215,93 @@ int main() {
     _compile_and_run(source)
 
 
+# API-DMA-003
+# 功能说明: 验证 runtime `DmaRing` public API 的 cursor 轮转、byte offset 与失败类别。
+# 测试目的: 锁定 `npu_demo::make_ring` 返回 factory-created ring，`current()` 不推进 cursor，`advance()` 推进后返回新 slot，并使用 byte pointer arithmetic。
+# 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_runtime_ring_current_advance_byte_offset_contract`
+# 对应功能实现文件路径: `include/npu_demo/Dma.h`
+# 对应 spec 文件路径: `spec/include/api/Dma.md`
+# 对应测试文件路径: `test/include/api/test_dma.py`
+def test_dma_runtime_ring_current_advance_byte_offset_contract() -> None:
+    source = r"""
+#include <cstdint>
+#include <stdexcept>
+
+#include "include/api/Dma.h"
+#include "include/npu_demo/Dma.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    int8_t backing_data[64] = {0};
+    Memory<TLM1, int8_t> backing(backing_data, {64}, {1}, MemoryFormat::Norm);
+
+    auto ring = npu_demo::make_ring<float>(backing, 2, 32, {2, 3}, {4, 1});
+    Memory<TLM1, float> cur0 = ring.current();
+    if (cur0.data() != reinterpret_cast<float*>(backing_data)) {
+        return fail(1);
+    }
+    if (cur0.rank() != 2 || cur0.get_shape(0) != 2 || cur0.get_shape(1) != 3) {
+        return fail(2);
+    }
+    if (cur0.get_stride(0) != 4 || cur0.get_stride(1) != 1) {
+        return fail(3);
+    }
+
+    Memory<TLM1, float> cur0_again = ring.current();
+    if (cur0_again.data() != cur0.data()) {
+        return fail(4);
+    }
+    Memory<TLM1, float> cur1 = ring.advance();
+    if (reinterpret_cast<int8_t*>(cur1.data()) != backing_data + 32) {
+        return fail(5);
+    }
+    Memory<TLM1, float> cur1_again = ring.current();
+    if (cur1_again.data() != cur1.data()) {
+        return fail(6);
+    }
+    Memory<TLM1, float> wrapped = ring.advance();
+    if (wrapped.data() != cur0.data()) {
+        return fail(7);
+    }
+
+    bool saw_invalid_num = false;
+    try {
+        (void)npu_demo::make_ring<float>(backing, 0, 32, {2, 3}, {4, 1});
+    } catch (const std::runtime_error&) {
+        saw_invalid_num = true;
+    }
+    if (!saw_invalid_num) {
+        return fail(8);
+    }
+
+    bool saw_small_offset = false;
+    try {
+        (void)npu_demo::make_ring<float>(backing, 2, 16, {2, 3}, {4, 1});
+    } catch (const std::runtime_error&) {
+        saw_small_offset = true;
+    }
+    if (!saw_small_offset) {
+        return fail(9);
+    }
+
+    int8_t small_backing_data[40] = {0};
+    Memory<TLM1, int8_t> small_backing(small_backing_data, {40}, {1}, MemoryFormat::Norm);
+    bool saw_small_backing = false;
+    try {
+        (void)npu_demo::make_ring<float>(small_backing, 2, 32, {2, 3}, {4, 1});
+    } catch (const std::runtime_error&) {
+        saw_small_backing = true;
+    }
+    if (!saw_small_backing) {
+        return fail(10);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
 # API-DMA-002
 # 功能说明: 验证成员式 `view` 与 DMA 入口在非法 vector rank 下保持稳定错误边界。
 # 测试目的: 验证 `include/api/Dma.h` 入口在非法 vector rank 下保持后端约定的错误边界。
