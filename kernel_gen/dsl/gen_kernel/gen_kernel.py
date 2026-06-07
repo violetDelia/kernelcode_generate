@@ -7,6 +7,7 @@
 - 单个非函数 op 继续直接委托给本模块绑定的 `emit_c_op(...)`。
 - 函数 / module 输入统一委托给公开 `emit_c(...)` 生成完整源码。
 - `kernel_gen.core.config.dump_dir` 非空时统一写出最终 `source.cpp`；SourceBundle 还会展开 artifact 文件。
+- dump 文本落盘统一委托 `kernel_gen.core.tools.dump_dir.DumpDirWriter`，SourceBundle 解析与公开错误语义仍留在本模块。
 - 内部函数级 kernel emitter 实现位于 `kernel_emitter.py`，本文件只承载公开 API。
 
 API 列表:
@@ -29,16 +30,14 @@ API 列表:
 
 from __future__ import annotations
 from collections.abc import Callable
-import os
-from pathlib import Path
 from typing import NoReturn, TypeAlias
 
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.ir import Operation
 
-from kernel_gen.core.config import get_dump_dir
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
+from kernel_gen.core.tools.dump_dir import DumpDirWriter
 from kernel_gen.dsl.ast.mlir_gen import mlir_gen
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -124,50 +123,6 @@ def _parse_source_bundle(source: str) -> dict[str, str] | None:
     return {path: "\n".join(content) for path, content in artifacts.items()}
 
 
-def _safe_artifact_path(dump_dir: Path, artifact_path: str) -> Path:
-    """把 artifact 相对路径解析到 dump 目录下。
-
-
-    功能说明:
-    - 使用 `Path.resolve(strict=False)` 识别已存在 symlink 逃逸。
-    - 写出路径必须保持在 dump 根目录内。
-
-    使用示例:
-    - output_path = _safe_artifact_path(Path("dump"), "kernel.cpp")
-    """
-
-    root = dump_dir.resolve()
-    output_path = (dump_dir / artifact_path).resolve(strict=False)
-    if os.path.commonpath((str(root), str(output_path))) != str(root):
-        raise _gen_kernel_error("source_bundle_path_escape")
-    return output_path
-
-
-def _write_source_dump(source: str, dump_dir: Path) -> None:
-    """按普通源码或 SourceBundle 写出 dump 文件。
-
-
-    功能说明:
-    - 始终写出兼容 `source.cpp`，内容为公开返回源码。
-    - 若源码是 SourceBundle aggregate string，额外展开每个 artifact 到对应安全相对路径。
-
-    使用示例:
-    - _write_source_dump(source, Path("dump"))
-    """
-
-    dump_dir.mkdir(parents=True, exist_ok=True)
-    text = source if source.endswith("\n") else f"{source}\n"
-    (dump_dir / "source.cpp").write_text(text, encoding="utf-8")
-    artifacts = _parse_source_bundle(source)
-    if artifacts is None:
-        return
-    for artifact_path, content in artifacts.items():
-        output_path = _safe_artifact_path(dump_dir, artifact_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        artifact_text = content if content.endswith("\n") else f"{content}\n"
-        output_path.write_text(artifact_text, encoding="utf-8")
-
-
 def _emit_func_with_kernel_emitter(func_op: func.FuncOp, ctx: EmitCContext) -> str:
     """通过公开 `KernelEmitter` 发射单个函数。
 
@@ -212,9 +167,16 @@ def gen_kernel(obj: GenKernelInput, ctx: EmitCContext) -> str:
         result = _emit_func_with_kernel_emitter(obj, ctx)
     else:
         result = emit_c(obj, ctx)
-    dump_dir = get_dump_dir()
-    if dump_dir is not None:
-        _write_source_dump(result, dump_dir)
+    writer = DumpDirWriter.from_config()
+    if writer is not None:
+        writer.write("source.cpp", result)
+        artifacts = _parse_source_bundle(result)
+        if artifacts is not None:
+            for artifact_path, content in artifacts.items():
+                try:
+                    writer.write(artifact_path, content)
+                except ValueError as exc:
+                    raise _gen_kernel_error("source_bundle_path_escape") from exc
     return result
 
 

@@ -2,6 +2,7 @@
 
 功能说明:
 - 承接 `target="cuda_sm86"` 的 SourceBundle 写盘、`nvcc` 命令生成和 `.so` 编译路径。
+- SourceBundle aggregate 与 `.cu/.cuh` 文本 artifact 写出统一委托 `kernel_gen.core.tools.dump_dir.DumpDirWriter`。
 - 只消费 generated source 中的 `kg_execute_entry(slots, count)` C ABI；具体业务 kernel 必须由 emit 生成。
 
 API 列表:
@@ -22,9 +23,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-import os
 import tempfile
 
+from kernel_gen.core.tools.dump_dir import DumpDirWriter
 from kernel_gen.execute_engine.builtin_strategy.common import (
     BUNDLE_MARKER_PREFIX,
     BuiltinCompileArtifacts,
@@ -53,10 +54,9 @@ def build_cuda_sm86_compile_artifacts(
     try:
         work_dir = Path(tempfile.mkdtemp(prefix="kg_execute_engine_cuda_sm86_"))
         cleanup = partial(BuiltinStrategySupport.remove_workdir, work_dir)
-        source_root = work_dir / "source"
-        source_root.mkdir(parents=True, exist_ok=True)
-        aggregate_path = source_root / "source.cpp"
-        aggregate_path.write_text(request.source if request.source.endswith("\n") else f"{request.source}\n", encoding="utf-8")
+        work_writer = DumpDirWriter(work_dir)
+        source_writer = work_writer.child("source")
+        aggregate_path = source_writer.write("source.cpp", request.source)
 
         artifacts: dict[str, list[str]] = {}
         lines = request.source.splitlines()
@@ -91,15 +91,13 @@ def build_cuda_sm86_compile_artifacts(
             )
             artifacts["kernel.cu"] = compile_unit.splitlines()
 
-        source_root_resolved = source_root.resolve()
         written_paths: dict[str, Path] = {}
         for artifact_path, content_lines in artifacts.items():
-            output_path = (source_root / artifact_path).resolve(strict=False)
-            if os.path.commonpath((str(source_root_resolved), str(output_path))) != str(source_root_resolved):
-                raise BuiltinStrategySupport.builtin_compile_error("source_empty_or_invalid", "source_bundle_path_escape")
-            output_path.parent.mkdir(parents=True, exist_ok=True)
             artifact_text = "\n".join(content_lines)
-            output_path.write_text(artifact_text if artifact_text.endswith("\n") else f"{artifact_text}\n", encoding="utf-8")
+            try:
+                output_path = source_writer.write(artifact_path, artifact_text)
+            except ValueError as exc:
+                raise BuiltinStrategySupport.builtin_compile_error("source_empty_or_invalid", "source_bundle_path_escape") from exc
             written_paths[artifact_path] = output_path
 
         main_path = written_paths.get("kernel.cu")
@@ -108,7 +106,7 @@ def build_cuda_sm86_compile_artifacts(
             if not cuda_sources:
                 raise BuiltinStrategySupport.builtin_compile_error("source_empty_or_invalid", "source_bundle_missing_cuda_source")
             main_path = cuda_sources[0]
-        soname_path = work_dir / "libkernel.so"
+        soname_path = work_writer.root / "libkernel.so"
         cuda_flags = list(compiler_flags)
         if not any(flag.startswith("-arch=") for flag in cuda_flags) and not any(flag.startswith("-gencode") for flag in cuda_flags):
             cuda_flags.append("-arch=sm_86")
@@ -120,7 +118,7 @@ def build_cuda_sm86_compile_artifacts(
             compiler,
             *tuple(cuda_flags),
             f"-I{REPO_ROOT}",
-            f"-I{source_root}",
+            f"-I{source_writer.root}",
             str(main_path),
             "-o",
             str(soname_path),

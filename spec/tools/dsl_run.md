@@ -113,13 +113,13 @@
   - lowering 后若入口函数不满足当前 target 的公开 `gen_kernel(...)` 合同，`dsl_run(...)` 直接透传对应公开错误，不额外包装。
   - lowering 后残留的透明 `builtin.unrealized_conversion_cast` 允许由工具层源码生成自动吞掉。
   - `dump_dir` 由 `kernel_gen.core.config.set_dump_dir(...)` 配置；配置为 `None` 或空字符串时不写诊断文件，非空时按 `dump_dir/<kernel name>/` 写入诊断文件。
-  - `kernel_gen.core.config.dump_dir` 非空时，`dsl_run(...)` 必须按 DSL 函数名创建 kernel 子目录，例如 `dump/add_kernel/`。
+  - `kernel_gen.core.config.dump_dir` 非空时，`dsl_run(...)` 必须按 DSL 函数名创建 kernel 子目录，例如 `dump/add_kernel/`；该子目录派生与工具层 dump 文本写出由 `kernel_gen.core.tools.dump_dir.DumpDirWriter` 管理。
   - `kernel_gen.core.config.trance_enabled` 为 `True` 且 `dump_dir is None` 时，runtime trance 必须把日志输出到 stdout；日志至少包含 `in func: <entry> template=<none>`、`args =` 与真实运行参数摘要。
   - `kernel_gen.core.config.trance_enabled` 为 `True` 且 `dump_dir` 非空时，runtime trance 文件必须写入 `dump_dir/<kernel name>/trance/block_0000.log`、`block_0001.log` 等 block 文件；每个文件必须包含对应 block header 与 `npu_demo::launch` template/args 日志。
   - `dsl_run(...)` 不得继续生成 `dump_dir/<kernel name>/<entry>_trace.txt` 或 `dump_dir/<kernel name>_trace.txt`；同名 block 文件再次执行时必须覆盖旧内容，且本次 block 数变小时旧额外 `block_*.log` 不得残留。
   - runtime trance 只作为诊断输出，不改变 `DslRunResult` 字段、执行结果、源码文本或数学语义。
   - kernel 子目录内必须写入 `01-first-ir.mlir`，内容为 `mlir_gen(...)` 之后、pipeline 执行前的初始 alias IR。
-  - 标准 `PassManager` pipeline 必须写入每个 pass 后的 `NN-<pass-name>.mlir`；文件第一行为 pass 名称文本，后续为 pass 后 IR。
+  - 标准 `PassManager` pipeline 必须写入每个 pass 后的 `NN-<pass-name>.mlir`；文件第一行为当前 pass 的 xDSL pass spec 文本，后续为 pass 后 IR。
   - 自定义 `PassManager` 子类若覆盖 `run(module)` 且不使用标准 config dump，工具层只保证写入初始 alias IR 与 `02-pipeline.mlir` 粗粒度 alias IR 结果。
   - `dump_dir/<kernel name>/*.mlir` 的 IR 正文默认使用 alias IR；普通 `str(op)`、raw attr/type 打印和比较工具默认文本不因 `dsl_run(...)` 改变。
   - 源码生成成功后必须由 `gen_kernel(...)` 的公开 dump 链路写入 `source.cpp`，内容与 `DslRunResult.source` 一致。
@@ -159,7 +159,7 @@
   - lowering 后缺少目标 cost sibling 必须失败，固定短语前缀为 `DslCostRunMissingCostFunction:`。
   - cost 函数返回值通过工具层当前文件内部追加的捕获 wrapper 写入临时 `S_INT` 输出参数；该 wrapper 不作为执行引擎或 include 的公开 API。
   - `kernel_gen.core.config.trance_enabled` 为 `True` 时，cost 捕获 wrapper 必须在执行期间输出 `return = <cost>`；该输出只作为 runtime trance stdout 诊断，不改变返回值或缺 sibling 失败语义。
-  - `dsl_cost_run(...)` 在 `dump_dir` 有无时都不得创建 `trance/`、`block_*.log`、`<entry>_trace.txt` 或 `<kernel name>_trace.txt`；`dump_dir` 仍可用于既有 `99-cost-source.cpp` 诊断源码。
+  - `dsl_cost_run(...)` 在 `dump_dir` 有无时都不得创建 `trance/`、`block_*.log`、`<entry>_trace.txt` 或 `<kernel name>_trace.txt`；`dump_dir` 仍可用于既有 `99-cost-source.cpp` 诊断源码，该文件名和目录结构保持不变，最终写出由 `DumpDirWriter` 管理。
 
 ## 测试
 

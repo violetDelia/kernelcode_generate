@@ -9,6 +9,7 @@
   最终输出 `true/false`。
 - CLI 支持 `--help` / `-h`、`-irdump` 与 `-emitc{target=...}`。
 - `-irdump` 诊断文件默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias IR。
+- `.irdump/<case>/...` 诊断文本写出统一委托 `kernel_gen.core.tools.dump_dir.DumpDirWriter`，不改变 CLI 路径结构。
 - 对外公开 API 包括 CLI `main(...)`、公开数据模型与三条函数入口：
   `parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text`，便于 CLI / pytest / 脚本复用。
 
@@ -66,6 +67,7 @@ from xdsl.printer import Printer
 
 from kernel_gen.core.context import build_default_context as _build_default_context_base
 from kernel_gen.core.print import print_operation_with_aliases
+from kernel_gen.core.tools.dump_dir import DumpDirWriter
 from kernel_gen.passes.registry import (
     build_registered_pass,
     build_registered_pipeline,
@@ -1359,8 +1361,8 @@ def _write_irdump_file(path: Path, content: str) -> None:
 
 
     功能说明:
-    - 自动创建父目录，并将规范化后的 IR 文本写入指定路径。
-    - 统一保证文本以换行结束，便于直接查看。
+    - 使用 `DumpDirWriter` 写入当前 ircheck case 的诊断文本。
+    - 保留 `.irdump/<case>/<file>` 的既有目录结构和文件名。
 
     使用示例:
     - _write_irdump_file(Path(".irdump/demo/00-input.mlir"), "builtin.module {}")
@@ -1371,9 +1373,12 @@ def _write_irdump_file(path: Path, content: str) -> None:
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    text = content if content.endswith("\n") else f"{content}\n"
-    path.write_text(text, encoding="utf-8")
+    dump_root = path.parent
+    dump_name = path.name
+    if not dump_name:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckDumpError: empty dump file name")
+    writer = DumpDirWriter(dump_root)
+    writer.write(dump_name, content)
 
 
 def _parse_name_and_options(value: str) -> tuple[str, dict[str, str]] | None:

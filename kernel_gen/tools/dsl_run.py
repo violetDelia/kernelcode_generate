@@ -8,6 +8,7 @@
 - 不向 DSL 函数隐式注入 operation helper；kernel 体使用的 helper 必须由调用方显式 import 或闭包绑定。
 - `dump_dir` 与 runtime `trance` 诊断开关统一从 `kernel_gen.core.config` 读取，不作为 `dsl_run(...)` 入参。
 - IR dump 文件默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias 文本。
+- kernel 级 dump 目录派生和工具层诊断文本写出统一委托 `kernel_gen.core.tools.dump_dir.DumpDirWriter`。
 - `dsl_run(...)` 的 runtime trance 落盘只生成 block trace 文件；`dsl_cost_run(...)` 始终保留 stdout-only trance 诊断。
 
 API 列表:
@@ -34,16 +35,15 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 import inspect
 from numbers import Integral
-from pathlib import Path
 import re
 from typing import Protocol, TypeAlias
 
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp
 
-from kernel_gen.core.config import get_dump_dir, get_target, restore_config, set_dump_dir, snapshot_config
+from kernel_gen.core.config import get_target, restore_config, set_dump_dir, snapshot_config
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
-from kernel_gen.core.print import print_operation_with_aliases
+from kernel_gen.core.tools.dump_dir import DumpDirWriter
 from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
 from kernel_gen.dsl.ast.mlir_gen import mlir_gen
@@ -256,52 +256,31 @@ def _sanitize_dump_component(value: str) -> str:
     return safe_name or "kernel"
 
 
-def _resolve_dump_kernel_dir(
+def _resolve_dump_kernel_writer(
     func_obj: Callable[..., DslFunctionReturn],
-) -> Path | None:
-    """从公开 config 解析 `dsl_run(...)` 的 kernel 级 dump 目录。
+) -> DumpDirWriter | None:
+    """从公开 config 解析 `dsl_run(...)` 的 kernel 级 dump writer。
 
 
     功能说明:
-    - `kernel_gen.core.config.get_dump_dir() is None` 时禁用落盘。
+    - `DumpDirWriter.from_config() is None` 时禁用落盘。
     - 非空时在根目录下按 DSL 函数名创建子目录，匹配 `dir/kernelname/...` 结构。
 
     使用示例:
-    - dump_path = _resolve_dump_kernel_dir(add_kernel)
+    - dump_writer = _resolve_dump_kernel_writer(add_kernel)
 
     关联文件:
     - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
     - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
     - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
     """
-    dump_dir = get_dump_dir()
-    if dump_dir is None:
+    writer = DumpDirWriter.from_config()
+    if writer is None:
         return None
     kernel_name = getattr(func_obj, "__name__", "kernel")
     if not isinstance(kernel_name, str) or not kernel_name:
         kernel_name = "kernel"
-    return dump_dir / _sanitize_dump_component(kernel_name)
-
-
-def _write_dump_file(path: Path, content: str) -> None:
-    """写入 `dsl_run(...)` 的 dump 文件。
-
-
-    功能说明:
-    - 自动创建父目录。
-    - 保证文本以换行结尾。
-
-    使用示例:
-    - _write_dump_file(Path("dump/kernel/01-first-ir.mlir"), ir_text)
-
-    关联文件:
-    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
-    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
-    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    text = content if content.endswith("\n") else f"{content}\n"
-    path.write_text(text, encoding="utf-8")
+    return writer.child(kernel_name, fallback="kernel")
 
 
 def _runtime_module_name(value: TensorRuntimeArg) -> str:
@@ -681,29 +660,10 @@ def _resolve_pipeline(pipeline: str | PassManager) -> PassManager:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, f"DslRunUnknownPipeline: unknown pipeline '{pipeline}'") from exc
 
 
-def _pipeline_uses_config_dump(pipeline: PassManager) -> bool:
-    """判断 pipeline 是否使用标准 `PassManager.run(...)` 的 config dump。
-
-
-    功能说明:
-    - 标准 `PassManager.run(...)` 从 `kernel_gen.core.config.get_dump_dir()` 读取 dump 目录。
-    - 测试或外部自定义 `PassManager` 子类可能覆盖 `run(module)`，此时回退为工具层粗粒度 dump。
-
-    使用示例:
-    - _pipeline_uses_config_dump(pm)
-
-    关联文件:
-    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
-    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
-    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
-    """
-    return type(pipeline).run is PassManager.run
-
-
 def _run_pipeline_with_optional_dump(
     pipeline: PassManager,
     module: ModuleOp,
-    dump_dir: Path | None,
+    dump_writer: DumpDirWriter | None,
 ) -> ModuleOp:
     """执行 pipeline，并在可用时写入 pass IR dump。
 
@@ -713,28 +673,28 @@ def _run_pipeline_with_optional_dump(
     - 覆盖 `run(module)` 的自定义 pipeline 不强制改签名，只写入 alias 初始 IR 与 alias pipeline 后 IR。
 
     使用示例:
-    - lowered = _run_pipeline_with_optional_dump(pm, module, Path("dump/kernel"))
+    - lowered = _run_pipeline_with_optional_dump(pm, module, dump_writer)
 
     关联文件:
     - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
     - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
     - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
     """
-    if dump_dir is None:
+    if dump_writer is None:
         return pipeline.run(module)
-    if _pipeline_uses_config_dump(pipeline):
+    if type(pipeline).run is PassManager.run:
         snapshot = snapshot_config()
         try:
-            set_dump_dir(dump_dir)
+            set_dump_dir(dump_writer.root)
             return pipeline.run(module)
         finally:
             restore_config(snapshot)
-    _write_dump_file(dump_dir / "01-first-ir.mlir", print_operation_with_aliases(module))
+    dump_writer.write("01-first-ir.mlir", module)
     output = pipeline.run(module)
     pipeline_name = getattr(pipeline, "name", "pipeline")
     if not isinstance(pipeline_name, str) or not pipeline_name:
         pipeline_name = "pipeline"
-    _write_dump_file(dump_dir / "02-pipeline.mlir", f"{pipeline_name}\n{print_operation_with_aliases(output)}")
+    dump_writer.write("02-pipeline.mlir", output, marker=pipeline_name)
     return output
 
 
@@ -1237,7 +1197,7 @@ def dsl_run(
     emit_context = EmitCContext()
     resolved_pipeline = _resolve_pipeline(pipeline)
     runtime_args = _normalize_real_args(real_args)
-    dump_kernel_dir = _resolve_dump_kernel_dir(func_obj)
+    dump_kernel_writer = _resolve_dump_kernel_writer(func_obj)
 
     positional_params = [
         param
@@ -1259,17 +1219,17 @@ def dsl_run(
     if root_func.function_type.outputs.data:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, RETURN_VALUE_ERROR)
 
-    lowered_module = _run_pipeline_with_optional_dump(resolved_pipeline, module, dump_kernel_dir)
+    lowered_module = _run_pipeline_with_optional_dump(resolved_pipeline, module, dump_kernel_writer)
     if not isinstance(lowered_module, ModuleOp):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInternalError: pipeline must return builtin.module")
 
     source_snapshot = snapshot_config()
     try:
-        if dump_kernel_dir is not None:
-            set_dump_dir(dump_kernel_dir)
+        if dump_kernel_writer is not None:
+            set_dump_dir(dump_kernel_writer.root)
         source, entry_name, func_op = _select_source_and_entry(lowered_module, emit_context)
-        if dump_kernel_dir is not None:
-            set_dump_dir(dump_kernel_dir.parent)
+        if dump_kernel_writer is not None:
+            set_dump_dir(dump_kernel_writer.root.parent)
         engine = ExecutionEngine(target=_emitc_target_name(emit_context))
         compiled_kernel = engine.compile(source=source, function=entry_name)
     finally:
@@ -1318,7 +1278,7 @@ def dsl_cost_run(
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, DSL_COST_TARGET_ERROR)
     resolved_pipeline = _resolve_pipeline(pipeline)
     runtime_args = _normalize_real_args(real_args)
-    dump_kernel_dir = _resolve_dump_kernel_dir(func_obj)
+    dump_kernel_writer = _resolve_dump_kernel_writer(func_obj)
 
     positional_params = [
         param
@@ -1340,18 +1300,18 @@ def dsl_cost_run(
     if root_func.function_type.outputs.data:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, RETURN_VALUE_ERROR)
 
-    lowered_module = _run_pipeline_with_optional_dump(resolved_pipeline, module, dump_kernel_dir)
+    lowered_module = _run_pipeline_with_optional_dump(resolved_pipeline, module, dump_kernel_writer)
     if not isinstance(lowered_module, ModuleOp):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInternalError: pipeline must return builtin.module")
 
     source_snapshot = snapshot_config()
     try:
-        if dump_kernel_dir is not None:
-            set_dump_dir(dump_kernel_dir)
+        if dump_kernel_writer is not None:
+            set_dump_dir(dump_kernel_writer.root)
         source, cost_entry_name, _ = _select_source_and_cost_entry(lowered_module, emit_context, cost_kind)
         cost_source, wrapper_name = _append_cost_capture_wrapper(source, cost_entry_name, cost_kind)
-        if dump_kernel_dir is not None:
-            _write_dump_file(dump_kernel_dir / "99-cost-source.cpp", cost_source)
+        if dump_kernel_writer is not None:
+            dump_kernel_writer.write("99-cost-source.cpp", cost_source)
             set_dump_dir(None)
         engine = ExecutionEngine(target=_emitc_target_name(emit_context))
         compiled_kernel = engine.compile(source=cost_source, function=wrapper_name)

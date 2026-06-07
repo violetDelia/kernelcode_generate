@@ -35,6 +35,7 @@
 - PassManager 只负责 Pass 编排与执行，不承载默认 pipeline builder；默认 builder 见 [`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)。
 - PassManager 固定支持两类公开对象：`Pass` 与 xdsl `ModulePass`；执行时内部创建并复用单个 `Context`。
 - `dump_dir` 是来自 `kernel_gen.core.config` 的诊断开关；非空时写入初始 IR 与逐 pass 后 IR，不改变 pass 执行结果；pass 后 dump 文件第一行使用 xDSL `ModulePass.pipeline_pass_spec(include_default=True)` 生成的 pass spec，IR dump 正文默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias IR。
+- PassManager 的 dump 文本写出、阶段文件名规整与最终换行由 `kernel_gen.core.tools.dump_dir.DumpDirWriter` 承担；PassManager 只负责 pass 编排和 marker 生成，不公开写文件 helper。
 - fold 是 pass 级通用开关；未声明 `fold` 的第三方 `ModulePass` 按 `fold=True` 处理，只有显式 `fold=False` 才关闭 pass 后 folding + DCE sweep。
 - 通用 fold sweep 启用 folding 与 DCE；DCE 仅删除无使用者且无副作用的 op，不承担 CSE、业务重写或 canonicalization pattern。
 - 业务顺序约束不属于 PassManager 职责；具体 lowering / tuning / tile / backend pipeline 的顺序由对应 builder 与其 spec 固定。
@@ -246,7 +247,7 @@ pm.extend([PassA(), PassB()])
 - 参数：
 
 - `module (ModuleOp)`：待处理的 `builtin.module`。
-- 诊断目录通过 `kernel_gen.core.config.set_dump_dir(...)` 设置；非空时写入 pass IR 产物。
+- 诊断目录通过 `kernel_gen.core.config.set_dump_dir(...)` 设置；非空时经 `DumpDirWriter` 写入 pass IR 产物。
 
 - 使用示例：
 

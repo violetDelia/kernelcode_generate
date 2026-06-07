@@ -4,6 +4,7 @@
 
 - 定义 `ExecutionEngine.compile(...)` 的 compile strategy 扩展合同。
 - 内置 `cpu` / `npu_demo` strategy 保持既有真实编译行为；内置 `cuda_sm86` strategy 使用 `nvcc` 编译公开 SourceBundle artifact。
+- 内置 strategy 的 Python 侧编译单元文本、dry-run 占位产物、dummy backend source/build 文本产物和 CUDA SourceBundle artifact 写出由 `kernel_gen.core.tools.dump_dir.DumpDirWriter` 管理；真实二进制仍由编译命令写入既定输出路径。
 - compile strategy registry 真源由 `strategy.py` 承接；`compiler.py` 保留旧公开导入路径和 `CompiledKernel` 装配。
 - 内置 target include、entry shim 与编译产物生成由 `builtin_strategy/` package 承接；package root 只提供包内文件级 API，不进入 `kernel_gen.execute_engine` 包根公开 API。
 - 第三方 target 可通过公开 registry 注册 compile strategy；缺失时公开失败，不得 fallback 到 CPU。
@@ -88,7 +89,7 @@
   ```python
   kernel = strategy.compile(request)
   ```
-- 注意事项：strategy 必须返回 `CompiledKernel`；非法输入按 `KernelCodeError` 公开错误处理。
+- 注意事项：strategy 必须返回 `CompiledKernel`；非法输入按 `KernelCodeError` 公开错误处理。内置 strategy 的 dump/workdir 文本产物写出不得公开 SourceBundle decode/write helper 或散装路径 helper。
 
 ### `register_compile_strategy(target: str, strategy: CompileStrategy, *, override: bool = False) -> None`
 

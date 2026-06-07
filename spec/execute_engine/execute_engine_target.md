@@ -85,7 +85,7 @@
 - `kernel_gen.core.config.get_trance_enabled() == False` 时，编译命令不得追加 `TRANCE`、`KG_TRANCE_KERNEL_NAME`、`KG_TRANCE_DIR_PATH` 或 `KG_TRANCE_FILE_PATH` 宏。
 - `kernel_gen.core.config.get_trance_enabled() == True` 时，编译命令必须追加 `-DTRANCE`、`-DKG_TRANCE_KERNEL_NAME="<kernel_name>"`、`-DKG_TRANCE_DIR_PATH="<trace_dir>"` 与 `-DKG_TRANCE_FILE_PATH=""`。
 - `kernel_name` 来自 `ExecutionEngine.compile(..., function=...)` 的短名，去掉 `::` 命名空间前缀后做文件名安全化；空结果回退为 `kernel`。
-- `dump_dir is None` 时 `KG_TRANCE_DIR_PATH` 与 `KG_TRANCE_FILE_PATH` 必须为空字符串，运行期由 stdout sink 输出；`dump_dir` 非空时 trace 目录路径为 `dump_dir/<kernel_name>/trance`，不得再生成旧 `dump_dir/<kernel_name>_trace.txt`。
+- `dump_dir is None` 时 `KG_TRANCE_DIR_PATH` 与 `KG_TRANCE_FILE_PATH` 必须为空字符串，运行期由 stdout sink 输出；`dump_dir` 非空时 trace 目录路径为 `dump_dir/<kernel_name>/trance`，该路径由 `kernel_gen.core.tools.dump_dir.DumpDirWriter` 派生，最终文本不得再生成旧 `dump_dir/<kernel_name>_trace.txt`。
 - entry shim 在 `TRANCE` 开启且 `KG_TRANCE_DIR_PATH` 为空时负责建立 `ScopedTranceSink`，先输出 `in func: <kernel_name> template=<none>`，再输出 `args =` 和按 `ordered_args` 顺序排列的参数行；`KG_TRANCE_DIR_PATH` 非空时顶层 shim 不得输出 stdout 或旧单文件 trace，block 文件日志由 `npu_demo::launch` 承接。
 - Memory 参数行必须委托 `Memory::trance_print(...)` 输出；整型与浮点参数使用 `kernelcode::trance::print_value_arg(...)` 输出。
 - runtime trance 只新增诊断输出，不改变目标函数调用顺序、实参绑定、返回码或失败短语。

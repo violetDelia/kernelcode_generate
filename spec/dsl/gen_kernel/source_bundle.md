@@ -35,7 +35,7 @@
 - aggregate marker 格式固定为 `// __KG_BUNDLE_FILE__:<relative/path>`。
 - artifact path 必须是安全相对路径；不得为空、绝对路径、包含 `..`、反斜杠、NUL 或重复。
 - artifact content 中不得包含完整 SourceBundle marker 行。
-- `dump_dir` 写出时必须拒绝 symlink 逃逸。
+- `dump_dir` 写出时必须拒绝 symlink 逃逸；最终文本落盘由 `kernel_gen.core.tools.dump_dir.DumpDirWriter` 管理，非法路径仍由所属模块映射为既有公开错误语义。
 
 ## API详细说明
 
@@ -45,7 +45,7 @@
   - `obj`：待生成源码的 IR 对象。
   - `ctx`：公开 EmitC 上下文。
 - 返回值：单文件源码字符串或 SourceBundle aggregate string。
-- 功能说明：当 `emit_c(...)` 返回 SourceBundle aggregate string 且 `dump_dir` 非空时，写出 `source.cpp` 和所有 artifact。
+- 功能说明：当 `emit_c(...)` 返回 SourceBundle aggregate string 且 `dump_dir` 非空时，经 `DumpDirWriter` 写出 `source.cpp` 和所有 artifact。
 - 使用示例：
 
   ```python

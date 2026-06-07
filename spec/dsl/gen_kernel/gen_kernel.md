@@ -40,6 +40,7 @@
 - 让 pass/pipeline 输出的 host wrapper + device body 双函数 IR 统一经由 `gen_kernel(...)` 消费，不要求调用方感知内部 emitter 拆分。
 - `kernel_gen.core.config.dump_dir` 非空时，`gen_kernel(...)` 必须把最终源码同步写入 `dump_dir/source.cpp`；调用方只负责设置 dump 目录，不再自行重复写源码。
 - 当 backend 返回 SourceBundle aggregate string 时，`gen_kernel(...)` 仍返回该 aggregate 文本，并在 `dump_dir` 非空时额外展开 bundle artifact。
+- `dump_dir` 下 `source.cpp` 与 SourceBundle artifact 的底层文本写出由 `kernel_gen.core.tools.dump_dir.DumpDirWriter` 管理；SourceBundle 解析与公开错误语义仍归 gen_kernel 模块。
 - `kernel_gen.core.config.trance_enabled` 只影响后续编译/运行链路；`gen_kernel(...)` 不读取该开关来改变源码内容，也不创建 runtime trace 文件。
 
 ## 额外补充
@@ -51,7 +52,7 @@
 - `dsl_gen_kernel(...)` 只接受 Python DSL callable + `runtime_args`；实现必须先调用公开 `mlir_gen(fn, *runtime_args)` 生成 `builtin.module`，再调用公开 `gen_kernel(module_or_func, ctx)` 生成源码。
 - `gen_kernel(...)` 继续只消费 op / `func.func` / 受控 `builtin.module` IR；`dsl_gen_kernel(...)` 不是 `gen_kernel(...)` 的别名模式，也不能接管 `dsl_run`、`ircheck` 这类已有 IR 路径消费者。
 - `dump_dir` 只控制诊断落盘，不改变 `gen_kernel(...)` 的返回值、target 选择或源码内容；为空时不得创建 `source.cpp`。
-- SourceBundle dump 只通过 `gen_kernel(...)` 的返回文本与 `dump_dir` 文件观察；SourceBundle 解析、校验和写出 helper 不公开。
+- SourceBundle dump 只通过 `gen_kernel(...)` 的返回文本与 `dump_dir` 文件观察；SourceBundle 解析、校验和写出 helper 不公开，最终文本落盘统一委托 `DumpDirWriter`。
 - `trance_enabled` 不属于源码生成语义；即使该开关为 `True`，`gen_kernel(...)` 仍只按 `dump_dir` 写 `source.cpp`，不得写 `<kernel>_trace.txt`。
 - 对 `target="npu_demo"`，`gen_kernel(...)` 输入的 `NnMemoryType.template_name` 必须透传为 C++ 函数模板参数；wrapper/device/helper 均可模板化。
 - 对 `target="npu_demo"`，若 module 含唯一 `entry_point` host dispatcher 且存在多个 pattern device 函数，`gen_kernel(...)` 必须先输出 device/helper 函数，再输出 entry dispatcher，保证 C++ 调用点已声明。

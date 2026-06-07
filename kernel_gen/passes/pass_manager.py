@@ -5,7 +5,7 @@
 - 定义 Pass 与 PassManager 的基础行为。
 - 固定 `kernel_gen.passes.pass_manager` 只承载 Pass 抽象与 PassManager，不再承载默认 pipeline builder。
 - 当前文件不额外公开 helper；内部状态仅通过 `Pass` / `PassManager` 两个公开入口对外生效。
-- `PassManager.run(...)` 从 `kernel_gen.core.config.get_dump_dir()` 读取诊断产物落盘开关，不改变 pass 执行语义。
+- `PassManager.run(...)` 通过 `DumpDirWriter.from_config()` 读取诊断产物落盘开关，不改变 pass 执行语义。
 - pass 后 dump 第一行使用 xDSL `pipeline_pass_spec(include_default=True)`，稳定包含 pass 公开配置。
 - dump IR 正文默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias 文本。
 - pass 实例默认 `fold=True`；管理器在每个 pass 后对 `ModuleOp` 执行一次 folding + DCE sweep。
@@ -34,18 +34,14 @@ API 列表:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from pathlib import Path
-import re
 
 from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
-from xdsl.ir import Operation
 from xdsl.passes import ModulePass as XdslModulePass
 from xdsl.pattern_rewriter import GreedyRewritePatternApplier, PatternRewriteWalker
 
-from kernel_gen.core.config import get_dump_dir
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
-from kernel_gen.core.print import print_operation_with_aliases
+from kernel_gen.core.tools.dump_dir import DumpDirWriter
 
 
 class Pass(XdslModulePass):
@@ -89,68 +85,6 @@ class Pass(XdslModulePass):
         """
 
         self.fold = bool(fold)
-
-
-def _sanitize_dump_name(value: str) -> str:
-    """把 pass 名称规整为安全文件名片段。
-
-
-    功能说明:
-    - 保留字母、数字、点、下划线与短横线。
-    - 其他字符统一替换为 `_`，避免 dump 文件名依赖 shell 或文件系统特殊字符。
-
-    使用示例:
-    - _sanitize_dump_name("tile-elewise")
-
-    关联文件:
-    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
-    - test: [test/passes/test_pass_manager.py](test/passes/test_pass_manager.py)
-    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
-    """
-    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
-    return safe_name or "pass"
-
-
-def _write_dump_file(path: Path, content: str) -> None:
-    """写入单个 dump 文件。
-
-
-    功能说明:
-    - 自动创建父目录。
-    - 保证文件以换行结尾，方便后续命令行查看和机械 diff。
-
-    使用示例:
-    - _write_dump_file(Path("dump/01-first-ir.mlir"), str(module))
-
-    关联文件:
-    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
-    - test: [test/passes/test_pass_manager.py](test/passes/test_pass_manager.py)
-    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    text = content if content.endswith("\n") else f"{content}\n"
-    path.write_text(text, encoding="utf-8")
-
-
-def _format_dump_ir(target: ModuleOp | Operation | str) -> str:
-    """把当前 pass 结果格式化为 dump 文本。
-
-
-    功能说明:
-    - 对 xDSL operation 使用公开 alias printer，保证诊断 dump 默认是 alias IR。
-    - 字符串输入保持原样，用于已经格式化好的错误或测试文本。
-
-    使用示例:
-    - _format_dump_ir(module)
-
-    关联文件:
-    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
-    - test: [test/passes/test_pass_manager.py](test/passes/test_pass_manager.py)
-    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
-    """
-    if isinstance(target, str):
-        return target
-    return print_operation_with_aliases(target).rstrip()
 
 
 def _load_fold_dialects(ctx: Context) -> None:
@@ -327,9 +261,9 @@ class PassManager:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "PassManager.run target must be builtin.module")
         result = target
         ctx = Context()
-        dump_path = get_dump_dir()
-        if dump_path is not None:
-            _write_dump_file(dump_path / "01-first-ir.mlir", _format_dump_ir(result))
+        dump_writer = DumpDirWriter.from_config()
+        if dump_writer is not None:
+            dump_writer.write("01-first-ir.mlir", result)
         for index, item in enumerate(self._passes, start=2):
             try:
                 item.apply(ctx, result)
@@ -344,12 +278,10 @@ class PassManager:
                 ) from exc
             if _pass_fold_enabled(item):
                 _fold_module(ctx, result)
-            if dump_path is not None:
+            if dump_writer is not None:
                 pass_name = getattr(item, "name", "pass")
-                safe_name = _sanitize_dump_name(pass_name)
                 dump_marker = str(item.pipeline_pass_spec(include_default=True))
-                dump_text = f"{dump_marker}\n{_format_dump_ir(result)}"
-                _write_dump_file(dump_path / f"{index:02d}-{safe_name}.mlir", dump_text)
+                dump_writer.write_stage(index, pass_name, result, marker=dump_marker, fallback="pass")
         return result
 
 

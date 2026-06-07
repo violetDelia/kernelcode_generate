@@ -4,6 +4,7 @@
 功能说明:
 - 承接内置 `cpu` / `npu_demo` / `cuda_sm86` 后端共享的源码校验、entry shim、编译命令和 SourceBundle 基础能力。
 - 提供 `builtin_strategy` package 内部跨 target 复用的文件级 API。
+- compile unit 源码、dry-run 占位产物和 runtime trance 目录路径派生统一委托 `kernel_gen.core.tools.dump_dir.DumpDirWriter`。
 - 不运行期导入 `compiler.py`，不构造 `CompiledKernel`，不进入 `kernel_gen.execute_engine` 包根公开 API。
 
 API 列表:
@@ -42,8 +43,9 @@ import shutil
 import subprocess
 import tempfile
 
-from kernel_gen.core.config import get_dump_dir, get_trance_enabled
+from kernel_gen.core.config import get_trance_enabled
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
+from kernel_gen.core.tools.dump_dir import DumpDirWriter
 _TARGET_HEADER_MISMATCH = "target_header_mismatch"
 _SOURCE_EMPTY_OR_INVALID = "source_empty_or_invalid"
 _COMPILE_FAILED = "compile_failed"
@@ -388,8 +390,8 @@ class _BuiltinStrategySupport:
         if not get_trance_enabled():
             return compiler_flags
         kernel_name = _BuiltinStrategySupport.sanitize_trance_kernel_name(function)
-        dump_dir = get_dump_dir()
-        trace_dir = "" if dump_dir is None else str(dump_dir / kernel_name / "trance")
+        writer = DumpDirWriter.from_config()
+        trace_dir = "" if writer is None else str(writer.child(kernel_name, fallback="kernel").child("trance").root)
         return (
             *compiler_flags,
             "-DTRANCE",
@@ -425,10 +427,10 @@ class _BuiltinStrategySupport:
             if work_dir is None:
                 work_dir = Path(tempfile.mkdtemp(prefix="kg_execute_engine_"))
                 cleanup = partial(_BuiltinStrategySupport.remove_workdir, work_dir)
-            work_dir.mkdir(parents=True, exist_ok=True)
-            source_path = work_dir / "kernel.cpp"
+            writer = DumpDirWriter(work_dir)
+            work_dir = writer.root
+            source_path = writer.write("kernel.cpp", source)
             soname_path = work_dir / "libkernel.so"
-            source_path.write_text(source, encoding="utf-8")
             command = _BuiltinStrategySupport.compose_compile_command(
                 compiler=compiler,
                 source_path=str(source_path),
@@ -438,7 +440,7 @@ class _BuiltinStrategySupport:
                 include_dirs=include_dirs,
             )
             if dry_run:
-                soname_path.write_text("", encoding="utf-8")
+                soname_path = writer.write("libkernel.so", "")
                 stdout = f"dry-run: {' '.join(command)}"
                 return BuiltinCompileArtifacts(
                     soname_path=str(soname_path),

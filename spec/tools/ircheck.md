@@ -46,6 +46,7 @@
 ### helper 边界
 
 - `_build_default_context(...)`、`_parse_ircheck_cases(...)`、`_run_ircheck_case(...)`、`_normalize_ir(...)`、`_match_checks(...)` 等下划线 helper 只服务当前文件内部实现。
+- `-irdump` 的 `.irdump/<case>/...` 目录结构、文件名和 alias IR 文本保持公开行为不变；底层文本写出由 `kernel_gen.core.tools.dump_dir.DumpDirWriter` 管理。
 - 实现、测试和外部调用方不得跨文件导入或断言这些 helper；公开行为只能通过 `API 列表` 中列出的 CLI、数据模型和函数观察。
 
 ## API详细说明

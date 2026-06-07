@@ -66,6 +66,7 @@
   - 若调用方提供的 pipeline 已经生成 `_cost_<cost_kind>_*` sibling，返回值为该 sibling 的 `S_INT` 执行结果。
   - 执行失败必须抛 `KernelCodeError(ErrorModule.TOOLS, ...)`，固定短语为 `DslCostRunExecutionFailed: cost wrapper execution failed`。
   - 捕获 C++ `S_INT` 返回值所需的 wrapper 只属于 `kernel_gen/tools/dsl_run.py` 当前文件内部实现，不是公开 include、执行引擎或测试 API。
+  - `dump_dir` 非空时，`99-cost-source.cpp` 诊断源码仍写入 `dump_dir/<kernel name>/99-cost-source.cpp`；文件名、目录结构和公开行为不变，底层文本写出由 `kernel_gen.core.tools.dump_dir.DumpDirWriter` 管理。
 
 ## 测试
 
