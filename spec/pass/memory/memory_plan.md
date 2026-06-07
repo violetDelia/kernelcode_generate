@@ -99,6 +99,7 @@
 - 仅当 `auto-pad=true` 时执行，且执行顺序早于 `insert-free` 生命周期补齐。
 - 只处理 row-major contiguous `NnMemoryType` 的 `dma.alloc`。
 - 若 logical shape 某维是 `min(TILE, EXTENT - iter<0,EXTENT,TILE>)`，该维 padded backing upper bound 为 `TILE`。
+- 解析 `min(...)` 时必须按括号深度与 `iter<...>` 尖括号深度寻找顶层逗号；右侧含 `iter<START,END,STEP>` 的候选若不能证明为 tail 上界，则当前 alloc 保守 no-op，不因表达式解析失败中断 pass。
 - 非 tail 维度保持原 logical shape；匿名 `?` 或找不到支配当前 alloc 的 shape/stride operand 时，当前 alloc 保守 no-op。
 - rewrite 成功时，原 logical alloc：
   - 替换为 padded backing `dma.alloc`，backing shape 使用每个维度的 upper bound / 原维度，backing stride 使用 row-major contiguous stride；
@@ -160,8 +161,7 @@ pass_obj = build_registered_pass("memory-plan", {"insert-free": "true", "reuse":
 | TC-MPLAN-002D | auto_pad START 非 0 tail | `min(T, END - iter<START,END,T>)` 可推导 padded backing 上界 `T` |
 | TC-MPLAN-002E | auto_pad 乘积 tail | `K * min(T, tail)` 在 `K*T` SSA 可见时改写为 padded backing |
 | TC-MPLAN-002F | auto_pad `min(A, B)` | `A` 可作为正上界时使用 `A` 作为 padded backing shape |
-| TC-MPLAN-002G | auto_pad dynamic matmul effective tile | `symbol-buffer-hoist` 后 padded backing 外提，`kernel.matmul` 继续消费 logical alias，不直接读取 padded backing |
-| TC-MPLAN-002H | npu-demo-lowering 固定 auto_pad | 三段 `MemoryPlanPass` 均以 `auto_pad=True` 构造，matmul pipeline dump 中 padded backing / logical alias 与 alloc/free 外提语义可观察 |
+| TC-MPLAN-002G | auto_pad `min(...)` 右侧含 nested iter 但非 tail | 当前 alloc 保守 no-op，不生成 `dma.reinterpret`，且不因 `iter<...>` 内逗号解析失败中断 pass |
 | TC-MPLAN-003 | 已有合法 free | 不重复插入 |
 | TC-MPLAN-003A | reuse 类型一致且生命周期不重叠 | 删除后一个 alloc 与前一个旧 free，保留最终 free |
 | TC-MPLAN-003B | reuse 类型不一致 | 保守 no-op，两个 alloc/free 都保留 |

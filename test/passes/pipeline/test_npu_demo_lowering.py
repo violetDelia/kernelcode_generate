@@ -1013,7 +1013,7 @@ def test_npu_demo_lowering_pipeline_static_dump_runs_multi_buffer_before_pool(tm
     功能说明:
     - 使用公开 `set_dump_dir(...)` 与公开 pipeline builder 观察 `transform-apply` 与 `memory-pool` stage。
     - 静态 tile 让 pattern 内 `TransformApplyPass` 执行 lower-dma-memory-hierarchy 并产生可计算 byte size 的 staging buffer。
-    - 断言当前 npu-demo-lowering 在第三段 cleanup 后接入 `multi-buffer`；该 demo 不满足 direct staging pair 时允许 no-op。
+    - 断言当前 npu-demo-lowering 在第三段 cleanup 后接入 `multi-buffer`，并在 memory-pool 前生成 ring IR。
 
     使用示例:
     - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k static_dump_runs_multi_buffer_before_pool
@@ -1051,16 +1051,22 @@ def test_npu_demo_lowering_pipeline_static_dump_runs_multi_buffer_before_pool(tm
     assert "acc = false" not in decompose_text
     assert '"kernel.matmul"' in decompose_text
     assert multi_buffer_text.splitlines()[0] == 'multi-buffer{memory_stage=2 fold=true target="npu_demo"}'
+    assert "dma.make_ring" in multi_buffer_text
+    assert "dma.current_ring" in multi_buffer_text
+    assert "dma.advance_ring" in multi_buffer_text
     assert "dma.alloc" in multi_buffer_text
     assert producer_consumer_text.splitlines()[0] == "producer-consumer-analysis{fold=true}"
     assert "dma.alloc" in producer_consumer_text
+    assert "dma.make_ring" in producer_consumer_text
+    assert "dma.current_ring" in producer_consumer_text
+    assert "dma.advance_ring" in producer_consumer_text
     assert "arch.get_dynamic_memory" not in producer_consumer_text
     assert memory_pool_text.splitlines()[0] == "memory-pool{rewrite=true fold=true alignment=1024}"
     assert "arch.get_dynamic_memory" in memory_pool_text
     assert "dma.reinterpret" in memory_pool_text
-    assert "dma.make_ring" not in memory_pool_text
-    assert "dma.current_ring" not in memory_pool_text
-    assert "dma.advance_ring" not in memory_pool_text
+    assert "dma.make_ring" in memory_pool_text
+    assert "dma.current_ring" in memory_pool_text
+    assert "dma.advance_ring" in memory_pool_text
     assert "dma.alloc" not in memory_pool_text
     assert "dma.free" not in memory_pool_text
     assert markers.count("multi-buffer") == 1
@@ -1125,9 +1131,9 @@ def test_npu_demo_lowering_pipeline_static_dump_runs_multi_buffer_before_pool(tm
     assert "launch_block = #builtin.int<2>" in attach_text
     assert "arch.get_dynamic_memory" in attach_text
     assert "!nn.memory<[#C2097152]" in attach_text
-    assert "dma.make_ring" not in str(module)
-    assert "dma.current_ring" not in str(module)
-    assert "dma.advance_ring" not in str(module)
+    assert "dma.make_ring" in str(module)
+    assert "dma.current_ring" in str(module)
+    assert "dma.advance_ring" in str(module)
     assert "dma.alloc" not in str(module)
     assert "dma.free" not in str(module)
 

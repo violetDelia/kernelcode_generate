@@ -468,6 +468,37 @@ builtin.module {
     assert result.ok, result.message or result.actual_ir
 
 
+# TC-MPLAN-002G
+# 功能说明: 验证 auto-pad 对 `min(...)` 右侧含 nested `iter<...>` 但非可证明 tail 时保守 no-op 且不崩溃。
+# 使用示例: pytest -q test/passes/memory/test_memory_plan.py -k test_memory_plan_auto_pad_keeps_iter_min_with_mismatched_step_noop
+# 对应功能实现文件路径: kernel_gen/passes/memory/memory_plan.py
+# 对应 spec 文件路径: spec/pass/memory/memory_plan.md
+# 对应测试文件路径: test/passes/memory/test_memory_plan.py
+def test_memory_plan_auto_pad_keeps_iter_min_with_mismatched_step_noop() -> None:
+    result = run_ircheck_text(
+        """// COMPILE_ARGS: --pass "memory-plan={auto-pad=true,fold=false}"
+// CHECK: %[[BUF:{reg}]] = "dma.alloc"(%[[CUR:{reg}]])
+// CHECK: "dma.broadcast"(%[[BUF]]
+// CHECK-NOT: "dma.reinterpret"
+
+builtin.module {
+  func.func @auto_pad_iter_min_mismatched_step(
+    %cur : !symbol.int<#symbol.expr<min(TILE_C, C - iter<0,C,TILE_STEP>)>>
+  ) {
+    %scalar = arith.constant 1 : i32
+    %buf = "dma.alloc"(%cur) <{operandSegmentSizes = array<i32: 1>}> : (!symbol.int<#symbol.expr<min(TILE_C, C - iter<0,C,TILE_STEP>)>>) -> !nn.memory<[#symbol.expr<min(TILE_C, C - iter<0,C,TILE_STEP>)>], [#symbol.expr<1>], i32, #nn.space<global>>
+    "dma.broadcast"(%buf, %scalar) : (!nn.memory<[#symbol.expr<min(TILE_C, C - iter<0,C,TILE_STEP>)>], [#symbol.expr<1>], i32, #nn.space<global>>, i32) -> ()
+    func.return
+  }
+}
+""",
+        source_path="memory_plan_auto_pad_iter_min_mismatched_step.ircheck",
+    )
+
+    assert result.ok, result.message or result.actual_ir
+    assert '"dma.reinterpret"' not in result.actual_ir
+
+
 # TC-MPLAN-003
 # 功能说明: 验证已有合法 free 时 pass 不重复插入。
 # 使用示例: pytest -q test/passes/memory/test_memory_plan.py -k test_memory_plan_keeps_existing_free_noop

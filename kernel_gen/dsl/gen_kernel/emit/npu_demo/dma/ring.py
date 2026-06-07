@@ -19,11 +19,18 @@ API 列表:
 
 from __future__ import annotations
 
+import re
+
+from xdsl.ir import SSAValue
+
 from kernel_gen.dialect.dma import DmaAdvanceRingOp, DmaCurrentRingOp, DmaMakeRingOp, DmaRingType
 from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.dialect.symbol import SymbolExprAttr
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
 
 from ...register import emit_c_impl
+
+_SYMBOL_IDENTIFIER_PATTERN = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
+_SYMBOL_KEYWORDS = {"min", "max", "floordiv", "ceildiv", "mod", "iter"}
 
 
 @emit_c_impl(DmaMakeRingOp, target="npu_demo")
@@ -31,8 +38,10 @@ def _emit_npu_demo_dma_make_ring(op: DmaMakeRingOp, ctx) -> str:
     """发射 npu_demo `dma.make_ring` C++ 语句。
 
     功能说明:
-    - 根据 result ring slot type 发射 `npu_demo::make_ring<SlotT>(backing, num, offset_bytes, shape, stride)`。
-    - slot 字节数不作为 IR operand 或 generated source 参数出现。
+    - 根据 result ring slot type 发射
+      `npu_demo::make_ring<SlotT>(backing, num, offset_bytes, shape, stride, backing.format())`。
+    - 将当前 op 可见的动态 symbol 绑定到已发射的 C++ SSA 名，供 slot shape 表达式复用。
+    - 按发射后的 slot shape 重建 contiguous stride，并把 `op.offset` 作为 `offset_bytes` 参数发射。
 
     使用示例:
     - stmt = _emit_npu_demo_dma_make_ring(op, ctx)
@@ -47,6 +56,35 @@ def _emit_npu_demo_dma_make_ring(op: DmaMakeRingOp, ctx) -> str:
     if not isinstance(slot_type, NnMemoryType):
         raise ctx.emit_error(op.name, "ring slot result must be nn.memory")
     slot_type.verify()
+    symbol_bindings: dict[str, str] = {}
+    current_op = op
+    block = op.parent_block()
+    while block is not None:
+        visible_values: list[SSAValue] = list(block.args)
+        for block_op in block.ops:
+            if block_op is current_op:
+                break
+            visible_values.extend(block_op.results)
+        for value in visible_values:
+            value_type = value.type
+            if not isinstance(value_type, SymbolValueType):
+                continue
+            value_name = emit_c_value(value, ctx)
+            expr_texts = [value_type.expr.expr.data]
+            public_value = value_type.get_value()
+            if isinstance(public_value, str):
+                expr_texts.append(public_value)
+            for expr_text in expr_texts:
+                stripped = expr_text.strip()
+                compact = stripped.replace(" ", "")
+                for expr_key in (stripped, f"({stripped})", compact, f"({compact})"):
+                    symbol_bindings[expr_key] = value_name
+        parent_op = block.parent_op()
+        if parent_op is None:
+            break
+        current_op = parent_op
+        block = parent_op.parent_block()
+
     shape_values: list[str] = []
     stride_values: list[str] = []
     for dim in slot_type.shape.data:
@@ -56,15 +94,30 @@ def _emit_npu_demo_dma_make_ring(op: DmaMakeRingOp, ctx) -> str:
         dim_expr = dim.expr.data
         if dim_expr == "?":
             raise ctx.emit_error(op.name, "ring slot shape must be static or symbolic")
-        shape_values.append(dim_expr)
-    for dim in slot_type.stride.data:
-        if not isinstance(dim, SymbolExprAttr):
-            raise ctx.emit_error(op.name, "ring slot stride must be symbolic expression")
-        dim.verify()
-        dim_expr = dim.expr.data
-        if dim_expr == "?":
-            raise ctx.emit_error(op.name, "ring slot stride must be static or symbolic")
-        stride_values.append(dim_expr)
+        stripped = dim_expr.strip()
+        compact = stripped.replace(" ", "")
+        shape_value = None
+        for expr_key in (stripped, f"({stripped})", compact, f"({compact})"):
+            mapped = symbol_bindings.get(expr_key)
+            if mapped is not None:
+                shape_value = mapped
+                break
+        if shape_value is None:
+            parts: list[str] = []
+            cursor = 0
+            for match in _SYMBOL_IDENTIFIER_PATTERN.finditer(dim_expr):
+                parts.append(dim_expr[cursor : match.start()])
+                identifier = match.group(0)
+                mapped = symbol_bindings.get(identifier)
+                parts.append(identifier if identifier in _SYMBOL_KEYWORDS or mapped is None else mapped)
+                cursor = match.end()
+            parts.append(dim_expr[cursor:])
+            shape_value = "".join(parts)
+        shape_values.append(shape_value)
+    running_stride = "1"
+    for shape_value in reversed(shape_values):
+        stride_values.insert(0, running_stride)
+        running_stride = shape_value if running_stride == "1" else f"({running_stride} * {shape_value})"
     result_name = ctx.create_or_get_name(op.result)
     backing_expr = emit_c_value(op.memory, ctx)
     num_expr = emit_c_value(op.num, ctx)
@@ -76,7 +129,7 @@ def _emit_npu_demo_dma_make_ring(op: DmaMakeRingOp, ctx) -> str:
     return (
         f"{ctx.current_indent}auto {result_name} = npu_demo::make_ring<{element_type}>"
         f"({backing_expr} /*backing*/, {num_expr} /*num*/, {offset_expr} /*offset_bytes*/, "
-        f"{shape_expr} /*shape*/, {stride_expr} /*stride*/);"
+        f"{shape_expr} /*shape*/, {stride_expr} /*stride*/, {backing_expr}.format());"
     )
 
 

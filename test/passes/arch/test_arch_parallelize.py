@@ -552,6 +552,64 @@ builtin.module {
     assert '"dma.reshape"' in result.actual_ir
 
 
+# TC-PASS-ARCH-PARALLELIZE-021
+# 功能说明: 验证 loop 前 `dma.make_ring` setup 前缀不阻塞 block 分发。
+# 使用示例: pytest -q test/passes/arch/test_arch_parallelize.py -k test_arch_parallelize_allows_make_ring_setup_before_single_loop
+def test_arch_parallelize_allows_make_ring_setup_before_single_loop() -> None:
+    case_text = """// COMPILE_ARGS: --pass "arch-parallelize={target=npu_demo,parallel_level=block}"
+// CHECK: "dma.make_ring"
+// CHECK: arch.get_block_id
+// CHECK: symbol.for
+// CHECK: "dma.current_ring"
+
+builtin.module {
+  func.func @ring_prefix_loop(%pool : !nn.memory<[#symbol.expr<8>], [#symbol.expr<1>], i8, #nn.space<shared>>) {
+    %zero = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %one = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %two = symbol.const 2 : !symbol.int<#symbol.expr<2>>
+    %four = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %eight = symbol.const 8 : !symbol.int<#symbol.expr<8>>
+    %ring = "dma.make_ring"(%pool, %two, %four) : (!nn.memory<[#symbol.expr<8>], [#symbol.expr<1>], i8, #nn.space<shared>>, !symbol.int<#symbol.expr<2>>, !symbol.int<#symbol.expr<4>>) -> !dma.ring<!nn.memory<[#symbol.expr<1>], [#symbol.expr<1>], i32, #nn.space<shared>>>
+    symbol.for %i = %zero to %eight step %one {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<8>, step = #symbol.expr<1>>} {
+      %cur = "dma.current_ring"(%ring) : (!dma.ring<!nn.memory<[#symbol.expr<1>], [#symbol.expr<1>], i32, #nn.space<shared>>>) -> !nn.memory<[#symbol.expr<1>], [#symbol.expr<1>], i32, #nn.space<shared>>
+    }
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(case_text, source_path="test/passes/arch/test_arch_parallelize.py")
+    assert result.ok is True, result.message
+    assert result.actual_ir.index('"dma.make_ring"') < result.actual_ir.index("arch.get_block_id")
+
+
+# TC-PASS-ARCH-PARALLELIZE-022
+# 功能说明: 验证 loop body 内 `DmaRingType` 随 block-strided iter type 一起重写。
+# 使用示例: pytest -q test/passes/arch/test_arch_parallelize.py -k test_arch_parallelize_rewrites_ring_type_inside_loop_body
+def test_arch_parallelize_rewrites_ring_type_inside_loop_body() -> None:
+    case_text = """// COMPILE_ARGS: --pass "arch-parallelize={target=npu_demo,parallel_level=block}"
+// CHECK: arch.get_block_id
+// CHECK: "dma.make_ring"
+// CHECK: "dma.current_ring"
+
+builtin.module {
+  func.func @ring_body_loop(%pool : !nn.memory<[#symbol.expr<128>], [#symbol.expr<1>], i8, #nn.space<shared>>) {
+    %zero = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %one = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %four = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %sixteen = symbol.const 16 : !symbol.int<#symbol.expr<16>>
+    symbol.for %i = %zero to %sixteen step %four {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<16>, step = #symbol.expr<4>>} {
+      %ring = "dma.make_ring"(%pool, %one, %four) : (!nn.memory<[#symbol.expr<128>], [#symbol.expr<1>], i8, #nn.space<shared>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<4>>) -> !dma.ring<!nn.memory<[#symbol.expr<iter<0,16,4>>], [#symbol.expr<1>], i32, #nn.space<shared>>>
+      %cur = "dma.current_ring"(%ring) : (!dma.ring<!nn.memory<[#symbol.expr<iter<0,16,4>>], [#symbol.expr<1>], i32, #nn.space<shared>>>) -> !nn.memory<[#symbol.expr<iter<0,16,4>>], [#symbol.expr<1>], i32, #nn.space<shared>>
+    }
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(case_text, source_path="test/passes/arch/test_arch_parallelize.py")
+    assert result.ok is True, result.message
+    assert "dma.current_ring result must match ring slot memory type" not in result.actual_ir
+
+
 # TC-PASS-ARCH-PARALLELIZE-020
 # 功能说明: 验证 optional memory presence guard 的 loop 前 setup 前缀不阻塞 block 分发。
 # 使用示例: pytest -q test/passes/arch/test_arch_parallelize.py -k test_arch_parallelize_allows_presence_guard_setup_before_single_loop

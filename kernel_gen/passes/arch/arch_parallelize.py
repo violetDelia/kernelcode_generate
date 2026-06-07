@@ -5,7 +5,7 @@
 - 提供 standalone IR-level `arch-parallelize` pass。
 - 遍历 `builtin.module` 中非声明 `func.func`，跳过 `entry_point` host dispatcher，对未带 block 并行语义的其余函数执行 block 级分发。
 - 当前只支持 `parallel_level="block"`：单顶层 `symbol.for` 改写为 block-strided loop；非入口函数无顶层 loop 时用 block0 guard 包裹原 body。
-- 唯一顶层 loop 前允许公开 symbol setup 以及 memory-pool 产生的 `arch.get_dynamic_memory` / `dma.reinterpret` setup 前缀，并保留旧 alias 前缀兼容。
+- 唯一顶层 loop 前允许公开 symbol setup 以及 memory-pool / multi-buffer 产生的 `arch.get_dynamic_memory` / `dma.reinterpret` / `dma.make_ring` setup 前缀，并保留旧 alias 前缀兼容。
 - 内部 `FuncOp` root pattern 承接单函数改写，`ArchParallelizePass` 只负责校验和 pattern walker 驱动。
 
 API 列表:
@@ -41,7 +41,7 @@ from xdsl.pattern_rewriter import (
 )
 
 from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetBlockNumOp, ArchGetDynamicMemoryOp
-from kernel_gen.dialect.dma import DmaReinterpretOp, DmaReshapeOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaMakeRingOp, DmaReinterpretOp, DmaReshapeOp, DmaRingType, DmaViewOp
 from kernel_gen.dialect.memory import MemoryGetDataOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import (
@@ -86,6 +86,7 @@ _MEMORY_POOL_SETUP_OPS = (
     DmaViewOp,
     DmaReshapeOp,
     DmaReinterpretOp,
+    DmaMakeRingOp,
 )
 _PRESENCE_SETUP_OPS = (
     arith.ConstantOp,
@@ -274,7 +275,7 @@ def _is_allowed_loop_prefix_setup_op(op: Operation) -> bool:
 
     功能说明:
     - 放行公开 symbol dialect 的无副作用边界构造 op。
-    - 放行 memory-pool 生成的 `arch.get_dynamic_memory`、`dma.view`、`dma.reshape` 与 `dma.reinterpret`。
+    - 放行 memory-pool / multi-buffer 生成的 `arch.get_dynamic_memory`、`dma.view`、`dma.reshape`、`dma.reinterpret` 与 `dma.make_ring`。
     - 放行 optional memory presence guard 需要的 `arith.constant`、`memory.get_data`、`symbol.cast` 与 `symbol.ne`。
 
     使用示例:
@@ -398,7 +399,7 @@ def _rewrite_attribute_type(attr: Attribute, replacements: dict[str, str]) -> At
     """把克隆后属性中的旧 symbol token 重写为新 token。
 
     功能说明:
-    - 只处理本文件当前会生成的公开类型：`SymbolValueType`、`SymbolIterType`、`NnMemoryType` 和其包装的 `ArrayAttr`。
+    - 只处理本文件当前会生成的公开类型：`SymbolValueType`、`SymbolIterType`、`NnMemoryType`、`DmaRingType` 和其包装的 `ArrayAttr`。
     - 其它属性保持原样，避免扩大改写面。
 
     使用示例:
@@ -406,30 +407,112 @@ def _rewrite_attribute_type(attr: Attribute, replacements: dict[str, str]) -> At
     """
 
     if isinstance(attr, SymbolValueType):
-        return SymbolValueType.from_expr(_replace_symbol_expr_text(attr.expr.expr.data, replacements))
+        expr = attr.expr.expr.data
+        for old, new in replacements.items():
+            expr = expr.replace(old, new)
+        return SymbolValueType.from_expr(expr)
     if isinstance(attr, SymbolIterType):
+        start_expr = attr.start.expr.data
+        end_expr = attr.end.expr.data
+        step_expr = attr.step.expr.data
+        for old, new in replacements.items():
+            start_expr = start_expr.replace(old, new)
+            end_expr = end_expr.replace(old, new)
+            step_expr = step_expr.replace(old, new)
         return SymbolIterType.from_bounds(
-            _replace_symbol_expr_text(attr.start.expr.data, replacements),
-            _replace_symbol_expr_text(attr.end.expr.data, replacements),
-            _replace_symbol_expr_text(attr.step.expr.data, replacements),
+            start_expr,
+            end_expr,
+            step_expr,
         )
     if isinstance(attr, NnMemoryType):
+        shape_entries: list[SymbolExprAttr] = []
+        stride_entries: list[SymbolExprAttr] = []
+        for dim in attr.shape.data:
+            dim_expr = dim.expr.data
+            for old, new in replacements.items():
+                dim_expr = dim_expr.replace(old, new)
+            shape_entries.append(SymbolExprAttr.from_expr(dim_expr))
+        for dim in attr.stride.data:
+            dim_expr = dim.expr.data
+            for old, new in replacements.items():
+                dim_expr = dim_expr.replace(old, new)
+            stride_entries.append(SymbolExprAttr.from_expr(dim_expr))
         shape = ArrayAttr(
-            [SymbolExprAttr.from_expr(_replace_symbol_expr_text(dim.expr.data, replacements)) for dim in attr.shape.data]
+            shape_entries
         )
         stride = ArrayAttr(
-            [SymbolExprAttr.from_expr(_replace_symbol_expr_text(dim.expr.data, replacements)) for dim in attr.stride.data]
+            stride_entries
         )
         template_name = attr.template_name.data or None
         return NnMemoryType(shape, stride, attr.element_type, attr.space, template_name=template_name)
+    if isinstance(attr, DmaRingType):
+        memory_type = attr.memory_type
+        shape_entries: list[SymbolExprAttr] = []
+        stride_entries: list[SymbolExprAttr] = []
+        for dim in memory_type.shape.data:
+            dim_expr = dim.expr.data
+            for old, new in replacements.items():
+                dim_expr = dim_expr.replace(old, new)
+            shape_entries.append(SymbolExprAttr.from_expr(dim_expr))
+        for dim in memory_type.stride.data:
+            dim_expr = dim.expr.data
+            for old, new in replacements.items():
+                dim_expr = dim_expr.replace(old, new)
+            stride_entries.append(SymbolExprAttr.from_expr(dim_expr))
+        template_name = memory_type.template_name.data or None
+        return DmaRingType(
+            NnMemoryType(
+                ArrayAttr(shape_entries),
+                ArrayAttr(stride_entries),
+                memory_type.element_type,
+                memory_type.space,
+                template_name=template_name,
+            )
+        )
     if isinstance(attr, SymbolIterAttr):
+        start_expr = attr.start.expr.data
+        end_expr = attr.end.expr.data
+        step_expr = attr.step.expr.data
+        for old, new in replacements.items():
+            start_expr = start_expr.replace(old, new)
+            end_expr = end_expr.replace(old, new)
+            step_expr = step_expr.replace(old, new)
         return SymbolIterAttr.from_bounds(
-            _replace_symbol_expr_text(attr.start.expr.data, replacements),
-            _replace_symbol_expr_text(attr.end.expr.data, replacements),
-            _replace_symbol_expr_text(attr.step.expr.data, replacements),
+            start_expr,
+            end_expr,
+            step_expr,
         )
     if isinstance(attr, ArrayAttr):
-        return ArrayAttr([_rewrite_attribute_type(entry, replacements) for entry in attr.data])
+        rewritten_entries: list[Attribute] = []
+        for entry in attr.data:
+            if isinstance(entry, SymbolValueType):
+                expr = entry.expr.expr.data
+                for old, new in replacements.items():
+                    expr = expr.replace(old, new)
+                rewritten_entries.append(SymbolValueType.from_expr(expr))
+                continue
+            if isinstance(entry, SymbolIterType):
+                start_expr = entry.start.expr.data
+                end_expr = entry.end.expr.data
+                step_expr = entry.step.expr.data
+                for old, new in replacements.items():
+                    start_expr = start_expr.replace(old, new)
+                    end_expr = end_expr.replace(old, new)
+                    step_expr = step_expr.replace(old, new)
+                rewritten_entries.append(SymbolIterType.from_bounds(start_expr, end_expr, step_expr))
+                continue
+            if isinstance(entry, SymbolIterAttr):
+                start_expr = entry.start.expr.data
+                end_expr = entry.end.expr.data
+                step_expr = entry.step.expr.data
+                for old, new in replacements.items():
+                    start_expr = start_expr.replace(old, new)
+                    end_expr = end_expr.replace(old, new)
+                    step_expr = step_expr.replace(old, new)
+                rewritten_entries.append(SymbolIterAttr.from_bounds(start_expr, end_expr, step_expr))
+                continue
+            rewritten_entries.append(entry)
+        return ArrayAttr(rewritten_entries)
     return attr
 
 

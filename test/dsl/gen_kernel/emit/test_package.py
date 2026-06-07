@@ -1415,7 +1415,7 @@ def test_emit_c_lowers_npu_demo_dma_ring_contract() -> None:
     ctx.bind_name(backing.result, "ring_backing")
 
     assert emit_c_op(make_ring, ctx) == (
-        "auto v0 = npu_demo::make_ring<float>(ring_backing /*backing*/, 4 /*num*/, 24 /*offset_bytes*/, {2, 3} /*shape*/, {3, 1} /*stride*/);"
+        "auto v0 = npu_demo::make_ring<float>(ring_backing /*backing*/, 4 /*num*/, 24 /*offset_bytes*/, {2, 3} /*shape*/, {3, 1} /*stride*/, ring_backing.format());"
     )
     assert emit_c_op(current, ctx) == "Memory<TLM1, float> v1 = v0.current();"
     assert emit_c_op(advance, ctx) == "v0.advance();"

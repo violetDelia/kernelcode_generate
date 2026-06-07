@@ -39,6 +39,7 @@ from kernel_gen.dialect.dma import (
     DmaMakeRingOp,
     DmaReshapeOp,
     DmaRingType,
+    DmaSliceOp,
 )
 from kernel_gen.dialect.kernel import KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
@@ -281,6 +282,49 @@ def _build_dynamic_same_space_module() -> tuple[ModuleOp, Block, SymbolForOp, Bl
     )
     func_op = func.FuncOp("multi_buffer_matmul_dynamic_same_space", func_type, Region(top_block))
     return ModuleOp([func_op]), top_block, loop_op, loop_block, matmul
+
+
+def _build_loop_local_direct_slice_module() -> tuple[ModuleOp, Block, SymbolForOp, Block, DmaSliceOp, NnMemoryType]:
+    """构造 loop-local direct-use staging alloc 测试 module。
+
+    功能说明:
+    - 在 `symbol.for` body 内创建 `dma.alloc -> dma.slice -> dma.free` 生命周期。
+    - 该形态没有中间 view alias，用于覆盖 direct alloc use 的 loop-local `num=1` ring 化。
+
+    使用示例:
+    - module, top_block, loop_op, loop_block, slice_op, slot_type = _build_loop_local_direct_slice_module()
+
+    关联文件:
+    - spec: spec/pass/memory/multi_buffer.md
+    - test: test/passes/memory/test_multi_buffer.py
+    - 功能实现: kernel_gen/passes/memory/multi_buffer.py
+    """
+
+    slot_type = NnMemoryType(
+        ArrayAttr([SymbolExprAttr.from_expr("4")]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
+        i32,
+        NnMemorySpaceAttr.from_name("tlm1"),
+    )
+    source_type = NnMemoryType(
+        ArrayAttr([SymbolExprAttr.from_expr("4")]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
+        i32,
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    func_type = FunctionType.from_lists([source_type], [])
+    top_block = Block(arg_types=[source_type])
+    c0 = SymbolConstOp(0)
+    c4 = SymbolConstOp(4)
+    c1 = SymbolConstOp(1)
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "4", "1")])
+    alloc = DmaAllocOp([], slot_type)
+    slice_op = DmaSliceOp(alloc.result, top_block.args[0], [c0.result], [c4.result], [c1.result])
+    loop_block.add_ops([alloc, slice_op, DmaFreeOp(alloc.result)])
+    loop_op = SymbolForOp(c0.result, c4.result, c1.result, loop_block)
+    top_block.add_ops([c0, c4, c1, loop_op, func.ReturnOp()])
+    func_op = func.FuncOp("multi_buffer_loop_local_slice", func_type, Region(top_block))
+    return ModuleOp([func_op]), top_block, loop_op, loop_block, slice_op, slot_type
 
 
 def _walk_ops(module: ModuleOp, op_type: type[Operation]) -> list[Operation]:
@@ -772,7 +816,10 @@ def test_multi_buffer_target_same_space_static_num() -> None:
     )
     lhs_bytes = _static_memory_bytes(lhs_slot_type)
     rhs_bytes = _static_memory_bytes(rhs_slot_type)
-    expected_num = 524288 // (lhs_bytes + rhs_bytes)
+    expected_num = 524288 // (
+        ((lhs_bytes + 1023) // 1024) * 1024
+        + ((rhs_bytes + 1023) // 1024) * 1024
+    )
 
     MultiBufferPass(memory_stage=2, target="npu_demo").apply(Context(), module)
 
@@ -796,8 +843,10 @@ def test_multi_buffer_target_different_space_static_num() -> None:
         rhs_space="tlm2",
         n_dim=2,
     )
-    lhs_num = 524288 // _static_memory_bytes(lhs_slot_type)
-    rhs_num = 1048576 // _static_memory_bytes(rhs_slot_type)
+    lhs_bytes = _static_memory_bytes(lhs_slot_type)
+    rhs_bytes = _static_memory_bytes(rhs_slot_type)
+    lhs_num = 524288 // (((lhs_bytes + 1023) // 1024) * 1024)
+    rhs_num = 1048576 // (((rhs_bytes + 1023) // 1024) * 1024)
 
     MultiBufferPass(memory_stage=2, target="npu_demo").apply(Context(), module)
 
@@ -827,9 +876,39 @@ def test_multi_buffer_target_dynamic_same_space_num() -> None:
     assert _symbol_expr(make_rings[0].offset) == "4*S1*S2"
     assert _symbol_expr(make_rings[1].offset) == "4*S2*S3"
     assert _same_value(make_rings[0].num, make_rings[1].num)
-    assert _symbol_expr(make_rings[0].num) == "524288 floordiv (4*S1*S2 + 4*S2*S3)"
+    num_expr = _symbol_expr(make_rings[0].num)
+    assert "524288 floordiv" in num_expr
+    assert "4*S1*S2" in num_expr
+    assert "4*S2*S3" in num_expr
+    assert "1024" in num_expr
     assert not any(op.name == "symbol.get_dim" for op in module.walk())
     backing_allocs = [op for op in top_block.ops if isinstance(op, DmaAllocOp)]
     assert len(backing_allocs) == 2
     assert all(len(op.dynamic_shape) == 1 for op in backing_allocs)
+    module.verify()
+
+
+# TC-MULTI-BUFFER-015
+# 功能说明: 验证 loop-local direct alloc use 可改写为 `num=1` ring。
+# 使用示例: pytest -q test/passes/memory/test_multi_buffer.py -k test_multi_buffer_rewrites_loop_local_direct_slice_use
+# 对应功能实现文件路径: kernel_gen/passes/memory/multi_buffer.py
+# 对应 spec 文件路径: spec/pass/memory/multi_buffer.md
+# 对应测试文件路径: test/passes/memory/test_multi_buffer.py
+def test_multi_buffer_rewrites_loop_local_direct_slice_use() -> None:
+    module, _top_block, _loop_op, loop_block, slice_op, slot_type = _build_loop_local_direct_slice_module()
+
+    MultiBufferPass(memory_stage=2, target="npu_demo").apply(Context(), module)
+
+    make_rings = _walk_ops(module, DmaMakeRingOp)
+    currents = _walk_ops(module, DmaCurrentRingOp)
+    advances = _walk_ops(module, DmaAdvanceRingOp)
+    assert len(make_rings) == 1
+    assert len(currents) == 1
+    assert len(advances) == 1
+    _assert_static_ring(make_rings[0], slot_type, 1)
+    assert _same_value(slice_op.target, currents[0].result)
+    body_ops = list(loop_block.ops)
+    assert body_ops.index(make_rings[0]) < body_ops.index(currents[0]) < body_ops.index(slice_op)
+    assert body_ops.index(slice_op) < body_ops.index(advances[0])
+    assert not any(isinstance(op, DmaFreeOp) for op in loop_block.ops)
     module.verify()

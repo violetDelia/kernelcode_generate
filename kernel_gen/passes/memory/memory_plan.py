@@ -360,8 +360,12 @@ def _apply_auto_pad(module: ModuleOp) -> None:
                 if comma_index < 0:
                     shape_is_supported = False
                     break
-                left_expr = SymbolExprAttr.from_expr(inner[:comma_index].strip()).expr.data
-                right_expr = SymbolExprAttr.from_expr(inner[comma_index + 1 :].strip()).expr.data
+                try:
+                    left_expr = SymbolExprAttr.from_expr(inner[:comma_index].strip()).expr.data
+                    right_expr = SymbolExprAttr.from_expr(inner[comma_index + 1 :].strip()).expr.data
+                except KernelCodeError:
+                    shape_is_supported = False
+                    break
                 selected_upper = ""
                 other_expr = ""
                 if _AUTO_PAD_ATOM_EXPR_PATTERN.fullmatch(left_expr) is not None:
