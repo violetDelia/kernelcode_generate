@@ -243,11 +243,11 @@ def test_run_ircheck_text_supports_filecheck_wrapped_capture_regex() -> None:
 
 
 # TC-IRCHECK-MATCH-008
-# 测试目的: 验证公开入口按 SymbolExprAttr canonical 语义匹配 literal 中的旧符号表达文本。
+# 测试目的: 验证公开入口不再按 SymbolExprAttr canonical 语义修补 literal 中的旧符号表达文本。
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
-# 示例: pytest -q test/tools/test_ircheck_matcher.py -k test_run_ircheck_text_matches_canonical_symbol_expr_literals
-def test_run_ircheck_text_matches_canonical_symbol_expr_literals() -> None:
+# 示例: pytest -q test/tools/test_ircheck_matcher.py -k test_run_ircheck_text_does_not_canonicalize_symbol_expr_literals
+def test_run_ircheck_text_does_not_canonicalize_symbol_expr_literals() -> None:
     result = run_ircheck_text(
         _ircheck_case(
             checks=[
@@ -268,8 +268,9 @@ def test_run_ircheck_text_matches_canonical_symbol_expr_literals() -> None:
         ),
         source_path="inline.ircheck",
     )
-    assert result.ok is True
-    assert result.message is None
+    assert result.ok is False
+    assert result.message is not None
+    assert result.message.startswith("IrcheckMatchError: CHECK not found")
 
 
 # TC-IRCHECK-MATCH-009
@@ -313,11 +314,11 @@ def test_run_ircheck_text_preserves_escaped_quote_literals() -> None:
 
 
 # TC-IRCHECK-MATCH-011
-# 测试目的: 验证历史 f-string 产生的 `{ *}` 片段按空白匹配，而不是按字面量大括号匹配。
+# 测试目的: 验证历史 f-string 产生的 `{ *}` 片段不再按空白匹配。
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
-# 示例: pytest -q test/tools/test_ircheck_matcher.py -k test_run_ircheck_text_supports_brace_space_fragment
-def test_run_ircheck_text_supports_brace_space_fragment() -> None:
+# 示例: pytest -q test/tools/test_ircheck_matcher.py -k test_run_ircheck_text_rejects_brace_space_fragment_compat
+def test_run_ircheck_text_rejects_brace_space_fragment_compat() -> None:
     result = run_ircheck_text(
         _ircheck_case(
             checks=[
@@ -327,5 +328,6 @@ def test_run_ircheck_text_supports_brace_space_fragment() -> None:
         ),
         source_path="inline.ircheck",
     )
-    assert result.ok is True
-    assert result.message is None
+    assert result.ok is False
+    assert result.message is not None
+    assert result.message.startswith("IrcheckMatchError: CHECK not found")

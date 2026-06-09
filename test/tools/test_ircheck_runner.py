@@ -222,7 +222,8 @@ def test_run_ircheck_text_check_next_failure() -> None:
 def test_run_ircheck_text_emitc_npu_demo_single_symbol_func() -> None:
     text = """// COMPILE_ARGS: --pass no-op
 // CHECK: #include "include/npu_demo/npu_demo.h"
-// CHECK: void symbol_cast_case(S_INT [[IN:{val}]]) {
+// CHECK: template <typename Context>
+// CHECK-NEXT: void symbol_cast_case(Context& ctx, S_INT [[IN:{val}]]) {
 // CHECK-NEXT:     int32_t [[OUT:{val}]] = [[IN]];
 // CHECK-NEXT: }
 
@@ -236,7 +237,7 @@ builtin.module {
     result = run_ircheck_text(text, source_path="inline_npu_symbol.ircheck", emitc_target="npu_demo")
     assert result.ok is True
     assert result.exit_code == 0
-    assert 'void symbol_cast_case(S_INT ' in result.actual_ir
+    assert 'void symbol_cast_case(Context& ctx, S_INT ' in result.actual_ir
 
 
 # TC-IRCHECK-RUN-005
@@ -355,8 +356,9 @@ def test_run_ircheck_text_emitc_npu_demo_failure_keeps_ir() -> None:
 def test_run_ircheck_text_emitc_npu_demo_plain_dma_alloc_success() -> None:
     text = """// COMPILE_ARGS: --pass no-op
 // CHECK: #include "include/npu_demo/npu_demo.h"
-// CHECK: void dma_alloc_case() {
-// CHECK-NEXT:     Memory<GM, uint8_t> [[OUT:{val}]] = alloc<GM, uint8_t>({2, 3} /*shape*/, {3, 1} /*stride*/);
+// CHECK: template <typename Context>
+// CHECK-NEXT: void dma_alloc_case(Context& ctx) {
+// CHECK-NEXT:     Memory<GM, uint8_t> [[OUT:{val}]] = alloc<GM, uint8_t>(ctx, {2, 3} /*shape*/, {3, 1} /*stride*/);
 // CHECK-NEXT: }
 
 builtin.module {
@@ -372,7 +374,7 @@ builtin.module {
     assert result.exit_code == 0
     assert result.message is None
     assert 'Memory<GM, uint8_t>' in result.actual_ir
-    assert "alloc<GM, uint8_t>({2, 3} /*shape*/, {3, 1} /*stride*/);" in result.actual_ir
+    assert "alloc<GM, uint8_t>(ctx, {2, 3} /*shape*/, {3, 1} /*stride*/);" in result.actual_ir
 
 
 # TC-IRCHECK-RUN-032
@@ -789,12 +791,12 @@ def test_run_ircheck_text_unclosed_escaped_variable_maps_to_exit_code_2() -> Non
 
 
 # TC-IRCHECK-RUN-027B
-# 功能说明: 验证按 spec 转义的字面量 `[[...]]` 可作为普通 CHECK 文本参与匹配。
-# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_escaped_double_brackets_literal_ok
+# 功能说明: 验证反斜杠转义的 `[[...]]` 不再被修补成普通 CHECK 文本。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_escaped_double_brackets_literal_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
-def test_run_ircheck_text_escaped_double_brackets_literal_ok() -> None:
+def test_run_ircheck_text_escaped_double_brackets_literal_fails() -> None:
     text = """// COMPILE_ARGS: --pass no-op
 // CHECK: note = "\\[\\[LIT\\]\\]"
 
@@ -805,18 +807,20 @@ builtin.module attributes {note = "[[LIT]]"} {
 }
 """
     result = run_ircheck_text(text, source_path="inline.ircheck")
-    assert result.ok is True
-    assert result.exit_code == 0
+    assert result.ok is False
+    assert result.exit_code == 1
+    assert result.message is not None
+    assert result.message.startswith("IrcheckMatchError: CHECK not found")
     assert 'note = "[[LIT]]"' in result.actual_ir
 
 
 # TC-IRCHECK-RUN-027C
-# 功能说明: 验证按 spec 转义的字面量 `[[` 前缀可作为普通 CHECK 文本参与匹配。
-# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_escaped_double_open_brackets_prefix_ok
+# 功能说明: 验证反斜杠转义的 `[[` 前缀不再被修补成普通 CHECK 文本。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_escaped_double_open_brackets_prefix_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
-def test_run_ircheck_text_escaped_double_open_brackets_prefix_ok() -> None:
+def test_run_ircheck_text_escaped_double_open_brackets_prefix_fails() -> None:
     text = """// COMPILE_ARGS: --pass no-op
 // CHECK: note = "\\[\\["
 
@@ -827,8 +831,10 @@ builtin.module attributes {note = "[["} {
 }
 """
     result = run_ircheck_text(text, source_path="inline.ircheck")
-    assert result.ok is True
-    assert result.exit_code == 0
+    assert result.ok is False
+    assert result.exit_code == 1
+    assert result.message is not None
+    assert result.message.startswith("IrcheckMatchError: CHECK not found")
     assert 'note = "[["' in result.actual_ir
 
 
@@ -841,7 +847,7 @@ builtin.module attributes {note = "[["} {
 @pytest.mark.parametrize(
     ("check_line", "expected_ok", "expected_code", "expected_message"),
     [
-        ("// CHECK: builtin{.*}module", True, 0, None),
+        ("// CHECK: builtin{.*}module", False, 1, "IrcheckMatchError: CHECK not found"),
         ("// CHECK: {{}}", False, 2, "IrcheckParseError: invalid regex check"),
         ("// CHECK: [[BROKEN", False, 2, "IrcheckParseError: invalid regex check"),
     ],
@@ -946,7 +952,7 @@ builtin.module {
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
 def test_run_ircheck_text_reg_alias_matches_ssa_ids() -> None:
     text = """// COMPILE_ARGS: --pass no-op
-// CHECK: func.func @main(%arg0 : !nn.memory<[#symbol.expr<[[M:{reg}]]>, #symbol.expr<[[N:{reg}]]>], [#symbol.expr<[[N]]>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<[[M]]>, #symbol.expr<[[N]]>], [#symbol.expr<[[N]]>, #symbol.expr<1>], f32, #nn.space<global>> {
+// CHECK: func.func @main(%arg0: !nn.memory<[#symbol.expr<[[M:{reg}]]>, #symbol.expr<[[N:{reg}]]>], [#symbol.expr<[[N]]>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<[[M]]>, #symbol.expr<[[N]]>], [#symbol.expr<[[N]]>, #symbol.expr<1>], f32, #nn.space<global>> {
 // CHECK-NEXT: %[[ALLOC:{reg}]] = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<[[M]]>, #symbol.expr<[[N]]>], [#symbol.expr<[[N]]>, #symbol.expr<1>], f32, #nn.space<global>>
 // CHECK-NEXT: func.return %[[ALLOC]] : !nn.memory<[#symbol.expr<[[M]]>, #symbol.expr<[[N]]>], [#symbol.expr<[[N]]>, #symbol.expr<1>], f32, #nn.space<global>>
 

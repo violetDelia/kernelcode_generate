@@ -76,9 +76,9 @@
   - 普通文本按字面量匹配；regex 能力只允许出现在局部变量片段 `[[NAME:REGEX]]` 和引用片段 `[[NAME]]`。
   - `[[NAME:REGEX]]` 允许使用 FileCheck 风格 `[[NAME:{{REGEX}}]]` 包裹写法，语义等价于 `[[NAME:REGEX]]`。
   - 多条普通 `CHECK:` 按文本位置顺序匹配；后一条可在上一条命中的同一行、上一条命中结束位置之后继续匹配，不要求从下一行开始。
-  - 普通 literal 中的 `\"` 与 `\\` 必须按实际 IR 文本保留匹配，不能被解码成普通引号导致 StringAttr 文本不稳定。
-  - 历史 f-string 产生的 `{ *}` literal 片段按空白正则匹配，语义等价于“零个或多个空白字符”。
-  - 普通文本中的 `#symbol.expr<...>` 会按 `SymbolExprAttr` canonical 语义归一后匹配，兼容 `1 + N` 与 `N + 1`、`1 * X` 与 `X`、`//` 与 `floordiv` 这类等价文本差异。
+  - 普通 literal 按输入文本字面量匹配，不解码 `\.`、`\(`、`\[`、`\]` 等反斜杠转义。
+  - 历史 f-string 产生的 `{.*}` / `{ *}` literal 片段不再作为 regex 或空白兼容入口；需要 regex 时必须使用 `{{...}}` 或 `[[NAME:REGEX]]`。
+  - 普通文本中的 `#symbol.expr<...>` 不再做代数 canonical 修补；期望文本必须与 xDSL Printer 输出一致，或显式使用 regex。
   - `CHECK-NEXT:` 不能作为第一条正向检查。
   - `CHECK-NOT:` 不能定义新变量，只能引用前面已绑定的变量。
   - 多 case 只支持 `// -----` 分隔，按顺序执行并在首个失败处停止。

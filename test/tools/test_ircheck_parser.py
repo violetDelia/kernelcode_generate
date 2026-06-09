@@ -322,7 +322,7 @@ builtin.module {
 
 
 # TC-IRCHECK-PARSE-010B
-# 功能说明: 验证按 spec 转义的字面量 `[[...]]` 不会被 parser 误判成非法变量片段。
+# 功能说明: 验证反斜杠形式的 `[[...]]` 文本不会被 parser 误判成非法变量片段。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_escaped_double_brackets_literal_ok
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
@@ -345,7 +345,7 @@ builtin.module attributes {note = "[[LIT]]"} {
 
 
 # TC-IRCHECK-PARSE-010C
-# 功能说明: 验证按 spec 转义的字面量 `[[` 前缀不会被 parser 误判成非法变量片段。
+# 功能说明: 验证反斜杠形式的 `[[` 前缀不会被 parser 误判成非法变量片段。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_escaped_double_open_brackets_prefix_ok
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md

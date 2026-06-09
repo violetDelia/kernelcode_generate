@@ -74,8 +74,6 @@ from kernel_gen.passes.registry import (
     load_builtin_passes,
 )
 from kernel_gen.passes.pass_manager import PassManager
-from kernel_gen.dialect.symbol import SymbolExprAttr
-from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 CheckKind = Literal[
     "CHECK",
@@ -86,7 +84,6 @@ CASE_SEPARATOR = "// -----"
 _CHECK_TOKEN_PATTERN = re.compile(r"\[\[([A-Za-z_][A-Za-z0-9_]*)(?::(.*?))?\]\]")
 _REGEX_ALIAS_PATTERN = re.compile(r"\{(reg|val|dim|int)\}")
 _REGEX_UNPARSED_MARKERS = ("[[", "]]")
-_SYMBOL_EXPR_LITERAL_PATTERN = re.compile(r"#symbol\.expr<([^<>]*)>")
 _REGEX_ALIASES = {
     "reg": r"(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+)",
     "val": r"[A-Za-z_][A-Za-z0-9_]*",
@@ -334,48 +331,6 @@ def _tokenize_check_pattern(text: str) -> list[tuple[str, str, str | None]]:
     return tokens
 
 
-def _decode_literal_check_fragment(literal: str) -> str:
-    r"""把 literal 模式下的兼容转义还原成字面量文本。
-
-
-    功能说明:
-    - `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 的普通文本默认按字面量匹配。
-    - 为兼容旧 expectation 中的过度转义写法，允许把 `\.`、`\(`、`\[`、`\]` 等“反斜杠 + 标点”
-      还原成对应字面量字符。
-    - `\"` 与 `\\` 保持原样，用于匹配 MLIR string attr 内部被打印器转义的引号与反斜杠。
-    - 若反斜杠后跟的是字母、数字或下划线，则保留反斜杠本身，避免吞掉真实路径或标识符文本。
-
-    使用示例:
-    - assert _decode_literal_check_fragment(r"arith\.constant \[\[") == "arith.constant [["
-
-    关联文件:
-    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
-    - test:
-      - [test/tools/test_ircheck_matcher.py](test/tools/test_ircheck_matcher.py)
-      - [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
-    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
-    """
-
-    chars: list[str] = []
-    index = 0
-    while index < len(literal):
-        current = literal[index]
-        if current == "\\" and index + 1 < len(literal):
-            nxt = literal[index + 1]
-            if nxt in {'"', "\\"}:
-                chars.append(current)
-                chars.append(nxt)
-                index += 2
-                continue
-            if not (nxt.isalnum() or nxt == "_"):
-                chars.append(nxt)
-                index += 2
-                continue
-        chars.append(current)
-        index += 1
-    return "".join(chars)
-
-
 def _contains_invalid_regex_literal_fragment(literal: str) -> bool:
     r"""判断 literal 片段里是否残留了非法 regex 变量痕迹。
 
@@ -429,94 +384,27 @@ def _compile_literal_fragment(literal: str) -> str:
     功能说明:
     - 默认仍按字面量匹配（`re.escape`）。
     - 兼容 FileCheck 风格的 `{{...}}` 行内 regex 片段。
-    - 兼容 f-string 生成后残留的 `{ *}` 空白 regex 片段。
     - 对未闭合或空 `{{...}}` 片段抛稳定解析错误。
     """
 
-    decoded = _normalize_literal_symbol_exprs(_decode_literal_check_fragment(literal))
     pattern_parts: list[str] = []
     cursor = 0
     while True:
-        open_double_idx = decoded.find("{{", cursor)
-        open_single_idx = decoded.find("{.*}", cursor)
-        open_space_idx = decoded.find("{ *}", cursor)
-        candidates = [idx for idx in (open_double_idx, open_single_idx, open_space_idx) if idx != -1]
-        if not candidates:
-            pattern_parts.append(re.escape(decoded[cursor:]))
+        open_idx = literal.find("{{", cursor)
+        if open_idx == -1:
+            pattern_parts.append(re.escape(literal[cursor:]))
             break
-        open_idx = min(candidates)
-        pattern_parts.append(re.escape(decoded[cursor:open_idx]))
-        if open_idx == open_double_idx:
-            close_idx = decoded.find("}}", open_idx + 2)
-            if close_idx == -1:
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid regex check")
-            regex_text = decoded[open_idx + 2 : close_idx]
-            if not regex_text:
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid regex check")
-            pattern_parts.append(_expand_regex_aliases(regex_text))
-            cursor = close_idx + 2
-            continue
-        if open_idx == open_single_idx:
-            pattern_parts.append(".*")
-            cursor = open_idx + len("{.*}")
-            continue
-        pattern_parts.append(" *")
-        cursor = open_idx + len("{ *}")
+        pattern_parts.append(re.escape(literal[cursor:open_idx]))
+        close_idx = literal.find("}}", open_idx + 2)
+        if close_idx == -1:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid regex check")
+        regex_text = literal[open_idx + 2 : close_idx]
+        if not regex_text:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid regex check")
+        expanded_regex = _REGEX_ALIAS_PATTERN.sub(lambda match: _REGEX_ALIASES[match.group(1)], regex_text)
+        pattern_parts.append(expanded_regex)
+        cursor = close_idx + 2
     return "".join(pattern_parts)
-
-
-def _normalize_literal_symbol_exprs(text: str) -> str:
-    """归一文本中的 `#symbol.expr<...>` 片段。
-
-    功能说明:
-    - CHECK 路径只处理普通 literal 片段，不触碰 `[[NAME:REGEX]]` 捕获或引用。
-    - actual IR 路径对打印后的 IR 做相同归一，使匹配两侧使用同一公开 symbol 语义。
-    - 将旧 expectation 中 `1 + N`、`1 * X` 这类等价表达规整为 `SymbolExprAttr` canonical 文本。
-    - 解析不了的表达保持原样，继续按普通字面量匹配失败。
-
-    使用示例:
-    - text = _normalize_literal_symbol_exprs("!symbol.int<#symbol.expr<1 + N>>")
-
-    关联文件:
-    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
-    - test: [test/tools/test_ircheck_matcher.py](test/tools/test_ircheck_matcher.py)
-    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
-    """
-
-    return _SYMBOL_EXPR_LITERAL_PATTERN.sub(_normalize_symbol_expr_match, text)
-
-
-def _normalize_symbol_expr_match(match: re.Match[str]) -> str:
-    """归一单个 `#symbol.expr<...>` regex match。
-
-    功能说明:
-    - 优先使用 `SymbolDim` 公开语义处理 `//` 与代数项顺序。
-    - `SymbolDim` 无法解析的表达回退到 `SymbolExprAttr` canonical 文本。
-    - 两者都无法解析时保留原文本，继续由 ircheck 匹配失败报告差异。
-
-    使用示例:
-    - text = _normalize_symbol_expr_match(match)
-
-    关联文件:
-    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
-    - test: [test/tools/test_ircheck_matcher.py](test/tools/test_ircheck_matcher.py)
-    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
-    """
-
-    expr = match.group(1).strip()
-    if not expr:
-        return match.group(0)
-    expr = expr.replace("//", " floordiv ")
-    expr = re.sub(r"(?<!/)/(?!/)", " floordiv ", expr)
-    try:
-        canonical_value = SymbolDim(expr.replace(" floordiv ", " // ")).get_value()
-        canonical = str(canonical_value).replace("//", " floordiv ")
-    except Exception:
-        try:
-            canonical = SymbolExprAttr.from_expr(expr).expr.data
-        except Exception:
-            return match.group(0)
-    return f"#symbol.expr<{canonical}>"
 
 
 def _expand_regex_aliases(regex_text: str) -> str:
@@ -574,7 +462,7 @@ def _validate_pattern_directive(text: str, kind: CheckKind, declared_variables: 
     功能说明:
     - 校验 `[[NAME:REGEX]]` / `[[NAME]]` 的结构是否合法。
     - 校验重复变量、未定义变量、`CHECK-NOT` 定义变量等稳定错误短语。
-    - `CHECK*` 的 literal 片段先按 FileCheck 风格解码，再 `re.escape(...)` 成字面量。
+    - `CHECK*` 的 literal 片段按字面量编译，仅保留 `{{...}}` 局部 regex 能力。
     - 预编译替换后的 regex，确保语法错误在解析阶段暴露。
 
     使用示例:
@@ -1526,9 +1414,6 @@ def _normalize_ir(value: Operation) -> str:
 
     功能说明:
     - 使用 xdsl `Printer` 将 operation 打印为文本，用于后续的 line-based 匹配。
-    - 统一函数签名里 SSA 名称与类型之间的空格口径，避免不同 expectation 仍沿用旧打印样式。
-    - 对 `func.func` 签名参数冒号间距做兼容归一，并对 `kernel.img2col1d` 行做最小格式归一，
-      避免格式噪音影响文本匹配。
 
     使用示例:
     - actual_ir = _normalize_ir(module)
@@ -1539,18 +1424,12 @@ def _normalize_ir(value: Operation) -> str:
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
-    text = _render_operation_text(value)
-    # 归一化 func.func 签名里命名 SSA `name:` 的空格口径，让期望文本可按旧合同继续匹配。
-    text = re.sub(r"(%[A-Za-z_][A-Za-z0-9_]*):(?=\s)", r"\1 :", text)
-    if "kernel.img2col1d" in text:
-        lines = text.splitlines()
-        for idx, line in enumerate(lines):
-            if "kernel.img2col1d" not in line:
-                continue
-            lines[idx] = re.sub(r"#builtin\.int<(-?\d+)>", r"\1", line)
-        text = "\n".join(lines)
-    text = _normalize_literal_symbol_exprs(text)
-    return text
+    stream = StringIO()
+    printer = Printer(stream=stream)
+    printer.print_op(value)
+    rendered = stream.getvalue()
+    normalized = rendered.rstrip()
+    return normalized
 
 
 def _match_fail(
