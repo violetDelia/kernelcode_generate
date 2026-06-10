@@ -444,7 +444,14 @@ def _rewrite_attribute_type(attr: Attribute, replacements: dict[str, str]) -> At
             stride_entries
         )
         template_name = attr.template_name.data or None
-        return NnMemoryType(shape, stride, attr.element_type, attr.space, template_name=template_name)
+        return NnMemoryType(
+            shape,
+            stride,
+            attr.element_type,
+            attr.space,
+            template_name=template_name,
+            external_attrs=attr.external_attrs,
+        )
     if isinstance(attr, DmaRingType):
         memory_type = attr.memory_type
         shape_entries: list[SymbolExprAttr] = []
@@ -467,6 +474,7 @@ def _rewrite_attribute_type(attr: Attribute, replacements: dict[str, str]) -> At
                 memory_type.element_type,
                 memory_type.space,
                 template_name=template_name,
+                external_attrs=memory_type.external_attrs,
             )
         )
     if isinstance(attr, SymbolIterAttr):
