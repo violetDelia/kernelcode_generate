@@ -49,8 +49,6 @@ PRODUCTION_ALLOWLIST: dict[tuple[str, str, str], str] = {
         "auto-pad candidate construction failure skips unsupported rewrite",
     ("kernel_gen/passes/registry.py", "_build_registered_pass_instance", "TypeError"):
         "constructor fold keyword fallback; no public TypeError crosses boundary",
-    ("kernel_gen/tools/ircheck.py", "_normalize_symbol_expr_match", "Exception"):
-        "best-effort matcher canonicalization fallback returns original regex",
     ("kernel_gen/tools/ircheck.py", "run_ircheck_file", "Exception"):
         "parse/read failure maps to IrcheckResult exit_code=2",
     ("kernel_gen/tools/ircheck.py", "run_ircheck_text", "Exception"):
