@@ -75,6 +75,7 @@
 - `slice` 是目标式接口：调用方必须先准备好 `target`；include/api 层不为 `slice` 隐式分配结果内存。
 - `include/api/Dma.h` 仅提供声明与类型边界，不提供函数体实现；具体后端实现需在各自 include 层提供。
 - 未限定的全局 `alloc`、`slice`、`deslice` 名称不属于成功调用合同；调用方应经 `namespace npu_demo` 消费。
+- `Context` 为 `npu_demo::CostContext` 时，DMA helper 只按匹配方向记录 raw bytes 成本并返回 `StatusCode::kOk`，不得写业务 output；普通 `KernelContext` 路径保持真实搬运 / 填充 / 写回语义。
 
 ## API详细说明
 

@@ -12,7 +12,7 @@
 - **失败短语入口**：所有失败必须在 `ExecuteResult.failure_phrase` 以“固定短语”表达，禁止静默 fallback 或同义词扩散。
 - **非目标（P0 不支持）**：
   - `stream` / 异步调度。
-  - 函数输出回收（output capture），仅保留显式扩展位与失败短语。
+  - 通用函数输出回收；仅 `target="npu_demo"` 的 generated cost summary companion 支持 `capture_function_output=True` 并把文本放入 `ExecuteResult.run_stdout`。
 
 ## API 列表
 
@@ -76,7 +76,7 @@
 - `P0` 内置真实编译/执行支持 `target in {"cpu","npu_demo","cuda_sm86"}`；其他 target 必须注册 compile strategy，缺失时 `failure_phrase == "target_header_mismatch"`。
 - 第三方 compile-only target 的 `CompiledKernel.execute(...)` 必须以 `failure_phrase == "execution_unsupported"` 公开失败，不得 fallback 到普通 kernel。
 - `P0` 不支持 `stream`；当 `ExecuteRequest.stream is not None` 必须失败，且 `failure_phrase == "stream_not_supported"`。
-- `P0` 不支持函数输出回收；当 `ExecuteRequest.capture_function_output=True` 必须失败，且 `failure_phrase == "function_output_capture_not_supported"`。
+- `P0` 不支持通用函数输出回收；当 `ExecuteRequest.capture_function_output=True` 且不是 npu_demo cost summary companion 场景时必须失败，且 `failure_phrase == "function_output_capture_not_supported"`。npu_demo cost summary companion 成功时，`ExecuteResult.run_stdout` 承载捕获文本。
 - `P0` 不负责推导参数个数/顺序；调用方必须提供与 `function` 形参顺序一致的 `args`。
 - 禁止 silent fallback：
   - 目标 include 缺失或不匹配时必须失败；不得自动切换到另一 target include。
@@ -167,7 +167,7 @@ assert result.ok and result.failure_phrase is None
   - `args`：位置参数序列，按公开调用约定传递给目标函数或工具入口；类型 `tuple[RuntimeInput, ...] | None`；默认值 `None`；外层 `None` 表示使用 `request.args` 或空参数；元素允许 memory、Python / numpy integer scalar、Python / numpy floating scalar，元素 `None` 仅用于 allow-absent memory runtime input；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `request`：请求对象，承载工具、执行引擎或服务入口需要处理的输入信息；类型 `ExecuteRequest | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `entry_point`：`entry_point` 输入值，参与 `execute` 的公开处理流程；类型 `str | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `capture_function_output`：函数对象或函数级 IR；类型 `bool`；默认值 `False`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `capture_function_output`：是否启用 npu_demo cost summary companion 文本捕获；类型 `bool`；默认值 `False`；仅 `target="npu_demo"` 且存在 `<entry_point>_capture` companion 的 generated cost summary sink 场景成功，文本写入 `ExecuteResult.run_stdout`；其它场景以 `function_output_capture_not_supported` 失败。
   - `stream`：输入或输出流对象，用于读取源码、写入文本或传递诊断；类型 `None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
 - 返回值：`ExecuteResult`。
 - 使用示例：
@@ -233,7 +233,7 @@ assert result.ok and result.failure_phrase is None
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-001 | 边界/异常 | `compile -> execute` 成功返回 `ok=True,status_code=0,failure_phrase=None`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `EE-S1-001`。 | “`compile -> execute` 成功返回 `ok=True,status_code=0,failure_phrase=None`。”场景按公开错误语义失败或被拒绝。 | `EE-S1-001` |
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-002 | 公开入口 | `stream != None` 触发 `stream_not_supported`。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `EE-S1-002`。 | 公开入口在“`stream != None` 触发 `stream_not_supported`。”场景下可导入、构造、注册或按名称发现。 | `EE-S1-002` |
-| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-003 | 执行结果 | `capture_function_output=True` 触发 `function_output_capture_not_supported`。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `EE-S1-003`。 | 命令返回码、输出、执行结果或状态变更体现“`capture_function_output=True` 触发 `function_output_capture_not_supported`。”场景。 | `EE-S1-003` |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-003 | 执行结果 | `capture_function_output=True` 的限定成功与 unsupported 失败。 | 准备 npu_demo cost summary companion、普通 npu_demo 函数和非 npu_demo target。 | 运行 `test_execute_engine_npu_demo_capture_function_output_returns_run_stdout` 与 `test_execute_engine_function_output_capture_not_supported`。 | npu_demo cost summary companion 返回 `run_stdout`；普通函数或非 npu_demo target 以 `function_output_capture_not_supported` 失败。 | `test_execute_engine_npu_demo_capture_function_output_returns_run_stdout`, `test_execute_engine_function_output_capture_not_supported` |
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-004 | 边界/异常 | 空/非法 `source` 触发 `source_empty_or_invalid`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `EE-S1-004`。 | “空/非法 `source` 触发 `source_empty_or_invalid`。”场景按公开错误语义失败或被拒绝。 | `EE-S1-004` |
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-005 | 边界/异常 | 符号解析失败触发 `symbol_resolve_failed`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `EE-S1-005`。 | “符号解析失败触发 `symbol_resolve_failed`。”场景按公开错误语义失败或被拒绝。 | `EE-S1-005` |
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-006 | 边界/异常 | 编译失败触发 `compile_failed`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `EE-S1-006`。 | “编译失败触发 `compile_failed`。”场景按公开错误语义失败或被拒绝。 | `EE-S1-006` |

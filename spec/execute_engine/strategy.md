@@ -58,7 +58,7 @@
 - 内置 target 编译产物结构、include 注入、entry shim 与真实编译 helper 均为 `builtin_strategy/` package 内实现；第三方 strategy 不得依赖这些 helper 或 target 子模块作为公开扩展点。
 - `builtin_strategy/__init__.py` 提供 `BuiltinCompileArtifacts`、`build_builtin_compile_artifacts(...)`、`install_builtin_compile_strategies(...)` 三个文件级 API，不写入 `kernel_gen.execute_engine` 包根 `__all__`，公开测试不得直接调用安装函数。
 - `builtin_strategy/__init__.py` 的内置安装必须注册 `cpu`、`npu_demo` 与 `cuda_sm86`；`cuda_sm86` target 实现在 `builtin_strategy/cuda_sm86.py`，不得通过 `kernel_gen.execute_engine` 包根公开额外 helper。
-- `runtime_args.py` 提供 `RuntimeScalarArgInfo`、`RuntimeMemoryArgInfo`、`RuntimeArgInfo`、`describe_runtime_arg(...)`、`AllowAbsentMemoryArg`、`RuntimeInput`、`invoke_compiled_kernel(...)` 文件级 API，不写入包根 `__all__`；`describe_runtime_arg(...)` 是 execute ABI 与工具层复用的 runtime arg 基础分类真源。
+- `runtime_args.py` 提供 `RuntimeScalarArgInfo`、`RuntimeMemoryArgInfo`、`RuntimeArgInfo`、`describe_runtime_arg(...)`、`AllowAbsentMemoryArg`、`RuntimeInput`、`invoke_compiled_kernel(...)`、`invoke_compiled_kernel_capture_output(...)` 文件级 API，不写入包根 `__all__`；`describe_runtime_arg(...)` 是 execute ABI 与工具层复用的 runtime arg 基础分类真源，capture API 只服务 npu_demo generated cost summary companion。
 
 ## API详细说明
 
@@ -147,7 +147,7 @@
   - `args`：运行时实参序列；元素允许 memory、Python / numpy integer scalar、Python / numpy floating scalar，元素 `None` 仅用于 allow-absent memory runtime input。
   - `request`：完整 execute 请求；为 `None` 时由其它参数构造。
   - `entry_point`：覆盖 kernel 默认入口名。
-  - `capture_function_output`：是否捕获函数返回值。
+  - `capture_function_output`：是否启用 npu_demo cost summary companion 文本捕获；仅 generated cost summary sink 场景成功并写入 `ExecuteResult.run_stdout`，其它场景以 `function_output_capture_not_supported` 失败。
   - `stream`：流对象；本阶段不支持。
 - 返回值：`ExecuteResult`。
 - 功能说明：执行已编译 kernel；compile-only target 返回稳定失败。

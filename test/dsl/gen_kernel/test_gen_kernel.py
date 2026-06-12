@@ -60,7 +60,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.core.config import reset_config, set_dump_dir, set_target, set_trance_enabled
+from kernel_gen.core.config import reset_config, set_codegen_mode, set_dump_dir, set_target, set_trance_enabled
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.core.context import build_default_context
 from kernel_gen.dialect.arch import (
@@ -2803,6 +2803,37 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
     )
     assert "arch.launch_kernel" not in source
     assert "ctx.sync_threads" not in source
+
+
+def test_gen_kernel_emits_npu_demo_cost_mode_wrapper_summary_sink() -> None:
+    """验证 cost mode 生成 `<wrapper>_cost` host 并使用 CostContext summary sink。"""
+
+    module = _make_npu_demo_add_barrier_module(tlm_space="tlm1")
+    set_codegen_mode("cost")
+
+    source = gen_kernel(module, _npu_ctx())
+
+    assert "template <typename Context>\nstatic void add_barrier_body(Context& ctx" in source
+    assert (
+        "void add_barrier_cost(Memory<MemorySpace::GM, float>& lhs, "
+        "Memory<MemorySpace::GM, float>& rhs, Memory<MemorySpace::GM, float>& out, "
+        "std::string& __kg_cost_summary)"
+        in source
+    )
+    assert "npu_demo::CostContext ctx;" in source
+    assert "npu_demo::launch<2, 1, 1, 0, add_barrier_body<npu_demo::CostContext>>(ctx, lhs, rhs, out);" in source
+    assert "Status __kg_cost_status = npu_demo::launch<2, 1, 1, 0, add_barrier_body<npu_demo::CostContext>>(ctx, lhs, rhs, out);" in source
+    assert 'throw std::runtime_error("kg_cost_unsupported");' in source
+    assert "if (slice(ctx, v2_1 /*dst*/, lhs_1 /*source*/, {0} /*offset*/, {16} /*size*/, {1} /*stride*/) != StatusCode::kOk)" in source
+    assert "if (add<TSM, float, float>(ctx, v2_3 /*out*/, v2_1 /*lhs*/, v2_2 /*rhs*/) != StatusCode::kOk)" in source
+    assert "if (deslice(ctx, out /*target*/, v2_3 /*source*/, {16*npu_demo::thread_id()} /*offset*/, {16} /*size*/, {1} /*stride*/) != StatusCode::kOk)" in source
+    assert "__kg_cost_summary = npu_demo::format_cost_summary(ctx.summary());" in source
+    assert "void add_barrier(" not in source
+    assert "npu_demo::KernelContext ctx;" not in source
+    assert "_cost_VECTOR1_" not in source
+    assert "tuner.cost" not in source
+    assert "npu_demo::detail" not in source
+    assert "* 2" not in source
 
 
 # GK-S4-001A

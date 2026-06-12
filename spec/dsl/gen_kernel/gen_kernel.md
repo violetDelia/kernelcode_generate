@@ -42,6 +42,7 @@
 - 当 backend 返回 SourceBundle aggregate string 时，`gen_kernel(...)` 仍返回该 aggregate 文本，并在 `dump_dir` 非空时额外展开 bundle artifact。
 - `dump_dir` 下 `source.cpp` 与 SourceBundle artifact 的底层文本写出由 `kernel_gen.core.tools.dump_dir.DumpDirWriter` 管理；SourceBundle 解析与公开错误语义仍归 gen_kernel 模块。
 - `kernel_gen.core.config.trance_enabled` 只影响后续编译/运行链路；`gen_kernel(...)` 不读取该开关来改变源码内容，也不创建 runtime trace 文件。
+- `kernel_gen.core.config.codegen_mode` 控制 npu_demo launch module 的 host 形态：`"norm"` 生成普通 `KernelContext` host，`"cost"` 生成 `<wrapper>_cost` host、`CostContext` 和 summary string sink。
 
 ## 额外补充
 
@@ -59,6 +60,9 @@
 - 对 `target="npu_demo"`，`tuner.select` 发射为 `S_INT <name> = 0;`，表示第一版固定选择 pattern0。
 - 对 `target="npu_demo"`，裸 `tuner.launch` 进入 gen_kernel 必须失败，错误文本包含 `tuner.launch` 与 `outline-device-kernel`；成功链路必须先由 `outline-device-kernel` 降为 `arch.launch`。
 - 对 `target="npu_demo"`，`arch.launch` 的四个 extent 必须来自 `symbol.const`，源码中发射为 `npu_demo::launch<2, 1, 1, 0, body>(ctx, ...)` 这类 C++ template 整数字面量与 callee-in-template 形态；不得把 `S_INT` 局部变量名作为 template 参数。
+- 对 `target="npu_demo"` 且 `get_codegen_mode() == "norm"`，launch wrapper 必须创建 `npu_demo::KernelContext ctx;` 并发射普通 host 名称，例如 `void add_kernel(...)`。
+- 对 `target="npu_demo"` 且 `get_codegen_mode() == "cost"`，launch wrapper 必须改名为 `<wrapper>_cost`，末尾参数必须为 `std::string& __kg_cost_summary`，body 必须模板化以接收 `npu_demo::CostContext`，host 必须创建 `npu_demo::CostContext ctx;`；body 中返回 `Status` 的 npu_demo helper 与 host 中 `npu_demo::launch(...)` 只要返回非 `StatusCode::kOk` 就必须抛出 `std::runtime_error("kg_cost_unsupported")`，不得继续写入 partial / 0 summary；全部成功后才执行 `__kg_cost_summary = npu_demo::format_cost_summary(ctx.summary());`。
+- cost mode 生成源码只计算 npu_demo first-block cost，不把 `launch` block extent 乘进总 cost；generated source 不得直接引用 `npu_demo::detail`、`ScopedActiveKernelContext`、`KernelContextRuntimeAccess`、`current_kernel_runtime` 或 `run_launch_worker`。
 - 对 `target="npu_demo"`，DMA / cost helper layout 参数必须消费 include/npu_demo public `Vector` 参数；rank 1..8 源码可用 `{...}` 绑定临时 `Vector`，rank >8 必须按公开错误失败；不得生成 `std::initializer_list<long long>` DMA / cost helper overload 或 `Vector{...}` 文本。
 - `kernel/` 下 matmul、conv2d、flash_attention 这类 npu-demo DSL kernel demo 的可改写 scratch storage 应在 DSL 生成侧使用 iterator-independent fixed upper-bound `dma.alloc`，并用现有 `dma.view` / `dma.deslice` 表达当前 tail tile；不得为该形态新增 pass、registry 名称、manifest 公开 API 或扩展 typed/ranked `dma.subview` 合同。
 - 若某个 scratch candidate 因缺少确定上界、下游 op 不接受 view type/layout 或别名用途无法证明而保持 current tile alloc，相关公开 pytest / dump checker 必须给出固定 no-op reason，不能依赖后续 pipeline pass 掩盖生成侧形态。
@@ -83,7 +87,7 @@
   result = gen_kernel(obj=obj, ctx=ctx)
   ```
 - 功能说明：执行 `gen_kernel`。
-- 注意事项：只按注册表和公开上下文分发；未注册或不支持的输入必须抛出公开错误；返回 SourceBundle aggregate string 时，`dump_dir` 写出规则以 [`spec/dsl/gen_kernel/source_bundle.md`](../../../spec/dsl/gen_kernel/source_bundle.md) 为准。
+- 注意事项：只按注册表和公开上下文分发；未注册或不支持的输入必须抛出公开错误；返回 SourceBundle aggregate string 时，`dump_dir` 写出规则以 [`spec/dsl/gen_kernel/source_bundle.md`](../../../spec/dsl/gen_kernel/source_bundle.md) 为准；npu_demo launch module 会读取公开 `get_codegen_mode()`，`"norm"` 与 `"cost"` 只改变 host/context/summary sink，不新增 `EmitCContext` mode API。
 
 ### `dsl_gen_kernel(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg, ctx: EmitCContext) -> str`
 
@@ -178,6 +182,7 @@
 | TC-DSL-GEN-KERNEL-GEN-KERNEL-055 | 生成/编译 | gen kernel compiles npu demo cost function module | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_gen_kernel_compiles_npu_demo_cost_function_module`。 | 生成源码、IR 文本或编译结果体现“gen kernel compiles npu demo cost function module”场景。 | `test_gen_kernel_compiles_npu_demo_cost_function_module` |
 | TC-DSL-GEN-KERNEL-GEN-KERNEL-056 | pass 改写 | gen kernel compiles outlined npu demo launch module | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_gen_kernel_compiles_outlined_npu_demo_launch_module`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“gen kernel compiles outlined npu demo launch module”场景。 | `test_gen_kernel_compiles_outlined_npu_demo_launch_module` |
 | TC-DSL-GEN-KERNEL-GEN-KERNEL-057 | 生成/编译 | gen kernel npu demo add barrier runtime smoke | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_gen_kernel_npu_demo_add_barrier_runtime_smoke`。 | 生成源码、IR 文本或编译结果体现“gen kernel npu demo add barrier runtime smoke”场景。 | `test_gen_kernel_npu_demo_add_barrier_runtime_smoke` |
+| TC-DSL-GEN-KERNEL-GEN-KERNEL-057A | 生成/编译 | gen kernel emits npu demo cost mode wrapper summary sink | 设置 `set_codegen_mode("cost")` 并准备 npu_demo launch module。 | 运行 `test_gen_kernel_emits_npu_demo_cost_mode_wrapper_summary_sink`。 | 源码包含 `<wrapper>_cost`、`std::string& __kg_cost_summary`、`npu_demo::CostContext`、helper/launch status fail-fast 与 `format_cost_summary(ctx.summary())`，不含旧 `_cost_*` sibling、`tuner.cost` 或 generated `npu_demo::detail`。 | `test_gen_kernel_emits_npu_demo_cost_mode_wrapper_summary_sink` |
 | TC-DSL-GEN-KERNEL-GEN-KERNEL-058 | 边界/异常 | gen kernel rejects npu demo barrier wrapper missing body symbol | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_gen_kernel_rejects_npu_demo_barrier_wrapper_missing_body_symbol`。 | “gen kernel rejects npu demo barrier wrapper missing body symbol”场景按公开错误语义失败或被拒绝。 | `test_gen_kernel_rejects_npu_demo_barrier_wrapper_missing_body_symbol` |
 | TC-DSL-GEN-KERNEL-GEN-KERNEL-059 | 边界/异常 | gen kernel rejects npu demo barrier fail fast boundaries | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_gen_kernel_rejects_npu_demo_barrier_fail_fast_boundaries`。 | “gen kernel rejects npu demo barrier fail fast boundaries”场景按公开错误语义失败或被拒绝。 | `test_gen_kernel_rejects_npu_demo_barrier_fail_fast_boundaries` |
 | TC-DSL-GEN-KERNEL-GEN-KERNEL-060 | 公开入口 | DSL package public exports | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_dsl_package_public_exports`。 | 公开入口在“DSL package public exports”场景下可导入、构造、注册或按名称发现。 | `test_dsl_package_public_exports` |

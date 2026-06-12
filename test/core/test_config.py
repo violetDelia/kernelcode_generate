@@ -8,6 +8,7 @@ API 列表:
 - `test_target_round_trip() -> None`
 - `test_dump_dir_round_trip() -> None`
 - `test_trance_enabled_round_trip() -> None`
+- `test_codegen_mode_round_trip() -> None`
 - `test_config_setters_reject_invalid_types() -> None`
 - `test_reset_config_restores_public_defaults() -> None`
 - `test_snapshot_and_restore_config_round_trip() -> None`
@@ -29,11 +30,13 @@ import pytest
 
 from kernel_gen.core.config import (
     CoreConfigSnapshot,
+    get_codegen_mode,
     get_dump_dir,
     get_target,
     get_trance_enabled,
     reset_config,
     restore_config,
+    set_codegen_mode,
     set_dump_dir,
     set_target,
     set_trance_enabled,
@@ -122,6 +125,22 @@ def test_trance_enabled_round_trip() -> None:
     assert get_trance_enabled() is False
 
 
+# CCFG-001C
+# 测试目的: 验证 codegen_mode 配置通过公开 set/get 接口稳定往返。
+# 使用示例: pytest -q test/core/test_config.py -k test_codegen_mode_round_trip
+# 对应功能实现文件路径: kernel_gen/core/config.py
+# 对应 spec 文件路径: spec/core/config.md
+# 对应测试文件路径: test/core/test_config.py
+def test_codegen_mode_round_trip() -> None:
+    assert get_codegen_mode() == "norm"
+
+    set_codegen_mode("cost")
+    assert get_codegen_mode() == "cost"
+
+    set_codegen_mode("norm")
+    assert get_codegen_mode() == "norm"
+
+
 # CCFG-002
 # 测试目的: 验证公开配置 setter 对非法类型输入会稳定失败。
 # 使用示例: pytest -q test/core/test_config.py -k test_config_setters_reject_invalid_types
@@ -135,6 +154,8 @@ def test_config_setters_reject_invalid_types() -> None:
         set_dump_dir(1)  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="trance_enabled must be bool"):
         set_trance_enabled(1)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="codegen_mode must be 'norm' or 'cost'"):
+        set_codegen_mode("debug")  # type: ignore[arg-type]
 
 
 # CCFG-003
@@ -147,12 +168,14 @@ def test_reset_config_restores_public_defaults() -> None:
     set_target("npu_demo")
     set_dump_dir("dump")
     set_trance_enabled(True)
+    set_codegen_mode("cost")
 
     reset_config()
 
     assert get_target() is None
     assert get_dump_dir() is None
     assert get_trance_enabled() is False
+    assert get_codegen_mode() == "norm"
 
 
 # CCFG-004
@@ -165,9 +188,10 @@ def test_snapshot_and_restore_config_round_trip() -> None:
     set_target("cpu")
     set_dump_dir("dump")
     set_trance_enabled(True)
+    set_codegen_mode("cost")
     snapshot = snapshot_config()
 
-    assert snapshot == CoreConfigSnapshot(target="cpu", dump_dir=Path("dump"), trance_enabled=True)
+    assert snapshot == CoreConfigSnapshot(target="cpu", dump_dir=Path("dump"), trance_enabled=True, codegen_mode="cost")
 
     reset_config()
     restore_config(snapshot)
@@ -175,6 +199,16 @@ def test_snapshot_and_restore_config_round_trip() -> None:
     assert get_target() == "cpu"
     assert get_dump_dir() == Path("dump")
     assert get_trance_enabled() is True
+    assert get_codegen_mode() == "cost"
+
+    old_snapshot = CoreConfigSnapshot(target="npu_demo", dump_dir=None, trance_enabled=False)
+    assert old_snapshot.codegen_mode == "norm"
+    set_codegen_mode("cost")
+    restore_config(old_snapshot)
+    assert get_target() == "npu_demo"
+    assert get_dump_dir() is None
+    assert get_trance_enabled() is False
+    assert get_codegen_mode() == "norm"
 
     with pytest.raises(TypeError, match="snapshot must be CoreConfigSnapshot"):
         restore_config({"target": "npu_demo", "dump_dir": "dump", "trance_enabled": True})  # type: ignore[arg-type]

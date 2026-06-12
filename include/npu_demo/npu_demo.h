@@ -6,6 +6,12 @@
 
 API 列表:
 - `namespace npu_demo`
+- `class npu_demo::CostSummary`
+- `npu_demo::CostSummary.value(npu_demo::cost::CostKind kind) const -> S_INT`
+- `class npu_demo::CostContext`
+- `npu_demo::CostContext.add_cost(npu_demo::cost::CostKind kind, S_INT value) -> void`
+- `npu_demo::CostContext.summary() const -> const npu_demo::CostSummary&`
+- `npu_demo::format_cost_summary(const npu_demo::CostSummary& summary) -> std::string`
 - `template <long long block, long long thread, long long subthread, long long shared_memory_size, auto name, typename Context, typename... Args> Status npu_demo::launch(Context& ctx, Args&&... args)`
 - `class npu_demo::KernelContext`
 - `npu_demo::block_id() -> S_INT`
@@ -43,6 +49,8 @@ helper 清单:
 - #include "include/npu_demo/npu_demo.h"
 - npu_demo::KernelContext ctx;
 - Status status = npu_demo::launch<2, 1, 1, 0, kernel_body>(ctx, output);
+- npu_demo::CostContext cost_ctx;
+- std::string summary = npu_demo::format_cost_summary(cost_ctx.summary());
 
 
 关联文件:

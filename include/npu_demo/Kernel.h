@@ -2,6 +2,7 @@
 功能说明:
 - 提供 npu_demo 后端的 Kernel helper 轻量实现，匹配 `include/api/Kernel.h` 的公开声明。
 - 当前实现覆盖 same-shape 逐元素、reduce、matmul 与 img2col 的真实运行路径。
+- `CostContext` 路径先执行对应 helper 的布局 / shape / data 校验，成功时只累计成本且不写业务输出。
 
 API 列表:
 - `npu_demo::add<Space, InType, OutType, Context>(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
@@ -44,6 +45,7 @@ API 列表:
 
 #include <cmath>
 #include <limits>
+#include <type_traits>
 
 #include "include/api/Kernel.h"
 #include "include/npu_demo/Core.h"
@@ -54,29 +56,13 @@ namespace detail {
 
 /*
 功能说明:
-- 判断输入指针是否非空，供各个 Kernel helper 的前置检查复用。
-
-使用示例:
-- bool ok = npu_demo::detail::is_non_null(mem.data());
-
-
-关联文件:
-- spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
-- 功能实现: include/npu_demo/Kernel.h
-*/
-template <typename T>
-inline bool is_non_null(const T* ptr) {
-    return ptr != nullptr;
-}
-
-/*
-功能说明:
 - 复用 same-shape 多维逐元素二元计算的公共前置检查与遍历逻辑。
 - 由 `add/sub/mul/truediv` 和 compare family 共享。
+- `validate_only=true` 时只执行 rank / shape / stride / data 校验，不写入输出。
 
 使用示例:
 - Status st = npu_demo::detail::elementwise_binary_same_shape(out, lhs, rhs, [](auto a, auto b) { return a + b; });
+- Status ok = npu_demo::detail::elementwise_binary_same_shape(out, lhs, rhs, [](auto a, auto b) { return a + b; }, true);
 
 
 关联文件:
@@ -89,12 +75,13 @@ inline Status elementwise_binary_same_shape(
     Memory<Space, OutType>& out,
     const Memory<Space, InType>& lhs,
     const Memory<Space, InType>& rhs,
-    BinaryFn fn) {
+    BinaryFn fn,
+    bool validate_only = false) {
     const unsigned long long rank = out.rank();
     if (rank == 0 || rank > 8 || lhs.rank() != rank || rhs.rank() != rank) {
         return StatusCode::kError;
     }
-    if (!is_non_null(lhs.data()) || !is_non_null(rhs.data()) || !is_non_null(out.data())) {
+    if (lhs.data() == nullptr || rhs.data() == nullptr || out.data() == nullptr) {
         return StatusCode::kError;
     }
     long long element_count = 1;
@@ -110,6 +97,9 @@ inline Status elementwise_binary_same_shape(
             return StatusCode::kError;
         }
         element_count *= extent;
+    }
+    if (validate_only) {
+        return StatusCode::kOk;
     }
     long long indices[8] = {0};
     for (long long linear = 0; linear < element_count; ++linear) {
@@ -128,9 +118,11 @@ inline Status elementwise_binary_same_shape(
 功能说明:
 - 复用 same-shape 多维逐元素一元计算的公共前置检查与遍历逻辑。
 - 由 `exp` 等一元 helper 共享。
+- `validate_only=true` 时只执行 rank / shape / stride / data 校验，不写入输出。
 
 使用示例:
 - Status st = npu_demo::detail::elementwise_unary_same_shape(out, input, [](auto value) { return value; });
+- Status ok = npu_demo::detail::elementwise_unary_same_shape(out, input, [](auto value) { return value; }, true);
 
 
 关联文件:
@@ -142,12 +134,13 @@ template <MemorySpace Space, typename InType, typename OutType, typename UnaryFn
 inline Status elementwise_unary_same_shape(
     Memory<Space, OutType>& out,
     const Memory<Space, InType>& input,
-    UnaryFn fn) {
+    UnaryFn fn,
+    bool validate_only = false) {
     const unsigned long long rank = out.rank();
     if (rank == 0 || rank > 8 || input.rank() != rank) {
         return StatusCode::kError;
     }
-    if (!is_non_null(input.data()) || !is_non_null(out.data())) {
+    if (input.data() == nullptr || out.data() == nullptr) {
         return StatusCode::kError;
     }
     long long element_count = 1;
@@ -163,6 +156,9 @@ inline Status elementwise_unary_same_shape(
             return StatusCode::kError;
         }
         element_count *= extent;
+    }
+    if (validate_only) {
+        return StatusCode::kOk;
     }
     long long indices[8] = {0};
     for (long long linear = 0; linear < element_count; ++linear) {
@@ -181,9 +177,11 @@ inline Status elementwise_unary_same_shape(
 功能说明:
 - 复用 same-shape 多维逐元素比较 helper 的公共遍历逻辑。
 - 由 `eq/ne/lt/le/gt/ge` 共享。
+- `validate_only=true` 时只执行 rank / shape / stride / data 校验，不写入输出。
 
 使用示例:
 - Status st = npu_demo::detail::compare_same_shape(out, lhs, rhs, [](auto a, auto b) { return a == b; });
+- Status ok = npu_demo::detail::compare_same_shape(out, lhs, rhs, [](auto a, auto b) { return a == b; }, true);
 
 
 关联文件:
@@ -196,8 +194,43 @@ inline Status compare_same_shape(
     Memory<Space, OutType>& out,
     const Memory<Space, InType>& lhs,
     const Memory<Space, InType>& rhs,
-    CompareFn fn) {
-    return elementwise_binary_same_shape(out, lhs, rhs, fn);
+    CompareFn fn,
+    bool validate_only = false) {
+    const unsigned long long rank = out.rank();
+    if (rank == 0 || rank > 8 || lhs.rank() != rank || rhs.rank() != rank) {
+        return StatusCode::kError;
+    }
+    if (lhs.data() == nullptr || rhs.data() == nullptr || out.data() == nullptr) {
+        return StatusCode::kError;
+    }
+    long long element_count = 1;
+    for (unsigned long long axis = 0; axis < rank; ++axis) {
+        const long long extent = out.get_shape(axis);
+        if (extent <= 0 || lhs.get_shape(axis) != extent || rhs.get_shape(axis) != extent) {
+            return StatusCode::kError;
+        }
+        if (out.get_stride(axis) <= 0 || lhs.get_stride(axis) <= 0 || rhs.get_stride(axis) <= 0) {
+            return StatusCode::kError;
+        }
+        if (element_count > std::numeric_limits<long long>::max() / extent) {
+            return StatusCode::kError;
+        }
+        element_count *= extent;
+    }
+    if (validate_only) {
+        return StatusCode::kOk;
+    }
+    long long indices[8] = {0};
+    for (long long linear = 0; linear < element_count; ++linear) {
+        long long remainder = linear;
+        for (unsigned long long reverse_index = 0; reverse_index < rank; ++reverse_index) {
+            const unsigned long long axis = rank - 1 - reverse_index;
+            indices[axis] = remainder % out.get_shape(axis);
+            remainder /= out.get_shape(axis);
+        }
+        out.at(indices) = static_cast<OutType>(fn(lhs.at(indices), rhs.at(indices)));
+    }
+    return StatusCode::kOk;
 }
 
 }  // namespace detail
@@ -217,6 +250,19 @@ inline Status compare_same_shape(
 */
 template <MemorySpace Space, typename InType, typename OutType, typename Context>
 inline Status add(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        const Status status = detail::elementwise_binary_same_shape(
+            out,
+            lhs,
+            rhs,
+            [](const InType& a, const InType& b) { return a + b; },
+            true);
+        if (status != StatusCode::kOk) {
+            return status;
+        }
+        ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+        return StatusCode::kOk;
+    }
     (void)ctx;
     return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a + b; });
 }
@@ -236,6 +282,19 @@ inline Status add(Context& ctx, Memory<Space, OutType>& out, const Memory<Space,
 */
 template <MemorySpace Space, typename InType, typename OutType, typename Context>
 inline Status sub(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        const Status status = detail::elementwise_binary_same_shape(
+            out,
+            lhs,
+            rhs,
+            [](const InType& a, const InType& b) { return a - b; },
+            true);
+        if (status != StatusCode::kOk) {
+            return status;
+        }
+        ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+        return StatusCode::kOk;
+    }
     (void)ctx;
     return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a - b; });
 }
@@ -255,6 +314,19 @@ inline Status sub(Context& ctx, Memory<Space, OutType>& out, const Memory<Space,
 */
 template <MemorySpace Space, typename InType, typename OutType, typename Context>
 inline Status mul(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        const Status status = detail::elementwise_binary_same_shape(
+            out,
+            lhs,
+            rhs,
+            [](const InType& a, const InType& b) { return a * b; },
+            true);
+        if (status != StatusCode::kOk) {
+            return status;
+        }
+        ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+        return StatusCode::kOk;
+    }
     (void)ctx;
     return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a * b; });
 }
@@ -274,6 +346,21 @@ inline Status mul(Context& ctx, Memory<Space, OutType>& out, const Memory<Space,
 */
 template <MemorySpace Space, typename InType, typename OutType, typename Context>
 inline Status truediv(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        const Status status = detail::elementwise_binary_same_shape(
+            out,
+            lhs,
+            rhs,
+            [](const InType& a, const InType& b) -> OutType {
+                return static_cast<OutType>(static_cast<double>(a) / static_cast<double>(b));
+            },
+            true);
+        if (status != StatusCode::kOk) {
+            return status;
+        }
+        ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+        return StatusCode::kOk;
+    }
     (void)ctx;
     return detail::elementwise_binary_same_shape(
         out,
@@ -299,6 +386,21 @@ inline Status truediv(Context& ctx, Memory<Space, OutType>& out, const Memory<Sp
 */
 template <MemorySpace Space, typename InType, typename OutType, typename Context>
 inline Status min(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        const Status status = detail::elementwise_binary_same_shape(
+            out,
+            lhs,
+            rhs,
+            [](const InType& a, const InType& b) {
+                return a < b ? a : b;
+            },
+            true);
+        if (status != StatusCode::kOk) {
+            return status;
+        }
+        ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+        return StatusCode::kOk;
+    }
     (void)ctx;
     return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) {
         return a < b ? a : b;
@@ -320,6 +422,21 @@ inline Status min(Context& ctx, Memory<Space, OutType>& out, const Memory<Space,
 */
 template <MemorySpace Space, typename InType, typename OutType, typename Context>
 inline Status max(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        const Status status = detail::elementwise_binary_same_shape(
+            out,
+            lhs,
+            rhs,
+            [](const InType& a, const InType& b) {
+                return a > b ? a : b;
+            },
+            true);
+        if (status != StatusCode::kOk) {
+            return status;
+        }
+        ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+        return StatusCode::kOk;
+    }
     (void)ctx;
     return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) {
         return a > b ? a : b;
@@ -341,6 +458,14 @@ inline Status max(Context& ctx, Memory<Space, OutType>& out, const Memory<Space,
 */
 template <MemorySpace Space, typename InType, typename OutType, typename Context>
 inline Status eq(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        const Status status = detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a == b; }, true);
+        if (status != StatusCode::kOk) {
+            return status;
+        }
+        ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+        return StatusCode::kOk;
+    }
     (void)ctx;
     return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a == b; });
 }
@@ -360,6 +485,14 @@ inline Status eq(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, 
 */
 template <MemorySpace Space, typename InType, typename OutType, typename Context>
 inline Status ne(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        const Status status = detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a != b; }, true);
+        if (status != StatusCode::kOk) {
+            return status;
+        }
+        ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+        return StatusCode::kOk;
+    }
     (void)ctx;
     return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a != b; });
 }
@@ -379,6 +512,14 @@ inline Status ne(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, 
 */
 template <MemorySpace Space, typename InType, typename OutType, typename Context>
 inline Status lt(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        const Status status = detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a < b; }, true);
+        if (status != StatusCode::kOk) {
+            return status;
+        }
+        ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+        return StatusCode::kOk;
+    }
     (void)ctx;
     return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a < b; });
 }
@@ -398,6 +539,14 @@ inline Status lt(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, 
 */
 template <MemorySpace Space, typename InType, typename OutType, typename Context>
 inline Status le(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        const Status status = detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a <= b; }, true);
+        if (status != StatusCode::kOk) {
+            return status;
+        }
+        ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+        return StatusCode::kOk;
+    }
     (void)ctx;
     return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a <= b; });
 }
@@ -417,6 +566,14 @@ inline Status le(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, 
 */
 template <MemorySpace Space, typename InType, typename OutType, typename Context>
 inline Status gt(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        const Status status = detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a > b; }, true);
+        if (status != StatusCode::kOk) {
+            return status;
+        }
+        ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+        return StatusCode::kOk;
+    }
     (void)ctx;
     return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a > b; });
 }
@@ -436,6 +593,14 @@ inline Status gt(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, 
 */
 template <MemorySpace Space, typename InType, typename OutType, typename Context>
 inline Status ge(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        const Status status = detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a >= b; }, true);
+        if (status != StatusCode::kOk) {
+            return status;
+        }
+        ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+        return StatusCode::kOk;
+    }
     (void)ctx;
     return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a >= b; });
 }
@@ -455,6 +620,20 @@ inline Status ge(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, 
 */
 template <MemorySpace Space, typename InType, typename OutType, typename Context>
 inline Status exp(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input) {
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        const Status status = detail::elementwise_unary_same_shape(
+            out,
+            input,
+            [](const InType& value) {
+                return static_cast<OutType>(std::exp(static_cast<double>(value)));
+            },
+            true);
+        if (status != StatusCode::kOk) {
+            return status;
+        }
+        ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+        return StatusCode::kOk;
+    }
     (void)ctx;
     return detail::elementwise_unary_same_shape(out, input, [](const InType& value) {
         return static_cast<OutType>(std::exp(static_cast<double>(value)));
@@ -485,13 +664,16 @@ inline Status select(
     if (cond.rank() != 1 || lhs.rank() != 1 || rhs.rank() != 1 || out.rank() != 1) {
         return StatusCode::kError;
     }
-    if (!detail::is_non_null(cond.data()) || !detail::is_non_null(lhs.data()) || !detail::is_non_null(rhs.data()) ||
-        !detail::is_non_null(out.data())) {
+    if (cond.data() == nullptr || lhs.data() == nullptr || rhs.data() == nullptr || out.data() == nullptr) {
         return StatusCode::kError;
     }
     const long long size = cond.get_shape(0);
     if (size <= 0 || lhs.get_shape(0) != size || rhs.get_shape(0) != size || out.get_shape(0) != size) {
         return StatusCode::kError;
+    }
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+        return StatusCode::kOk;
     }
     for (long long i = 0; i < size; ++i) {
         const long long cond_index = i * cond.get_stride(0);
@@ -522,12 +704,16 @@ inline Status reduce_sum(Context& ctx, Memory<Space, OutType>& out, const Memory
     if (input.rank() != 2 || out.rank() != 2) {
         return StatusCode::kError;
     }
-    if (!detail::is_non_null(input.data()) || !detail::is_non_null(out.data())) {
+    if (input.data() == nullptr || out.data() == nullptr) {
         return StatusCode::kError;
     }
     if (axis == 1) {
         if (out.get_shape(0) != input.get_shape(0) || out.get_shape(1) != 1) {
             return StatusCode::kError;
+        }
+        if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+            ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+            return StatusCode::kOk;
         }
         for (long long i = 0; i < input.get_shape(0); ++i) {
             OutType acc = static_cast<OutType>(0);
@@ -543,6 +729,10 @@ inline Status reduce_sum(Context& ctx, Memory<Space, OutType>& out, const Memory
     if (axis == 0) {
         if (out.get_shape(0) != 1 || out.get_shape(1) != input.get_shape(1)) {
             return StatusCode::kError;
+        }
+        if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+            ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+            return StatusCode::kOk;
         }
         for (long long j = 0; j < input.get_shape(1); ++j) {
             OutType acc = static_cast<OutType>(0);
@@ -577,12 +767,16 @@ inline Status reduce_min(Context& ctx, Memory<Space, OutType>& out, const Memory
     if (input.rank() != 2 || out.rank() != 2) {
         return StatusCode::kError;
     }
-    if (!detail::is_non_null(input.data()) || !detail::is_non_null(out.data())) {
+    if (input.data() == nullptr || out.data() == nullptr) {
         return StatusCode::kError;
     }
     if (axis == 1) {
         if (out.get_shape(0) != input.get_shape(0) || out.get_shape(1) != 1) {
             return StatusCode::kError;
+        }
+        if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+            ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+            return StatusCode::kOk;
         }
         for (long long i = 0; i < input.get_shape(0); ++i) {
             long long start_index[2] = {i, 0};
@@ -600,6 +794,10 @@ inline Status reduce_min(Context& ctx, Memory<Space, OutType>& out, const Memory
     if (axis == 0) {
         if (out.get_shape(0) != 1 || out.get_shape(1) != input.get_shape(1)) {
             return StatusCode::kError;
+        }
+        if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+            ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+            return StatusCode::kOk;
         }
         for (long long j = 0; j < input.get_shape(1); ++j) {
             long long start_index[2] = {0, j};
@@ -636,12 +834,16 @@ inline Status reduce_max(Context& ctx, Memory<Space, OutType>& out, const Memory
     if (input.rank() != 2 || out.rank() != 2) {
         return StatusCode::kError;
     }
-    if (!detail::is_non_null(input.data()) || !detail::is_non_null(out.data())) {
+    if (input.data() == nullptr || out.data() == nullptr) {
         return StatusCode::kError;
     }
     if (axis == 1) {
         if (out.get_shape(0) != input.get_shape(0) || out.get_shape(1) != 1) {
             return StatusCode::kError;
+        }
+        if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+            ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+            return StatusCode::kOk;
         }
         for (long long i = 0; i < input.get_shape(0); ++i) {
             long long start_index[2] = {i, 0};
@@ -659,6 +861,10 @@ inline Status reduce_max(Context& ctx, Memory<Space, OutType>& out, const Memory
     if (axis == 0) {
         if (out.get_shape(0) != 1 || out.get_shape(1) != input.get_shape(1)) {
             return StatusCode::kError;
+        }
+        if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+            ctx.add_cost(cost::CostKind::VECTOR1, out.element_count());
+            return StatusCode::kOk;
         }
         for (long long j = 0; j < input.get_shape(1); ++j) {
             long long start_index[2] = {0, j};
@@ -702,7 +908,7 @@ inline Status matmul(
     if (lhs.rank() != 2 || rhs.rank() != 2 || out.rank() != 2) {
         return StatusCode::kError;
     }
-    if (!detail::is_non_null(lhs.data()) || !detail::is_non_null(rhs.data()) || !detail::is_non_null(out.data())) {
+    if (lhs.data() == nullptr || rhs.data() == nullptr || out.data() == nullptr) {
         return StatusCode::kError;
     }
     const long long m = lhs.get_shape(0);
@@ -714,6 +920,10 @@ inline Status matmul(
     }
     if (rhs_k != k || out.get_shape(0) != m || out.get_shape(1) != n) {
         return StatusCode::kError;
+    }
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        ctx.add_cost(cost::CostKind::MAC, m * n * k);
+        return StatusCode::kOk;
     }
     long long lhs_indices[2] = {0, 0};
     long long rhs_indices[2] = {0, 0};
@@ -764,7 +974,7 @@ inline Status img2col1d(
     if (input.rank() != 3 || out.rank() != 4) {
         return StatusCode::kError;
     }
-    if (!detail::is_non_null(input.data()) || !detail::is_non_null(out.data())) {
+    if (input.data() == nullptr || out.data() == nullptr) {
         return StatusCode::kError;
     }
     if (input.format() != MemoryFormat::Norm || out.format() != MemoryFormat::Norm) {
@@ -783,6 +993,10 @@ inline Status img2col1d(
     }
     if (out.get_shape(0) != n || out.get_shape(1) != c || out.get_shape(2) != k || out.get_shape(3) != w_out) {
         return StatusCode::kError;
+    }
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        ctx.add_cost(cost::CostKind::DMA3, (out.element_count() * static_cast<S_INT>(sizeof(OutType))));
+        return StatusCode::kOk;
     }
 
     long long input_index[3] = {0, 0, 0};
@@ -843,7 +1057,7 @@ inline Status img2col2d(
     if (input.rank() != 4 || out.rank() != 6) {
         return StatusCode::kError;
     }
-    if (!detail::is_non_null(input.data()) || !detail::is_non_null(out.data())) {
+    if (input.data() == nullptr || out.data() == nullptr) {
         return StatusCode::kError;
     }
     if (input.format() != MemoryFormat::Norm || out.format() != MemoryFormat::Norm) {
@@ -868,6 +1082,10 @@ inline Status img2col2d(
     if (out.get_shape(0) != n || out.get_shape(1) != c || out.get_shape(2) != kh || out.get_shape(3) != kw ||
         out.get_shape(4) != h_out || out.get_shape(5) != w_out) {
         return StatusCode::kError;
+    }
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        ctx.add_cost(cost::CostKind::DMA3, (out.element_count() * static_cast<S_INT>(sizeof(OutType))));
+        return StatusCode::kOk;
     }
 
     long long input_index[4] = {0, 0, 0, 0};

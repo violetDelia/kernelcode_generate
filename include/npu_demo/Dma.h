@@ -34,6 +34,7 @@ API 列表:
 #include <initializer_list>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 
 #include "include/api/Dma.h"
 #include "include/npu_demo/Core.h"
@@ -68,6 +69,48 @@ inline bool dma_checked_add_non_negative(long long lhs, long long rhs, long long
     }
     *out = lhs + rhs;
     return true;
+}
+
+/*
+功能说明:
+- 按 DMA 源 / 目标 memory space 组合，把逻辑元素数换算为 raw bytes 并记录到对应公开 cost kind。
+- 该 helper 合并 space 分类和 raw byte 计算，避免新增多层浅 private callable。
+
+使用示例:
+- npu_demo::detail::record_dma_cost_for_elements<TSM, GM, float>(ctx, 16);
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/npu_demo/test_cost_context.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
+inline void record_dma_cost_for_elements(CostContext& ctx, S_INT elements) {
+    S_INT raw_bytes = 0;
+    if (elements > 0) {
+        raw_bytes = elements * static_cast<S_INT>(sizeof(T));
+    }
+    if (raw_bytes == 0) {
+        return;
+    }
+    constexpr bool source_is_gm = SourceSpace == GM;
+    constexpr bool target_is_gm = TargetSpace == GM;
+    constexpr bool source_is_tsm = SourceSpace == TSM;
+    constexpr bool target_is_tsm = TargetSpace == TSM;
+    constexpr bool source_is_tlm = SourceSpace == TLM1 || SourceSpace == TLM2 || SourceSpace == TLM3;
+    constexpr bool target_is_tlm = TargetSpace == TLM1 || TargetSpace == TLM2 || TargetSpace == TLM3;
+    if constexpr (source_is_gm && (target_is_tsm || target_is_tlm)) {
+        ctx.add_cost(cost::CostKind::DMA1, raw_bytes);
+    }
+    if constexpr ((source_is_tsm || source_is_tlm) && target_is_gm) {
+        ctx.add_cost(cost::CostKind::DMA2, raw_bytes);
+    }
+    if constexpr (source_is_tsm && target_is_tlm) {
+        ctx.add_cost(cost::CostKind::DMA3, raw_bytes);
+    }
+    if constexpr (source_is_tsm && target_is_tsm) {
+        ctx.add_cost(cost::CostKind::DMA4, raw_bytes);
+    }
 }
 
 }  // namespace detail
@@ -369,6 +412,9 @@ inline Status fill(Context& ctx, Memory<Space, T>& target, const T& value) {
         }
         element_count = next_element_count;
     }
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        return StatusCode::kOk;
+    }
 
     long long target_indices[npu_demo::detail::kMaxDmaRank] = {0};
     for (long long linear = 0; linear < element_count; ++linear) {
@@ -465,6 +511,10 @@ inline Status slice(
             return StatusCode::kError;
         }
         element_count = next_element_count;
+    }
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        npu_demo::detail::record_dma_cost_for_elements<TargetSpace, SourceSpace, T>(ctx, element_count);
+        return StatusCode::kOk;
     }
 
     long long logical_indices[npu_demo::detail::kMaxDmaRank] = {0};
@@ -576,6 +626,10 @@ inline Status deslice(
         }
         element_count = next_element_count;
     }
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        npu_demo::detail::record_dma_cost_for_elements<TargetSpace, SourceSpace, T>(ctx, element_count);
+        return StatusCode::kOk;
+    }
 
     long long logical_indices[npu_demo::detail::kMaxDmaRank] = {0};
     long long source_indices[npu_demo::detail::kMaxDmaRank] = {0};
@@ -669,6 +723,10 @@ inline Status store(
         }
         element_count = next_element_count;
     }
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        npu_demo::detail::record_dma_cost_for_elements<TargetSpace, SourceSpace, TargetType>(ctx, element_count);
+        return StatusCode::kOk;
+    }
 
     long long logical_indices[npu_demo::detail::kMaxDmaRank] = {0};
     long long source_indices[npu_demo::detail::kMaxDmaRank] = {0};
@@ -753,6 +811,10 @@ inline Status load(
             return StatusCode::kError;
         }
         element_count = next_element_count;
+    }
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        npu_demo::detail::record_dma_cost_for_elements<TargetSpace, SourceSpace, TargetType>(ctx, element_count);
+        return StatusCode::kOk;
     }
 
     long long logical_indices[npu_demo::detail::kMaxDmaRank] = {0};
@@ -846,6 +908,10 @@ inline Status transpose(
         }
         element_count = next_element_count;
     }
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        npu_demo::detail::record_dma_cost_for_elements<TargetSpace, SourceSpace, TargetType>(ctx, element_count);
+        return StatusCode::kOk;
+    }
 
     long long target_indices[npu_demo::detail::kMaxDmaRank] = {0};
     long long source_indices[npu_demo::detail::kMaxDmaRank] = {0};
@@ -917,6 +983,10 @@ inline Status broadcast(
             return StatusCode::kError;
         }
         element_count = next_element_count;
+    }
+    if constexpr (std::is_same<typename std::decay<Context>::type, CostContext>::value) {
+        ctx.add_cost(cost::CostKind::VECTOR1, element_count);
+        return StatusCode::kOk;
     }
 
     long long target_indices[npu_demo::detail::kMaxDmaRank] = {0};

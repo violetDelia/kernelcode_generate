@@ -21,6 +21,7 @@
 - `class RuntimeMemoryArgInfo(kind: Literal["memory"], dtype: NumericType, shape: tuple[int, ...], stride: tuple[int, ...] | None, is_contiguous: bool)`（`kernel_gen.execute_engine.runtime_args` 文件级 API，不进入包根导出）
 - `RuntimeArgInfo: TypeAlias = RuntimeScalarArgInfo | RuntimeMemoryArgInfo`（`kernel_gen.execute_engine.runtime_args` 文件级 API，不进入包根导出）
 - `describe_runtime_arg(value: object) -> RuntimeArgInfo | None`（`kernel_gen.execute_engine.runtime_args` 文件级 API，不进入包根导出）
+- `invoke_compiled_kernel_capture_output(soname_path: str, entry_point: str, args: tuple[RuntimeInput, ...], allow_absent_memory_args: tuple[AllowAbsentMemoryArg, ...], output_capacity: int = 4096) -> tuple[int, str]`（`kernel_gen.execute_engine.runtime_args` 文件级 API，不进入包根导出）
 
 ## 文档信息
 
@@ -59,7 +60,8 @@
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - `P0` 内置真实执行仅支持 `target in {"cpu","npu_demo"}`；第三方 target 可注册 compile strategy，但 execute-only 路径必须以 `execution_unsupported` 失败。
 - `compiler.py` 只承接公开请求/结果/facade 和旧公开导入路径；内置 target 编译细节在 `builtin_strategy/` package，运行时参数封送和动态库 entry 调用在 `runtime_args.py`。
-- `P0` 不支持 `stream` 与输出回收；当 `ExecuteRequest.stream is not None` 或 `capture_function_output=True` 必须失败。
+- `P0` 不支持 `stream`；当 `ExecuteRequest.stream is not None` 必须失败。
+- `capture_function_output=True` 仅在 `target="npu_demo"` 且编译产物存在 `<entry_point>_capture` companion symbol 的 cost summary 场景成功，文本写入 `ExecuteResult.run_stdout`；其它 target 或普通 npu_demo function 必须以 `function_output_capture_not_supported` 失败。
 - `args` 必须与 `function` 形参顺序严格一致；不做自动重排或参数推断。
 - 运行时参数仅允许 memory / int / float 三类输入；Python / numpy integer scalar 与 Python / numpy floating scalar 进入 ABI 前必须规整为 Python `int` / `float`；`None` 只允许作为源码元数据声明的 allow-absent memory runtime input；其他类型必须失败。
 - 失败短语只允许取 8 个固定值（见 `ExecuteResult`）；禁止同义词扩散与 silent fallback。
@@ -91,7 +93,7 @@
 - 参数：
   - `args`：位置参数序列，按公开调用约定传递给目标函数或工具入口；类型 `tuple[RuntimeInput, ...]`；无默认值，调用方必须显式提供；`RuntimeInput` 的 memory 参数公开形态包含 `torch.Tensor` 与 `numpy.ndarray`，并允许 Python / numpy integer scalar 与 Python / numpy floating scalar；元素 `None` 仅允许在编译产物源码元数据声明对应 index 为 allow-absent memory 时使用；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `entry_point`：`entry_point` 输入值，参与 `ExecuteRequest` 的公开处理流程；类型 `str | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `capture_function_output`：函数对象或函数级 IR；类型 `bool`；默认值 `False`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `capture_function_output`：是否启用 npu_demo cost summary companion 文本捕获；类型 `bool`；默认值 `False`；仅 `target="npu_demo"` 且存在 `<entry_point>_capture` companion 的 generated cost summary sink 场景成功，文本写入 `ExecuteResult.run_stdout`；其它场景以 `function_output_capture_not_supported` 失败。
   - `stream`：输入或输出流对象，用于读取源码、写入文本或传递诊断；类型 `None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
 - 返回值：`ExecuteRequest` 实例。
 - 使用示例：
@@ -125,6 +127,26 @@
   ```
 - 功能说明：描述 runtime arg 基础事实，供 execute ABI 与工具层复用同一分类真源。
 - 注意事项：Python / numpy integer scalar 返回 `RuntimeScalarArgInfo(kind="int", value=int(value))`；Python / numpy floating scalar 返回 `RuntimeScalarArgInfo(kind="float", value=float(value))`；torch / numpy memory 参数返回 `RuntimeMemoryArgInfo(kind="memory", dtype=<NumericType>, shape=<tuple>, stride=<tuple | None>, is_contiguous=<bool>)`；`bool`、numpy bool scalar、`None`、unsupported dtype、非法 shape 或 unsupported object 返回 `None`；本 API 不返回 data pointer、不分配 ctypes buffer、不加载 entry symbol，也不抛 tools 层错误文本或 execute failure phrase。
+
+### `invoke_compiled_kernel_capture_output(soname_path: str, entry_point: str, args: tuple[RuntimeInput, ...], allow_absent_memory_args: tuple[AllowAbsentMemoryArg, ...], output_capacity: int = 4096) -> tuple[int, str]`
+
+- api：`invoke_compiled_kernel_capture_output(soname_path: str, entry_point: str, args: tuple[RuntimeInput, ...], allow_absent_memory_args: tuple[AllowAbsentMemoryArg, ...], output_capacity: int = 4096) -> tuple[int, str]`
+- 参数：
+  - `soname_path`：shared object 路径；类型 `str`；无默认值；必须指向真实文件。
+  - `entry_point`：普通 C ABI entry 名；类型 `str`；无默认值；companion symbol 固定为 `<entry_point>_capture`。
+  - `args`：运行时实参序列；类型 `tuple[RuntimeInput, ...]`；按普通执行入口的 ABI slot 规则封送。
+  - `allow_absent_memory_args`：允许 absent memory 的 metadata；类型 `tuple[AllowAbsentMemoryArg, ...]`；按普通执行入口规则消费。
+  - `output_capacity`：输出 buffer 容量；类型 `int`；默认 `4096`；必须为正整数。
+- 返回值：`tuple[int, str]`，第一项为 companion 返回的原始 status，第二项为 UTF-8 文本；status 非零时文本为空。
+- 使用示例：
+
+  ```python
+  from kernel_gen.execute_engine.runtime_args import invoke_compiled_kernel_capture_output
+
+  status, text = invoke_compiled_kernel_capture_output("libkernel.so", "kg_execute_entry", (), ())
+  ```
+- 功能说明：调用已编译 kernel 的输出捕获 companion，并把 companion 写入的 UTF-8 文本返回给 `CompiledKernel.execute(..., capture_function_output=True)`。
+- 注意事项：该 API 是 `runtime_args.py` 文件级 API，不进入 `kernel_gen.execute_engine` 包根 `__all__`；缺 companion 必须以 `symbol_resolve_failed` 失败；非法容量、输出溢出或非 UTF-8 必须以 `runtime_throw_or_abort` 失败。
 
 ### `class RuntimeScalarArgInfo(kind: Literal["int", "float"], value: int | float)`
 
@@ -189,7 +211,7 @@
   - `args`：位置参数序列，按公开调用约定传递给目标函数或工具入口；类型 `tuple[RuntimeInput, ...] | None`；默认值 `None`；外层 `None` 表示使用 `request.args` 或空参数，元素 `None` 仅用于 allow-absent memory runtime input；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `request`：请求对象，承载工具、执行引擎或服务入口需要处理的输入信息；类型 `ExecuteRequest | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `entry_point`：`entry_point` 输入值，参与 `execute` 的公开处理流程；类型 `str | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `capture_function_output`：函数对象或函数级 IR；类型 `bool`；默认值 `False`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `capture_function_output`：是否通过 `<entry_point>_capture` companion 捕获函数输出文本；类型 `bool`；默认值 `False`；仅 npu_demo cost summary companion 场景支持。
   - `stream`：输入或输出流对象，用于读取源码、写入文本或传递诊断；类型 `None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
 - 返回值：`ExecuteResult`。
 - 使用示例：
@@ -199,7 +221,7 @@
   result = compiled_kernel.execute(args=None, request=None, entry_point=None, capture_function_output=False, stream=None)
   ```
 - 功能说明：执行 `execute`。
-- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态；当某个 runtime arg 是 `None` 时，仅源码 metadata 中列出的 allow-absent memory index 可被封送为 data=null、shape=`[0]`、stride=`[1]`、rank=1 的 memory slot，缺少 metadata 或 nominal dtype/rank 时必须以 `runtime_throw_or_abort` 失败，错误说明包含 `None` 与 `allow-absent memory metadata` 或 `nominal memory metadata`。
+- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态；当某个 runtime arg 是 `None` 时，仅源码 metadata 中列出的 allow-absent memory index 可被封送为 data=null、shape=`[0]`、stride=`[1]`、rank=1 的 memory slot，缺少 metadata 或 nominal dtype/rank 时必须以 `runtime_throw_or_abort` 失败，错误说明包含 `None` 与 `allow-absent memory metadata` 或 `nominal memory metadata`；`capture_function_output=True` 只允许 `target="npu_demo"` 且存在 `<entry_point>_capture` companion，成功时 `ExecuteResult.run_stdout` 为 companion 写回的 UTF-8 文本，缺 companion 或非 npu_demo target 必须以 `function_output_capture_not_supported` 失败。
 
 ### `class ExecuteResult(ok: bool, status_code: int, failure_phrase: str | None, compile_stdout: str = "", compile_stderr: str = "", run_stdout: str = "", run_stderr: str = "", elapsed_ms: float = 0.0)`
 
@@ -255,3 +277,5 @@
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-API-014 | 边界/异常 | 真实 shared object 存在但入口符号缺失时返回 `symbol_resolve_failed`。 | 使用公开 `CompiledKernel(...)` 指向已有 shared object 的缺失入口名。 | 运行 `test_execute_engine_invoke_real_entry_missing_exported_symbol`。 | 动态符号解析失败抛出 `KernelCodeError`，且 `failure_phrase == "symbol_resolve_failed"`。 | `test_execute_engine_invoke_real_entry_missing_exported_symbol` |
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-API-015 | 执行结果 | allow-absent memory `None` runtime input 使用源码 metadata 封送。 | 使用公开 `ExecutionEngine.compile(...)` 生成带 `kg.allow_absent_memory_args` 注释的源码并执行。 | 运行 `test_execute_engine_invoke_allows_none_with_absent_memory_metadata`。 | `None` memory 被封送为 null data 与 rank=1 shape/stride 元数据，真实 entry 可执行。 | `test_execute_engine_invoke_allows_none_with_absent_memory_metadata` |
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-API-016 | 边界/异常 | 缺少 allow-absent metadata 时拒绝 `None` runtime input。 | 使用不含 allow-absent 注释的公开源码执行 `None` memory。 | 运行 `test_execute_engine_invoke_rejects_none_without_absent_memory_metadata`。 | 以 `runtime_throw_or_abort` 失败，错误说明包含 `None` 与 `allow-absent memory metadata`。 | `test_execute_engine_invoke_rejects_none_without_absent_memory_metadata` |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-API-017 | 执行结果 | npu_demo capture companion 返回 stdout 文本。 | 使用公开 `ExecutionEngine.compile(...)` 编译带 `std::string&` summary sink 的 npu_demo source。 | 运行 `test_execute_engine_npu_demo_capture_function_output_returns_run_stdout`。 | `CompiledKernel.execute(..., capture_function_output=True)` 返回 `ok=True` 且 `run_stdout` 为 companion 写回文本。 | `test_execute_engine_npu_demo_capture_function_output_returns_run_stdout` |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-API-018 | 边界/异常 | 普通函数或非 npu_demo target 不支持 capture。 | 构造普通 npu_demo source、CPU source 或缺 companion shared object。 | 运行 `test_execute_engine_npu_demo_capture_missing_companion_is_unsupported` 与相关 target 负例。 | 以 `function_output_capture_not_supported` 失败；companion nonzero/overflow 按 `runtime_throw_or_abort` 失败。 | `test_execute_engine_npu_demo_capture_missing_companion_is_unsupported` |

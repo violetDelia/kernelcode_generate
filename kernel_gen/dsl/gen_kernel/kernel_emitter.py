@@ -56,11 +56,20 @@ from kernel_gen.dialect.dma import DmaCastOp, DmaReshapeOp, DmaViewOp
 from kernel_gen.dialect.memory import MemoryGetDataOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType, copy_memory_type
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolNeOp, SymbolValueType
-from kernel_gen.core.config import restore_config, set_target, snapshot_config
+from kernel_gen.core.config import get_codegen_mode, restore_config, set_target, snapshot_config
 from kernel_gen.target import registry as target_registry
 
 from .emit import emit_c_op, emit_c_value
 from .emit_context import EmitCContext
+
+
+_NPU_DEMO_LAUNCH_SCALAR_TYPES = (
+    SymbolValueType,
+    Float16Type,
+    BFloat16Type,
+    Float32Type,
+    Float64Type,
+)
 
 
 
@@ -625,19 +634,27 @@ class KernelEmitter:
                 return "\n\n".join(emitted_sources)
 
             body_func, wrapper_func = self._classify_npu_demo_launch_module(op_or_func)
+            codegen_mode = get_codegen_mode()
             body_input_types, body_arg_offset = self._validate_npu_demo_launch_body_signature(body_func)
             body_arg_names = self._arg_names(body_func)[body_arg_offset:]
-            body_params: list[str] = ["npu_demo::KernelContext& ctx"]
+            body_context_type = "Context" if codegen_mode == "cost" else "npu_demo::KernelContext"
+            body_params: list[str] = [f"{body_context_type}& ctx"]
             for arg_name, arg_type in zip(body_arg_names, body_input_types, strict=True):
                 if isinstance(arg_type, NnMemoryType):
                     body_params.append(f"{self._type_to_c(arg_type)}& {arg_name}")
                     continue
-                if isinstance(arg_type, SymbolValueType):
+                if isinstance(arg_type, _NPU_DEMO_LAUNCH_SCALAR_TYPES):
                     body_params.append(f"{self._type_to_c(arg_type)} {arg_name}")
                     continue
             if len(body_params) != len(body_input_types) + 1:
                 raise self._error(body_func.sym_name.data, "unsupported npu_demo launch body signature")
-            body_template_prefix = self._template_prefix_from_types(body_input_types)
+            if codegen_mode == "cost":
+                body_template_names = self._template_names_from_types(body_input_types)
+                if "Context" not in body_template_names:
+                    body_template_names.append("Context")
+                body_template_prefix = f"template <{', '.join(f'typename {name}' for name in body_template_names)}>\n"
+            else:
+                body_template_prefix = self._template_prefix_from_types(body_input_types)
             body_signature = f"{body_template_prefix}static void {body_func.sym_name.data}({', '.join(body_params)})"
 
             emitted: list[str] = [self._prepend_template_instance_seed_lines(body_func, f"{body_signature};")]
@@ -686,7 +703,7 @@ class KernelEmitter:
                             self.ctx.bind_name(op.results[0], last_memory_result_name)
                         stmt = self.emit_op(op)
                         if stmt:
-                            stmt = self._normalize_npu_demo_stmt(stmt)
+                            stmt = self._normalize_npu_demo_stmt(stmt, check_status=codegen_mode == "cost")
                             lines.append(stmt)
                         if len(op.results) == 1 and isinstance(op.results[0].type, NnMemoryType):
                             bound_name = self.ctx.lookup_name(op.results[0])
@@ -718,13 +735,17 @@ class KernelEmitter:
                         if isinstance(arg_type, NnMemoryType):
                             params.append(self._normalize_memory_stmt(f"{self._type_to_c(arg_type)}& {arg_name}"))
                             continue
-                        if isinstance(arg_type, SymbolValueType):
+                        if isinstance(arg_type, _NPU_DEMO_LAUNCH_SCALAR_TYPES):
                             params.append(f"{self._signature_type_to_c(arg_type)} {arg_name}")
                             continue
                     if len(params) != len(wrapper_func.function_type.inputs.data):
                         raise self._error(wrapper_func.sym_name.data, "unsupported npu_demo launch wrapper signature")
                     template_prefix = self._template_prefix_from_types(list(wrapper_func.function_type.inputs.data))
-                    signature = f"{template_prefix}void {wrapper_func.sym_name.data}({', '.join(params)})"
+                    wrapper_name = wrapper_func.sym_name.data
+                    if codegen_mode == "cost":
+                        wrapper_name = f"{wrapper_name}_cost"
+                        params.append("std::string& __kg_cost_summary")
+                    signature = f"{template_prefix}void {wrapper_name}({', '.join(params)})"
                     self.ctx.push_indent()
                     extent_lines: list[str] = []
                     for extent in (block_extent, thread_extent, subthread_extent, shared_memory_size_extent):
@@ -732,17 +753,39 @@ class KernelEmitter:
                         extent_lines.append(f"{self.ctx.current_indent}constexpr S_INT {extent_name} = {extent};")
                     call_args = ", ".join(arg_names)
                     body_callee = self._template_call_name(body_func.sym_name.data, wrapper_body_input_types)
-                    context_line = f"{self.ctx.current_indent}npu_demo::KernelContext ctx;"
-                    launch_line = (
-                        f"{self.ctx.current_indent}npu_demo::launch<"
+                    if codegen_mode == "cost":
+                        if body_callee == body_func.sym_name.data:
+                            body_callee = f"{body_callee}<npu_demo::CostContext>"
+                        else:
+                            body_callee = f"{body_callee[:-1]}, npu_demo::CostContext>"
+                    if codegen_mode == "cost":
+                        context_line = f"{self.ctx.current_indent}npu_demo::CostContext ctx;"
+                    else:
+                        context_line = f"{self.ctx.current_indent}npu_demo::KernelContext ctx;"
+                    launch_call = (
+                        f"npu_demo::launch<"
                         f"{block_extent}, {thread_extent}, {subthread_extent}, {shared_memory_size_extent}, "
-                        f"{body_callee}>(ctx, {call_args});"
+                        f"{body_callee}>(ctx, {call_args})"
                         if call_args
-                        else f"{self.ctx.current_indent}npu_demo::launch<"
+                        else f"npu_demo::launch<"
                         f"{block_extent}, {thread_extent}, {subthread_extent}, {shared_memory_size_extent}, "
-                        f"{body_callee}>(ctx);"
+                        f"{body_callee}>(ctx)"
                     )
-                    body = "\n".join([*extent_lines, context_line, launch_line])
+                    if codegen_mode == "cost":
+                        launch_lines = [
+                            f"{self.ctx.current_indent}Status __kg_cost_status = {launch_call};",
+                            f"{self.ctx.current_indent}if (__kg_cost_status != StatusCode::kOk) {{",
+                            f'{self.ctx.current_indent}    throw std::runtime_error("kg_cost_unsupported");',
+                            f"{self.ctx.current_indent}}}",
+                        ]
+                    else:
+                        launch_lines = [f"{self.ctx.current_indent}{launch_call};"]
+                    body_lines = [*extent_lines, context_line, *launch_lines]
+                    if codegen_mode == "cost":
+                        body_lines.append(
+                            f"{self.ctx.current_indent}__kg_cost_summary = npu_demo::format_cost_summary(ctx.summary());"
+                        )
+                    body = "\n".join(body_lines)
                     self.ctx.pop_indent()
                     source = self._prepend_template_instance_seed_lines(wrapper_func, f"{signature} {{\n{body}\n}}")
                     metadata_comment = self._allow_absent_memory_metadata_comment(
@@ -778,16 +821,17 @@ class KernelEmitter:
     def _filtered_launch_ops(self, func_op: func.FuncOp) -> list[Operation]:
         return [op for op in func_op.body.block.ops if not self._is_launch_helper_op(op)]
 
-    def _normalize_npu_demo_stmt(self, stmt: str) -> str:
+    def _normalize_npu_demo_stmt(self, stmt: str, *, check_status: bool = False) -> str:
         """归一化 npu_demo 函数体内的公开 helper 调用文本。
 
 
         功能说明:
         - 将未限定的线程 / 动态内存 helper 补成 `npu_demo::` 命名空间调用。
         - 不再把成员式 `.view<...>({...})` brace-list 形态改写回 `Vector{...}`。
+        - `check_status=True` 时，将返回 `Status` 且首参为 `ctx` 的 npu_demo helper 调用包成 fail-fast 检查。
 
         使用示例:
-        - stmt = self._normalize_npu_demo_stmt(stmt)
+        - stmt = self._normalize_npu_demo_stmt(stmt, check_status=True)
 
         关联文件:
         - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -798,6 +842,52 @@ class KernelEmitter:
         stmt = re.sub(r"(?<![\\w:])thread_id\\(\\)", "npu_demo::thread_id()", stmt)
         stmt = re.sub(r"(?<![\\w:])thread_num\\(\\)", "npu_demo::thread_num()", stmt)
         stmt = re.sub(r"(?<![\\w:])get_dynamic_memory<", "npu_demo::get_dynamic_memory<", stmt)
+        if check_status:
+            status_helpers = (
+                "fill",
+                "slice",
+                "deslice",
+                "store",
+                "load",
+                "transpose",
+                "broadcast",
+                "add",
+                "sub",
+                "mul",
+                "truediv",
+                "min",
+                "max",
+                "eq",
+                "ne",
+                "lt",
+                "le",
+                "gt",
+                "ge",
+                "exp",
+                "select",
+                "reduce_sum",
+                "reduce_min",
+                "reduce_max",
+                "matmul",
+                "img2col1d",
+                "img2col2d",
+            )
+            helper_pattern = "|".join(status_helpers)
+            stripped = stmt.strip()
+            match = re.match(
+                rf"^(?P<call>(?:npu_demo::)?(?:{helper_pattern})(?:<[^;]+>)?\s*\(\s*ctx\b.*\))\s*;$",
+                stripped,
+            )
+            if match is not None:
+                indent = stmt[: len(stmt) - len(stmt.lstrip())]
+                call = match.group("call")
+                return "\n".join(
+                    (
+                        f"{indent}if ({call} != StatusCode::kOk) {{",
+                        f'{indent}    throw std::runtime_error("kg_cost_unsupported");',
+                        f"{indent}}}",
+                    )
+                )
         return stmt
 
     def _get_npu_demo_plain_func(self, module_op: ModuleOp) -> func.FuncOp | None:
@@ -1073,8 +1163,8 @@ class KernelEmitter:
 
         功能说明:
         - body 兼容可选 `ctx` 参数、至少三个连续 memory 参数、零返回形式。
-        - memory 参数后允许继续携带零个或多个 `!symbol.int` tile / shape 参数。
-        - memory 参数必须 element type 一致，尾部公开标量参数必须保持 `SymbolValueType`。
+        - memory 参数后允许继续携带零个或多个 `!symbol.int` tile / shape 参数或普通整数 / 浮点标量参数。
+        - memory 参数必须 element type 一致，尾部公开标量参数必须保持为已支持的 scalar type。
 
         使用示例:
         - body_input_types, arg_offset = self._validate_npu_demo_launch_body_signature(body_func)
@@ -1088,11 +1178,21 @@ class KernelEmitter:
         func_name = func_op.sym_name.data
         input_types = list(func_op.function_type.inputs.data)
         result_types = list(func_op.function_type.outputs.data)
-        arg_names = self._arg_names(func_op)
+        arg_names: list[str] = []
+        attrs = func_op.arg_attrs
+        if isinstance(attrs, ArrayAttr):
+            for index, attr in enumerate(attrs.data):
+                if isinstance(attr, DictionaryAttr):
+                    name_attr = attr.data.get("name")
+                    if isinstance(name_attr, StringAttr) and name_attr.data:
+                        arg_names.append(name_attr.data)
+                        continue
+                arg_names.append(f"arg{index}")
+        subject = f"func {func_name}"
         if result_types:
-            raise self._error(func_name, "unsupported npu_demo launch body signature")
+            raise self.ctx.emit_error(subject, "unsupported npu_demo launch body signature")
         if len(input_types) < 3:
-            raise self._error(func_name, "unsupported npu_demo launch body signature")
+            raise self.ctx.emit_error(subject, "unsupported npu_demo launch body signature")
 
         body_arg_offset = 0
         if len(input_types) >= 4 and arg_names and arg_names[0] == "ctx":
@@ -1107,14 +1207,14 @@ class KernelEmitter:
                 continue
             symbol_start = index
             break
-        symbol_input_types = body_input_types[symbol_start:]
+        scalar_input_types = body_input_types[symbol_start:]
         if len(memory_input_types) < 3:
-            raise self._error(func_name, "unsupported npu_demo launch body signature")
-        if any(not isinstance(arg_type, SymbolValueType) for arg_type in symbol_input_types):
-            raise self._error(func_name, "unsupported npu_demo launch body signature")
+            raise self.ctx.emit_error(subject, "unsupported npu_demo launch body signature")
+        if any(not isinstance(arg_type, _NPU_DEMO_LAUNCH_SCALAR_TYPES) for arg_type in scalar_input_types):
+            raise self.ctx.emit_error(subject, "unsupported npu_demo launch body signature")
         first_memory_type = memory_input_types[0]
         if any(arg_type.element_type != first_memory_type.element_type for arg_type in memory_input_types[1:]):
-            raise self._error(func_name, "npu_demo launch body requires matching element types")
+            raise self.ctx.emit_error(subject, "npu_demo launch body requires matching element types")
         return list(body_input_types), body_arg_offset
 
     def _validate_npu_demo_launch_wrapper_signature(

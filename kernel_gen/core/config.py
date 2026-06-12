@@ -2,11 +2,12 @@
 
 
 功能说明:
-- 定义项目级公共行为配置底座，统一承载显式公开的 target、dump_dir、trance 配置与稳定读写接口。
+- 定义项目级公共行为配置底座，统一承载显式公开的 target、dump_dir、trance、codegen_mode 配置与稳定读写接口。
 - 当前公开配置项及其设置语义如下：
   - `target`：设置当前调用链预期使用的目标名称，例如 `cpu`、`npu_demo`；传 `None` 表示清空显式目标，让后续调用方自行决定默认目标。
   - `dump_dir`：设置 DSL/Pass 诊断产物根目录；传 `None` 表示关闭诊断落盘。
   - `trance_enabled`：设置 runtime trance kernel log 开关；默认关闭，开启后编译链会注入 `TRANCE` 宏。
+  - `codegen_mode`：设置源码生成模式；`"norm"` 生成真实运行源码，`"cost"` 生成 npu_demo 成本汇总源码。
 - 外部值拒绝与 Python callee 调用均为固定默认行为，不再作为公开配置项。
 
 配置项说明:
@@ -31,6 +32,13 @@
   - 示例：
     - `set_trance_enabled(True)`
     - `set_trance_enabled(False)`
+- `codegen_mode`
+  - 设置说明：用于在同一 lowering 结果上选择普通运行源码或成本汇总源码。
+  - 典型值：`"norm"`、`"cost"`。
+  - 清空方式：`set_codegen_mode("norm")` 或 `reset_config()`。
+  - 示例：
+    - `set_codegen_mode("cost")`
+    - `set_codegen_mode("norm")`
 
 API 列表:
 - `set_target(value: str | None) -> None`
@@ -39,19 +47,23 @@ API 列表:
 - `get_dump_dir() -> Path | None`
 - `set_trance_enabled(value: bool) -> None`
 - `get_trance_enabled() -> bool`
+- `set_codegen_mode(value: Literal["norm", "cost"]) -> None`
+- `get_codegen_mode() -> Literal["norm", "cost"]`
 - `reset_config() -> None`
-- `CoreConfigSnapshot(target: str | None, dump_dir: Path | None, trance_enabled: bool)`
+- `CoreConfigSnapshot(target: str | None, dump_dir: Path | None, trance_enabled: bool, codegen_mode: Literal["norm", "cost"] = "norm")`
 - `snapshot_config() -> CoreConfigSnapshot`
 - `restore_config(snapshot: CoreConfigSnapshot) -> None`
 
 使用示例:
-- from kernel_gen.core.config import get_dump_dir, get_target, get_trance_enabled, set_dump_dir, set_target, set_trance_enabled
+- from kernel_gen.core.config import get_codegen_mode, get_dump_dir, get_target, get_trance_enabled, set_codegen_mode, set_dump_dir, set_target, set_trance_enabled
 - set_target("npu_demo")
 - assert get_target() == "npu_demo"
 - set_dump_dir("dump")
 - assert get_dump_dir() == Path("dump")
 - set_trance_enabled(True)
 - assert get_trance_enabled() is True
+- set_codegen_mode("cost")
+- assert get_codegen_mode() == "cost"
 
 关联文件:
 - spec: [spec/core/config.md](../../spec/core/config.md)
@@ -63,6 +75,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 __all__ = [
     "CoreConfigSnapshot",
@@ -72,6 +85,8 @@ __all__ = [
     "get_dump_dir",
     "set_trance_enabled",
     "get_trance_enabled",
+    "set_codegen_mode",
+    "get_codegen_mode",
     "reset_config",
     "snapshot_config",
     "restore_config",
@@ -80,6 +95,7 @@ __all__ = [
 _target: str | None = None
 _dump_dir: Path | None = None
 _trance_enabled: bool = False
+_codegen_mode: Literal["norm", "cost"] = "norm"
 
 
 @dataclass(frozen=True)
@@ -88,7 +104,7 @@ class CoreConfigSnapshot:
 
 
     功能说明:
-    - 保存 `kernel_gen.core.config` 中的公开 target、dump_dir 与 trance_enabled 配置。
+    - 保存 `kernel_gen.core.config` 中的公开 target、dump_dir、trance_enabled 与 codegen_mode 配置。
     - 不承载运行时临时状态、解析环境、EmitC 名字表或任意扩展 key。
 
     使用示例:
@@ -99,6 +115,7 @@ class CoreConfigSnapshot:
     target: str | None
     dump_dir: Path | None
     trance_enabled: bool
+    codegen_mode: Literal["norm", "cost"] = "norm"
 
 
 def set_target(value: str | None) -> None:
@@ -223,12 +240,50 @@ def get_trance_enabled() -> bool:
     return _trance_enabled
 
 
+def set_codegen_mode(value: Literal["norm", "cost"]) -> None:
+    """设置源码生成模式。
+
+
+    功能说明:
+    - 更新项目公共配置中的 `codegen_mode`。
+    - 仅接受 `"norm"` 或 `"cost"`，避免隐式布尔、旧 cost kind 或任意字符串进入源码生成分支。
+    - `"norm"` 表示普通真实运行源码，`"cost"` 表示 npu_demo 成本汇总源码。
+
+    使用示例:
+    - set_codegen_mode("cost")
+    - assert get_codegen_mode() == "cost"
+    - set_codegen_mode("norm")
+    """
+
+    if value not in ("norm", "cost"):
+        raise TypeError("codegen_mode must be 'norm' or 'cost'")
+    global _codegen_mode
+    _codegen_mode = value
+
+
+def get_codegen_mode() -> Literal["norm", "cost"]:
+    """读取源码生成模式。
+
+
+    功能说明:
+    - 返回当前公共配置中的 `codegen_mode`。
+    - 默认返回 `"norm"`，表示生成普通真实运行源码。
+
+    使用示例:
+    - assert get_codegen_mode() == "norm"
+    - set_codegen_mode("cost")
+    - assert get_codegen_mode() == "cost"
+    """
+
+    return _codegen_mode
+
+
 def reset_config() -> None:
     """恢复公开配置默认值。
 
 
     功能说明:
-    - 将 `target` 与 `dump_dir` 恢复为 `None`，将 `trance_enabled` 恢复为 `False`。
+    - 将 `target` 与 `dump_dir` 恢复为 `None`，将 `trance_enabled` 恢复为 `False`，将 `codegen_mode` 恢复为 `"norm"`。
     - 只影响公开行为配置，不处理任何单次生成状态。
 
     使用示例:
@@ -239,12 +294,14 @@ def reset_config() -> None:
     - assert get_target() is None
     - assert get_dump_dir() is None
     - assert get_trance_enabled() is False
+    - assert get_codegen_mode() == "norm"
     """
 
-    global _target, _dump_dir, _trance_enabled
+    global _target, _dump_dir, _trance_enabled, _codegen_mode
     _target = None
     _dump_dir = None
     _trance_enabled = False
+    _codegen_mode = "norm"
 
 
 def snapshot_config() -> CoreConfigSnapshot:
@@ -265,6 +322,7 @@ def snapshot_config() -> CoreConfigSnapshot:
         target=_target,
         dump_dir=_dump_dir,
         trance_enabled=_trance_enabled,
+        codegen_mode=_codegen_mode,
     )
 
 
@@ -284,7 +342,8 @@ def restore_config(snapshot: CoreConfigSnapshot) -> None:
 
     if not isinstance(snapshot, CoreConfigSnapshot):
         raise TypeError("snapshot must be CoreConfigSnapshot")
-    global _target, _dump_dir, _trance_enabled
+    global _target, _dump_dir, _trance_enabled, _codegen_mode
     _target = snapshot.target
     _dump_dir = snapshot.dump_dir
     _trance_enabled = snapshot.trance_enabled
+    _codegen_mode = snapshot.codegen_mode

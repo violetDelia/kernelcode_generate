@@ -76,6 +76,7 @@ _INT_TYPE_PATTERN = re.compile(
 )
 _FLOAT_TYPE_PATTERN = re.compile(r"^(?:const\s+)?(?P<type>float|double)(?:\s*&)?\s+\w+$")
 _KERNEL_CONTEXT_TYPE_PATTERN = re.compile(r"^(?:npu_demo::)?KernelContext\s*&\s+\w+$")
+_COST_SUMMARY_TYPE_PATTERN = re.compile(r"^(?:std::)?string\s*&\s+\w+$")
 _MEMORY_TYPE_PATTERN = re.compile(
     r"^(?:const\s+)?Memory<\s*(?P<space>[^,\s>]+)\s*,\s*(?P<dtype>[^>\s]+)\s*>\s*&\s+\w+$"
 )
@@ -634,7 +635,7 @@ class _BuiltinStrategySupport:
         """把单个形参文本解析为最小参数规格。
 
         功能说明:
-        - 支持 `Memory<Space, T>&`、整型标量、浮点标量和 `KernelContext&`。
+        - 支持 `Memory<Space, T>&`、整型标量、浮点标量、`KernelContext&` 和 `std::string&` 输出捕获参数。
         - 不支持的参数形态返回 `None`，由上层回退占位 shim。
 
         使用示例:
@@ -659,6 +660,8 @@ class _BuiltinStrategySupport:
             return _ParamSpec(kind="float", ctype=float_match.group("type"))
         if _KERNEL_CONTEXT_TYPE_PATTERN.match(normalized):
             return _ParamSpec(kind="kernel_context", ctype="npu_demo::KernelContext")
+        if _COST_SUMMARY_TYPE_PATTERN.match(normalized):
+            return _ParamSpec(kind="cost_summary", ctype="std::string")
         return None
 
 
@@ -799,6 +802,10 @@ class _BuiltinStrategySupport:
                 lines.append("  npu_demo::KernelContext ctx;")
                 call_args.append("ctx")
                 continue
+            if spec.kind == "cost_summary":
+                lines.append("  std::string __kg_cost_summary;")
+                call_args.append("__kg_cost_summary")
+                continue
             runtime_idx = runtime_arg_index
             runtime_arg_index += 1
             if spec.kind == "memory":
@@ -895,7 +902,8 @@ class _BuiltinStrategySupport:
         - shim = _BuiltinStrategySupport.build_runtime_entry_shim_source(function="add_kernel", entry_point="kg_execute_entry", params=())
         """
 
-        runtime_params = [spec for spec in params if spec.kind != "kernel_context"]
+        runtime_params = [spec for spec in params if spec.kind not in {"kernel_context", "cost_summary"}]
+        has_cost_summary_param = any(spec.kind == "cost_summary" for spec in params)
         allow_absent_memory_arg_specs = _BuiltinStrategySupport.extract_allow_absent_memory_arg_specs(source)
         lines: list[str] = [
             f"// runtime entry shim for {function} as {entry_point}",
@@ -959,7 +967,55 @@ class _BuiltinStrategySupport:
                 lines.append("    return 0;")
                 lines.append("  }")
             lines.extend(["  return -1;", "}", ""])
-            return _BuiltinStrategySupport.join_text_sections("\n".join(lines))
+            regular_source = _BuiltinStrategySupport.join_text_sections("\n".join(lines))
+            if not has_cost_summary_param:
+                return regular_source
+            capture_lines: list[str] = [
+                f'extern "C" int {entry_point}_capture('
+                "const _ArgSlot* ordered_args, unsigned long long arg_count, "
+                "char* output, unsigned long long output_capacity, unsigned long long* output_size) {",
+                "  if (ordered_args == nullptr || output == nullptr || output_size == nullptr || output_capacity == 0ULL) {",
+                "    return -1;",
+                "  }",
+                f"  if (arg_count != {len(runtime_params)}ULL) {{",
+                "    return -1;",
+                "  }",
+                "  *output_size = 0ULL;",
+            ]
+            for template_types in _BuiltinStrategySupport.runtime_template_combinations_from_source(template_names, source):
+                conditions = _BuiltinStrategySupport.template_condition_lines(params, template_types)
+                if not conditions:
+                    continue
+                capture_lines.append(f"  if ({' && '.join(conditions)}) {{")
+                branch_lines, call_args, _trance_arg_lines = _BuiltinStrategySupport.runtime_param_declaration_lines(
+                    params,
+                    template_types,
+                    allow_absent_memory_arg_specs,
+                )
+                capture_lines.extend(f"  {line}" if line else line for line in branch_lines)
+                template_args = ", ".join(template_types[name][1] for name in template_names)
+                capture_lines.extend(
+                    [
+                        "    try {",
+                        f"      {function}<{template_args}>({', '.join(call_args)});",
+                        "    } catch (...) {",
+                        "      return -1;",
+                        "    }",
+                        "    const unsigned long long __kg_text_size = static_cast<unsigned long long>(__kg_cost_summary.size());",
+                        "    if (__kg_text_size >= output_capacity) {",
+                        "      return -1;",
+                        "    }",
+                        "    for (unsigned long long __kg_i = 0; __kg_i < __kg_text_size; ++__kg_i) {",
+                        "      output[__kg_i] = __kg_cost_summary[__kg_i];",
+                        "    }",
+                        "    output[__kg_text_size] = '\\0';",
+                        "    *output_size = __kg_text_size;",
+                        "    return 0;",
+                        "  }",
+                    ]
+                )
+            capture_lines.extend(["  return -1;", "}", ""])
+            return _BuiltinStrategySupport.join_text_sections(regular_source, "\n".join(capture_lines))
 
         decl_lines, call_args, trance_arg_lines = _BuiltinStrategySupport.runtime_param_declaration_lines(
             params,
@@ -984,7 +1040,44 @@ class _BuiltinStrategySupport:
                 "",
             ]
         )
-        return _BuiltinStrategySupport.join_text_sections("\n".join(lines))
+        regular_source = _BuiltinStrategySupport.join_text_sections("\n".join(lines))
+        if not has_cost_summary_param:
+            return regular_source
+        capture_lines = [
+            f'extern "C" int {entry_point}_capture('
+            "const _ArgSlot* ordered_args, unsigned long long arg_count, "
+            "char* output, unsigned long long output_capacity, unsigned long long* output_size) {",
+            "  if (ordered_args == nullptr || output == nullptr || output_size == nullptr || output_capacity == 0ULL) {",
+            "    return -1;",
+            "  }",
+            f"  if (arg_count != {len(runtime_params)}ULL) {{",
+            "    return -1;",
+            "  }",
+            "  *output_size = 0ULL;",
+        ]
+        capture_lines.extend(decl_lines)
+        capture_lines.extend(
+            [
+                "  try {",
+                f"    {function}({', '.join(call_args)});",
+                "  } catch (...) {",
+                "    return -1;",
+                "  }",
+                "  const unsigned long long __kg_text_size = static_cast<unsigned long long>(__kg_cost_summary.size());",
+                "  if (__kg_text_size >= output_capacity) {",
+                "    return -1;",
+                "  }",
+                "  for (unsigned long long __kg_i = 0; __kg_i < __kg_text_size; ++__kg_i) {",
+                "    output[__kg_i] = __kg_cost_summary[__kg_i];",
+                "  }",
+                "  output[__kg_text_size] = '\\0';",
+                "  *output_size = __kg_text_size;",
+                "  return 0;",
+                "}",
+                "",
+            ]
+        )
+        return _BuiltinStrategySupport.join_text_sections(regular_source, "\n".join(capture_lines))
 
 
     @staticmethod

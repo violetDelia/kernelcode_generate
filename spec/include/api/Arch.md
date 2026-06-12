@@ -59,6 +59,7 @@
 - 后端公开 barrier helper 的 `visibility` 元素类型必须是 `BarrierVisibility`；不得改成 `MemorySpace` 列表、字符串列表、自由文本或后端私有空间枚举。
 - `BarrierScope` 公开成员允许后端实现做能力裁剪；若某后端暂不支持某个 scope，必须显式失败，不得静默降级为其他 scope。
 - include/api 层不定义具体 `KernelContext` 的存储布局、生命周期、默认构造、线程绑定或注入方式；该类型只作为可传入 `launch(ctx, args...)` 和 context-first helper 的上下文占位。
+- include/api 层不规定特定 `Context` 类型的调度策略；`npu_demo::CostContext` 的 first-block cost 执行语义由 [`spec/include/npu_demo/npu_demo.md`](../../../spec/include/npu_demo/npu_demo.md) 承接。
 - `KernelContext` 不公开 runtime member API；运行时索引、同步与动态内存访问必须通过 Arch free helper 或后端命名空间 free helper 承接。
 - `block_id()` / `thread_id()` / `thread_num()` / `get_dynamic_memory<Space>()` 是公开代码生成口径；后端必须保证它们可在已绑定 launch 上下文时直接调用。
 - `TRANCE` 开启且 `KG_TRANCE_DIR_PATH` 为空时，后端 launch 实现必须输出 `in func: npu_demo::launch template=<block=..., thread=..., subthread=..., shared_memory_size=...>`、`args =`、`arg0 = KernelContext`，以及按 forwarded args 原始顺序输出的 `arg1`、`arg2`、... 参数摘要到 stdout 或当前 sink；关闭时不得产生诊断输出。

@@ -336,6 +336,7 @@ def test_execute_engine_internal_module_file_api_exact_sets() -> None:
         "AllowAbsentMemoryArg",
         "RuntimeInput",
         "invoke_compiled_kernel",
+        "invoke_compiled_kernel_capture_output",
     ]
     for name in (*builtin_module.__all__, *runtime_module.__all__):
         assert name not in execute_engine.__all__

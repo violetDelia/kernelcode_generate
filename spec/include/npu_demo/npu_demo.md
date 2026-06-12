@@ -10,10 +10,17 @@
 - `include/npu_demo/npu_demo.h` 作为单入口头文件，需透传 `include/api/Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `Trance.h` / `cost/*.h` 的统一声明，并汇聚 `include/npu_demo/Core.h` / `Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `Trance.h` / `cost/*.h` 的后端实现。
 - `npu_demo::add/sub/mul/truediv/min/max/...`、`npu_demo::launch(...)`、`npu_demo::block_id()`、`npu_demo::build_contiguous_stride(...)`、`npu_demo::alloc(...)`、`npu_demo::fill(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)`、`npu_demo::transpose(...)`、`npu_demo::store(...)`、`npu_demo::load(...)`、`npu_demo::broadcast(...)`、`npu_demo::DmaRing`、`npu_demo::make_ring(...)` 以及 `npu_demo::cost::add/min/max/copy/slice/deslice/...` 是 public function/type 的唯一成功消费方向；DMA / Kernel helper 均为 context-first 形态，`detail` 只服务实现内部。
 - `TRANCE` block 目录模式下，`npu_demo::launch(...)` 每个 block worker 必须写入独立 `block_XXXX.log`，文件实现由 trace 模块公开入口承接。
+- `CostSummary`、`CostContext` 与 `format_cost_summary(...)` 是 npu_demo cost mode 的公开 summary API；generated cost host 必须通过这些 API 汇总并序列化成本。
 
 ## API 列表
 
 - `namespace npu_demo`
+- `class npu_demo::CostSummary`
+- `npu_demo::CostSummary.value(npu_demo::cost::CostKind kind) const -> S_INT`
+- `class npu_demo::CostContext`
+- `npu_demo::CostContext.add_cost(npu_demo::cost::CostKind kind, S_INT value) -> void`
+- `npu_demo::CostContext.summary() const -> const npu_demo::CostSummary&`
+- `npu_demo::format_cost_summary(const npu_demo::CostSummary& summary) -> std::string`
 - `template <long long block, long long thread, long long subthread, long long shared_memory_size, auto name, typename Context, typename... Args> Status npu_demo::launch(Context& ctx, Args&&... args)`
 - `class npu_demo::KernelContext`
 - `npu_demo::KernelContext::KernelContext()`
@@ -49,8 +56,8 @@
 - 创建者：`未记录`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/include/npu_demo/npu_demo.md`](../../../spec/include/npu_demo/npu_demo.md)
-- `功能实现`：[`include/npu_demo/npu_demo.h`](../../../include/npu_demo/npu_demo.h)、[`include/npu_demo/Memory.h`](../../../include/npu_demo/Memory.h)、[`include/npu_demo/Dma.h`](../../../include/npu_demo/Dma.h)、[`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h)、[`include/npu_demo/Trance.h`](../../../include/npu_demo/Trance.h)、[`include/npu_demo/Kernel.h`](../../../include/npu_demo/Kernel.h)、[`include/npu_demo/cost/Core.h`](../../../include/npu_demo/cost/Core.h)、[`include/npu_demo/cost/Dma.h`](../../../include/npu_demo/cost/Dma.h)、[`include/npu_demo/cost/Kernel.h`](../../../include/npu_demo/cost/Kernel.h)
-- `test`：[`test/include/api/test_memory.py`](../../../test/include/api/test_memory.py)、[`test/include/api/test_dma.py`](../../../test/include/api/test_dma.py)、[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/include/npu_demo/test_public_namespace.py`](../../../test/include/npu_demo/test_public_namespace.py)、[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/api/test_kernel.py`](../../../test/include/api/test_kernel.py)、`test/include/api/test_cost.py`、`test/include/npu_demo/test_cost.py`、[`test/dsl/gen_kernel/test_gen_kernel.py`](../../../test/dsl/gen_kernel/test_gen_kernel.py)、[`test/target/test_registry.py`](../../../test/target/test_registry.py)
+- `功能实现`：[`include/npu_demo/npu_demo.h`](../../../include/npu_demo/npu_demo.h)、[`include/npu_demo/Core.h`](../../../include/npu_demo/Core.h)、[`include/npu_demo/Memory.h`](../../../include/npu_demo/Memory.h)、[`include/npu_demo/Dma.h`](../../../include/npu_demo/Dma.h)、[`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h)、[`include/npu_demo/Trance.h`](../../../include/npu_demo/Trance.h)、[`include/npu_demo/Kernel.h`](../../../include/npu_demo/Kernel.h)、[`include/npu_demo/cost/Core.h`](../../../include/npu_demo/cost/Core.h)、[`include/npu_demo/cost/Dma.h`](../../../include/npu_demo/cost/Dma.h)、[`include/npu_demo/cost/Kernel.h`](../../../include/npu_demo/cost/Kernel.h)
+- `test`：[`test/include/api/test_memory.py`](../../../test/include/api/test_memory.py)、[`test/include/api/test_dma.py`](../../../test/include/api/test_dma.py)、[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/include/npu_demo/test_public_namespace.py`](../../../test/include/npu_demo/test_public_namespace.py)、[`test/include/npu_demo/test_cost_context.py`](../../../test/include/npu_demo/test_cost_context.py)、[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/api/test_kernel.py`](../../../test/include/api/test_kernel.py)、`test/include/api/test_cost.py`、`test/include/npu_demo/test_cost.py`、[`test/dsl/gen_kernel/test_gen_kernel.py`](../../../test/dsl/gen_kernel/test_gen_kernel.py)、[`test/target/test_registry.py`](../../../test/target/test_registry.py)
 
 ## 依赖
 
@@ -90,6 +97,7 @@
 - public function 必须位于 `namespace npu_demo`；基础类型与 enum 可以继续来自 `include/api` 全局公开类型。
 - `npu_demo::detail` 只用于实现内部复用；公开测试、spec 示例、生成源码不得直接消费 `npu_demo::detail` 或 `*_detail` 名称。
 - `include/npu_demo/npu_demo.h` 是唯一聚合入口，不新增第二套 target include。
+- `include/npu_demo/npu_demo.h` 必须聚合 `include/npu_demo/Core.h`，使调用方可通过单入口头文件使用 `npu_demo::CostSummary`、`npu_demo::CostContext` 与 `npu_demo::format_cost_summary(...)`。
 - `Kernel` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md) 冻结；`npu_demo` 只负责承接 context-first 实现，不得重新发明旧 `Nn` 公共别名；`min/max` 与其它 same-shape binary helper 一样在 `ctx` 后使用 out-first 参数顺序。
 - `cost` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/cost/Core.md`](../../../spec/include/api/cost/Core.md)、[`spec/include/api/cost/Dma.md`](../../../spec/include/api/cost/Dma.md)、[`spec/include/api/cost/Kernel.md`](../../../spec/include/api/cost/Kernel.md) 冻结；`npu_demo` 只负责承接默认实现，不得额外引入 `kind2/kind3` 或 target 私有成本命名；`cost::min/max` 必须与 `cost::add/sub/mul/truediv` 保持同一模板与参数形态。
 - `gen_kernel(target="npu_demo")` 生成的完整源码若同时包含普通 kernel function 与 `_cost_DMA1_*` / `_cost_DMA2_*` / `_cost_DMA3_*` / `_cost_DMA4_*` / `_cost_MAC_*` / `_cost_VECTOR1_*` / `_cost_VECTOR2_*` sibling cost function，仍只允许依赖本头文件；不得额外要求包含 `include/npu_demo/cost/*.h`、`include/api/cost/*.h` 或额外 `using namespace npu_demo::cost;`。
@@ -118,6 +126,91 @@
 - 功能说明：定义 `include/npu_demo/npu_demo.h` 聚合后的公开函数命名空间。
 - 注意事项：public function 必须位于 `namespace npu_demo`；`npu_demo::cost` 是该命名空间下的公开子命名空间；`npu_demo::detail` 只允许实现内部使用，公开测试、spec 示例与生成源码不得直接消费 `npu_demo::detail` 或 `*_detail` 名称；基础类型继续沿用 `include/api` 层公开类型，不因函数迁移而整体改名。
 
+### `class npu_demo::CostSummary`
+
+- api：`class npu_demo::CostSummary`
+- 参数：无。
+- 返回值：`CostSummary` 实例。
+- 使用示例：
+
+  ```cpp
+  npu_demo::CostSummary summary;
+  S_INT value = summary.value(npu_demo::cost::CostKind::VECTOR1);
+  ```
+- 功能说明：保存 finalized cost summary，字段覆盖 `DMA1/DMA2/DMA3/DMA4/MAC/VECTOR1/VECTOR2`。
+- 注意事项：默认构造后所有 kind 值为 `0`；`value(kind)` 只接受公开 `CostKind` 成员，非法 kind 必须抛出 `std::invalid_argument("unsupported cost kind")`。
+
+### `npu_demo::CostSummary.value(npu_demo::cost::CostKind kind) const -> S_INT`
+
+- api：`npu_demo::CostSummary.value(npu_demo::cost::CostKind kind) const -> S_INT`
+- 参数：
+  - `kind`：成本 kind；类型 `npu_demo::cost::CostKind`；无默认值。
+- 返回值：`S_INT`。
+- 使用示例：
+
+  ```cpp
+  S_INT dma1 = summary.value(npu_demo::cost::CostKind::DMA1);
+  ```
+- 功能说明：读取指定 kind 的 finalized cost 值。
+- 注意事项：DMA kind 的值已经是 `ceil(raw_bytes / 64)` 后的结果。
+
+### `class npu_demo::CostContext`
+
+- api：`class npu_demo::CostContext`
+- 参数：无。
+- 返回值：`CostContext` 实例。
+- 使用示例：
+
+  ```cpp
+  npu_demo::CostContext ctx;
+  ctx.add_cost(npu_demo::cost::CostKind::VECTOR1, 128);
+  const npu_demo::CostSummary& summary = ctx.summary();
+  ```
+- 功能说明：作为 cost mode 的 context-first helper 上下文，累计 DMA raw bytes、MAC 与 VECTOR 成本。
+- 注意事项：`CostContext` 不写业务 output；helper 遇到 unsupported layout 或非法 layout 必须返回非 `StatusCode::kOk`，generated cost host 必须将该 status 映射为 `std::runtime_error("kg_cost_unsupported")`。
+
+### `npu_demo::CostContext.add_cost(npu_demo::cost::CostKind kind, S_INT value) -> void`
+
+- api：`npu_demo::CostContext.add_cost(npu_demo::cost::CostKind kind, S_INT value) -> void`
+- 参数：
+  - `kind`：成本 kind；类型 `npu_demo::cost::CostKind`；无默认值。
+  - `value`：待累计值；类型 `S_INT`；无默认值；必须大于等于 `0`。
+- 返回值：`void`。
+- 使用示例：
+
+  ```cpp
+  ctx.add_cost(npu_demo::cost::CostKind::MAC, 64);
+  ```
+- 功能说明：向指定 kind 累计成本；DMA kind 的输入值按 raw bytes 解释。
+- 注意事项：负值必须抛出 `std::invalid_argument("cost value must be non-negative")`；非法 kind 必须抛出 `std::invalid_argument("unsupported cost kind")`。
+
+### `npu_demo::CostContext.summary() const -> const npu_demo::CostSummary&`
+
+- api：`npu_demo::CostContext.summary() const -> const npu_demo::CostSummary&`
+- 参数：无。
+- 返回值：`const npu_demo::CostSummary&`。
+- 使用示例：
+
+  ```cpp
+  const npu_demo::CostSummary& summary = ctx.summary();
+  ```
+- 功能说明：刷新并返回 finalized summary 缓存；DMA raw bytes 在此处统一转换为 `ceil(bytes / 64)`。
+- 注意事项：该方法不清空 `CostContext` 累计值。
+
+### `npu_demo::format_cost_summary(const npu_demo::CostSummary& summary) -> std::string`
+
+- api：`npu_demo::format_cost_summary(const npu_demo::CostSummary& summary) -> std::string`
+- 参数：
+  - `summary`：finalized summary；类型 `const npu_demo::CostSummary&`；无默认值。
+- 返回值：`std::string`，固定为单行 JSON object，键顺序为 `DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2`。
+- 使用示例：
+
+  ```cpp
+  std::string text = npu_demo::format_cost_summary(ctx.summary());
+  ```
+- 功能说明：把 cost summary 格式化为 Python 侧可捕获和解析的稳定字符串。
+- 注意事项：生成源码不得用等价手写 JSON 替代该公开 formatter。
+
 ### `template <long long block, long long thread, long long subthread, long long shared_memory_size, auto name, typename Context, typename... Args> Status npu_demo::launch(Context& ctx, Args&&... args)`
 
 - api：`template <long long block, long long thread, long long subthread, long long shared_memory_size, auto name, typename Context, typename... Args> Status npu_demo::launch(Context& ctx, Args&&... args)`
@@ -138,7 +231,7 @@
   Status status = npu_demo::launch<2, 1, 1, 0, kernel_body>(ctx, block_ids);
   ```
 - 功能说明：启动一次 `npu_demo` kernel 执行，并把当前 launch 上下文绑定为线程可见的活动上下文。
-- 注意事项：公开源码形态固定为 `launch<block, thread, subthread, shared_memory_size, name>(ctx, args...)`；`name` 必须是可用 `Context&` 首参与 `args...` 调用的函数对象或等价可调用对象，字符串 callee 不属于合法公开合同；不保留无 ctx callable fallback；block-only 子集下 `block` 必须落在 `[1, registry.hardware.block_num]`，`thread` 固定为 `1`，`subthread` 固定为 `1`；失败时不得静默降级为单线程或无 barrier 的串行执行；`TRANCE` block 目录模式下，launch template/args 日志必须写入每个 block 文件。
+- 注意事项：公开源码形态固定为 `launch<block, thread, subthread, shared_memory_size, name>(ctx, args...)`；`name` 必须是可用 `Context&` 首参与 `args...` 调用的函数对象或等价可调用对象，字符串 callee 不属于合法公开合同；不保留无 ctx callable fallback；block-only 子集下 `block` 必须落在 `[1, registry.hardware.block_num]`，`thread` 固定为 `1`，`subthread` 固定为 `1`；失败时不得静默降级为单线程或无 barrier 的串行执行；`Context` 为 `npu_demo::CostContext` 时只执行 first block 的 body，并绑定 block=0/thread=0 与原 launch extent metadata，不把 `block` 乘进总 cost；`TRANCE` block 目录模式下，launch template/args 日志必须写入每个 block 文件。
 
 ### `class npu_demo::KernelContext`
 

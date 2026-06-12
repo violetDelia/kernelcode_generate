@@ -6,31 +6,31 @@
 
 - `Kernel` 只冻结当前 `emit_c/gen_kernel(target=npu_demo)` 已进入合同真源的 helper 集合。
 - 统一源码口径采用 `out-first`，并固定模板参数顺序为“先 space、后 type；多 space 时按 operand 顺序展开”。
-- 对 `target=npu_demo`，生成源码必须收口为 `npu_demo::<helper><...>(out, ...)` 的稳定调用形态。
+- 对 `target=npu_demo`，生成源码必须收口为 `npu_demo::<helper><...>(ctx, out, ...)` 的稳定 context-first 调用形态。
 - 逐元素 helper 按 same-shape 多维张量语义执行；不在本层隐式 broadcast。
 
 ## API 列表
 
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::add(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::sub(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::min(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::le(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::gt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::exp(Memory<Space, OutType>& out, const Memory<Space, InType>& input)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::select(Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_sum(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
-- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
-- `template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType> Status npu_demo::matmul(Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs, bool acc = false)`
-- `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col1d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right)`
-- `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col2d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::add(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::sub(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::mul(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::truediv(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::min(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::max(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::eq(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::ne(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::lt(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::le(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::gt(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::ge(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::exp(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::select(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::reduce_sum(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::reduce_min(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::reduce_max(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- `template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType, typename Context> Status npu_demo::matmul(Context& ctx, Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs, bool acc = false)`
+- `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType, typename Context> Status npu_demo::img2col1d(Context& ctx, Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right)`
+- `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType, typename Context> Status npu_demo::img2col2d(Context& ctx, Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`
 
 ## 文档信息
 
@@ -67,13 +67,14 @@
 - 除 `matmul`、`img2col1d`、`img2col2d` 外，当前公开 helper 默认要求输入与输出使用同一 `MemorySpace`；若后端实现不支持某个合法组合，必须显式失败，不能静默回退。
 - 所有 helper 都要求调用方显式提供输出 `Memory`，统一返回 `Status`；不得通过函数返回值承接输出 memory。
 - `include/api/Kernel.h` 只冻结公共 helper 名、模板顺序、参数顺序与最小类型边界，不承接后端私有实现细节。
-- `target=npu_demo` 的稳定源码口径固定为 `npu_demo::<helper><...>(out, ...)`；不得回退到 `cpu::...`、旧 `Nn*` 公共符号、表达式拼接或隐式临时变量承接。
+- `target=npu_demo` 的稳定源码口径固定为 `npu_demo::<helper><...>(ctx, out, ...)`；不得回退到 `cpu::...`、旧 `Nn*` 公共符号、表达式拼接或隐式临时变量承接。
+- `Context` 为 `npu_demo::CostContext` 时，Kernel helper 必须先执行普通路径同等 rank / shape / stride / data 边界校验；非法布局返回非 `StatusCode::kOk`，合法时只累计对应成本并返回 `StatusCode::kOk`，不得写业务 output；普通 `KernelContext` 路径保持真实计算。
 - 本文件不定义 launch、barrier、dynamic memory、view/slice/deslice 的职责；这些分别由 [`spec/include/api/Arch.md`](../../../spec/include/api/Arch.md) 与 [`spec/include/api/Dma.md`](../../../spec/include/api/Dma.md) 承接。
 ## API详细说明
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::add(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::add(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::add(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::add(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `lhs`：左操作数，参与二元运算、比较或矩阵乘语义；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -82,14 +83,14 @@
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::add(out, lhs, rhs);
+auto status = npu_demo::add(ctx, out, lhs, rhs);
 ```
 - 功能说明：执行 `add`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::sub(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::sub(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::sub(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::sub(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `lhs`：左操作数，参与二元运算、比较或矩阵乘语义；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -98,14 +99,14 @@ auto status = npu_demo::add(out, lhs, rhs);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::sub(out, lhs, rhs);
+auto status = npu_demo::sub(ctx, out, lhs, rhs);
 ```
 - 功能说明：执行 `sub`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::mul(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::mul(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `lhs`：左操作数，参与二元运算、比较或矩阵乘语义；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -114,14 +115,14 @@ auto status = npu_demo::sub(out, lhs, rhs);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::mul(out, lhs, rhs);
+auto status = npu_demo::mul(ctx, out, lhs, rhs);
 ```
 - 功能说明：执行 `mul`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::truediv(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::truediv(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `lhs`：左操作数，参与二元运算、比较或矩阵乘语义；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -130,14 +131,14 @@ auto status = npu_demo::mul(out, lhs, rhs);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::truediv(out, lhs, rhs);
+auto status = npu_demo::truediv(ctx, out, lhs, rhs);
 ```
 - 功能说明：执行 `truediv`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::min(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::min(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::min(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::min(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - 参数：
   - `out`：输出对象，承接逐元素最小值结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供。
   - `lhs`：左操作数，参与逐元素最小值计算；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供。
@@ -146,14 +147,14 @@ auto status = npu_demo::truediv(out, lhs, rhs);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::min(out, lhs, rhs);
+auto status = npu_demo::min(ctx, out, lhs, rhs);
 ```
 - 功能说明：执行 same-shape 逐元素最小值计算。
 - 注意事项：模板顺序固定为 `Space -> InType -> OutType`，参数顺序固定为 `out -> lhs -> rhs`；不提供隐式 broadcast、旧 `Nn` 别名或 Python helper。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::max(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::max(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - 参数：
   - `out`：输出对象，承接逐元素最大值结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供。
   - `lhs`：左操作数，参与逐元素最大值计算；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供。
@@ -162,14 +163,14 @@ auto status = npu_demo::min(out, lhs, rhs);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::max(out, lhs, rhs);
+auto status = npu_demo::max(ctx, out, lhs, rhs);
 ```
 - 功能说明：执行 same-shape 逐元素最大值计算。
 - 注意事项：模板顺序固定为 `Space -> InType -> OutType`，参数顺序固定为 `out -> lhs -> rhs`；不提供隐式 broadcast、旧 `Nn` 别名或 Python helper。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::eq(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::eq(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `lhs`：左操作数，参与二元运算、比较或矩阵乘语义；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -178,14 +179,14 @@ auto status = npu_demo::max(out, lhs, rhs);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::eq(out, lhs, rhs);
+auto status = npu_demo::eq(ctx, out, lhs, rhs);
 ```
 - 功能说明：执行 `eq`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::ne(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::ne(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `lhs`：左操作数，参与二元运算、比较或矩阵乘语义；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -194,14 +195,14 @@ auto status = npu_demo::eq(out, lhs, rhs);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::ne(out, lhs, rhs);
+auto status = npu_demo::ne(ctx, out, lhs, rhs);
 ```
 - 功能说明：执行 `ne`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::lt(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::lt(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `lhs`：左操作数，参与二元运算、比较或矩阵乘语义；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -210,14 +211,14 @@ auto status = npu_demo::ne(out, lhs, rhs);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::lt(out, lhs, rhs);
+auto status = npu_demo::lt(ctx, out, lhs, rhs);
 ```
 - 功能说明：执行 `lt`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::le(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::le(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::le(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::le(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `lhs`：左操作数，参与二元运算、比较或矩阵乘语义；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -226,14 +227,14 @@ auto status = npu_demo::lt(out, lhs, rhs);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::le(out, lhs, rhs);
+auto status = npu_demo::le(ctx, out, lhs, rhs);
 ```
 - 功能说明：执行 `le`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::gt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::gt(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::gt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::gt(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `lhs`：左操作数，参与二元运算、比较或矩阵乘语义；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -242,14 +243,14 @@ auto status = npu_demo::le(out, lhs, rhs);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::gt(out, lhs, rhs);
+auto status = npu_demo::gt(ctx, out, lhs, rhs);
 ```
 - 功能说明：执行 `gt`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::ge(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::ge(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `lhs`：左操作数，参与二元运算、比较或矩阵乘语义；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -258,14 +259,14 @@ auto status = npu_demo::gt(out, lhs, rhs);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::ge(out, lhs, rhs);
+auto status = npu_demo::ge(ctx, out, lhs, rhs);
 ```
 - 功能说明：执行 `ge`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::exp(Memory<Space, OutType>& out, const Memory<Space, InType>& input)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::exp(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::exp(Memory<Space, OutType>& out, const Memory<Space, InType>& input)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::exp(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `input`：输入对象，作为当前接口读取或转换的来源；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -273,14 +274,14 @@ auto status = npu_demo::ge(out, lhs, rhs);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::exp(out, input);
+auto status = npu_demo::exp(ctx, out, input);
 ```
 - 功能说明：执行 `exp`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::select(Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::select(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::select(Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::select(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `cond`：条件表达式，用于控制 select、分支或循环是否执行；类型 `const Memory<Space, bool>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -290,14 +291,14 @@ auto status = npu_demo::exp(out, input);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::select(out, cond, lhs, rhs);
+auto status = npu_demo::select(ctx, out, cond, lhs, rhs);
 ```
 - 功能说明：执行 `select`。
 - 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_sum(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::reduce_sum(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_sum(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::reduce_sum(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `input`：输入对象，作为当前接口读取或转换的来源；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -306,14 +307,14 @@ auto status = npu_demo::select(out, cond, lhs, rhs);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::reduce_sum(out, input, 0);
+auto status = npu_demo::reduce_sum(ctx, out, input, 0);
 ```
 - 功能说明：执行 `reduce_sum`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::reduce_min(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::reduce_min(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `input`：输入对象，作为当前接口读取或转换的来源；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -322,14 +323,14 @@ auto status = npu_demo::reduce_sum(out, input, 0);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::reduce_min(out, input, 0);
+auto status = npu_demo::reduce_min(ctx, out, input, 0);
 ```
 - 功能说明：执行 `reduce_min`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+### `template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::reduce_max(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
 
-- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- api：`template <MemorySpace Space, typename InType, typename OutType, typename Context> Status npu_demo::reduce_max(Context& ctx, Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `input`：输入对象，作为当前接口读取或转换的来源；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -338,14 +339,14 @@ auto status = npu_demo::reduce_min(out, input, 0);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::reduce_max(out, input, 0);
+auto status = npu_demo::reduce_max(ctx, out, input, 0);
 ```
 - 功能说明：执行 `reduce_max`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType> Status npu_demo::matmul(Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs, bool acc = false)`
+### `template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType, typename Context> Status npu_demo::matmul(Context& ctx, Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs, bool acc = false)`
 
-- api：`template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType> Status npu_demo::matmul(Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs, bool acc = false)`
+- api：`template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType, typename Context> Status npu_demo::matmul(Context& ctx, Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs, bool acc = false)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<OutSpace, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `lhs`：左操作数，参与二元运算、比较或矩阵乘语义；类型 `const Memory<LhsSpace, LhsType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -355,14 +356,14 @@ auto status = npu_demo::reduce_max(out, input, 0);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::matmul(out, lhs, rhs, true);
+auto status = npu_demo::matmul(ctx, out, lhs, rhs, true);
 ```
 - 功能说明：执行 `matmul`；`acc=false` 覆盖写 `out = lhs @ rhs`，`acc=true` 累加写 `out += lhs @ rhs`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败；emit_c/gen_kernel 必须显式输出 `true` 或 `false` 第四实参，不依赖默认值隐藏 IR 语义。
 
-### `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col1d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right)`
+### `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType, typename Context> Status npu_demo::img2col1d(Context& ctx, Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right)`
 
-- api：`template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col1d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right)`
+- api：`template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType, typename Context> Status npu_demo::img2col1d(Context& ctx, Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<OutputSpace, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `input`：输入对象，作为当前接口读取或转换的来源；类型 `const Memory<InputSpace, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -375,14 +376,14 @@ auto status = npu_demo::matmul(out, lhs, rhs, true);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::img2col1d(out, input, 3, 1, 1, 0, 0);
+auto status = npu_demo::img2col1d(ctx, out, input, 3, 1, 1, 0, 0);
 ```
 - 功能说明：执行 `img2col1d`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
 
-### `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col2d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`
+### `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType, typename Context> Status npu_demo::img2col2d(Context& ctx, Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`
 
-- api：`template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col2d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`
+- api：`template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType, typename Context> Status npu_demo::img2col2d(Context& ctx, Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`
 - 参数：
   - `out`：输出对象或输出缓冲区，承接当前接口生成或计算的结果；类型 `Memory<OutputSpace, OutType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按引用传入，允许当前接口按公开语义修改该对象；非法值按该 API 的公开错误语义处理。
   - `input`：输入对象，作为当前接口读取或转换的来源；类型 `const Memory<InputSpace, InType>&`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -400,7 +401,7 @@ auto status = npu_demo::img2col1d(out, input, 3, 1, 1, 0, 0);
 - 使用示例：
 
   ```cpp
-auto status = npu_demo::img2col2d(out, input, 3, 3, 1, 1, 1, 1, 0, 0, 0, 0);
+auto status = npu_demo::img2col2d(ctx, out, input, 3, 3, 1, 1, 1, 1, 0, 0, 0, 0);
 ```
 - 功能说明：执行 `img2col2d`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
@@ -419,7 +420,7 @@ auto status = npu_demo::img2col2d(out, input, 3, 3, 1, 1, 1, 1, 0, 0, 0, 0);
 ### 测试目标
 
 - 锁定 `include/api/Kernel.h` 的 helper 集合、模板顺序、参数顺序与删除 `Nn` 公开层后的唯一入口语义。
-- 锁定 `target=npu_demo` 时 `kernel.*` 节点发射到 `npu_demo::<helper><...>(out, ...)` 的文本合同，包括 `kernel.binary_elewise kind="min"/"max"`。
+- 锁定 `target=npu_demo` 时 `kernel.*` 节点发射到 `npu_demo::<helper><...>(ctx, out, ...)` 的文本合同，包括 `kernel.binary_elewise kind="min"/"max"`。
 - 锁定 `gen_kernel(target=npu_demo)` 只消费 `Kernel` 公共接口，不再依赖公开 `Nn` 层。
 
 ### 功能与用例清单

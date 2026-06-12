@@ -2,6 +2,7 @@
 功能说明:
 - 提供 include/api/Core.h 的 npu_demo 实现，补全 Vector 方法定义。
 - 补齐 Vector 花括号构造的内联存储实现。
+- 提供 npu_demo cost mode 使用的 `CostSummary`、`CostContext` 与 JSON summary 格式化入口。
 
 API 列表:
 - `enum StatusCode { kOk = 0, kError = 1 }`
@@ -24,6 +25,12 @@ API 列表:
 - `Vector::data() const -> const long long*`
 - `Vector::operator[](unsigned long long index) -> long long&`
 - `Vector::operator[](unsigned long long index) const -> const long long&`
+- `class npu_demo::CostSummary`
+- `npu_demo::CostSummary.value(npu_demo::cost::CostKind kind) const -> S_INT`
+- `class npu_demo::CostContext`
+- `npu_demo::CostContext.add_cost(npu_demo::cost::CostKind kind, S_INT value) -> void`
+- `npu_demo::CostContext.summary() const -> const npu_demo::CostSummary&`
+- `npu_demo::format_cost_summary(const npu_demo::CostSummary& summary) -> std::string`
 
 helper 清单:
 - 无；当前文件直接承接 `Vector` 公开方法实现，不额外暴露 helper。
@@ -45,7 +52,12 @@ helper 清单:
 #ifndef KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_CORE_H_
 #define KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_CORE_H_
 
+#include <sstream>
+#include <stdexcept>
+#include <string>
+
 #include "include/api/Core.h"
+#include "include/api/cost/Core.h"
 
 /*
 功能说明:
@@ -355,5 +367,200 @@ inline long long& Vector::operator[](unsigned long long index) {
 inline const long long& Vector::operator[](unsigned long long index) const {
     return data_[index];
 }
+
+namespace npu_demo {
+
+/*
+功能说明:
+- 承载一次 cost mode 执行完成后的七类公开成本值。
+- DMA 值已在 `CostContext::summary()` 中从 raw bytes 统一取整为 `ceil(bytes / 64)`。
+
+使用示例:
+- npu_demo::CostSummary summary;
+- S_INT vector_cost = summary.value(npu_demo::VECTOR1);
+
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/test_cost_context.py
+- 功能实现: include/npu_demo/Core.h
+*/
+class CostSummary {
+public:
+    CostSummary() = default;
+
+    /*
+    功能说明:
+    - 按公开 cost kind 读取汇总值；`npu_demo::DMA` 作为 `DMA1` 别名读取。
+
+    使用示例:
+    - S_INT dma1_cost = summary.value(npu_demo::DMA1);
+
+
+    关联文件:
+    - spec: spec/include/npu_demo/npu_demo.md
+    - test: test/include/npu_demo/test_cost_context.py
+    - 功能实现: include/npu_demo/Core.h
+    */
+    inline S_INT value(cost::CostKind kind) const {
+        switch (kind) {
+            case cost::CostKind::DMA1:
+                return dma1_;
+            case cost::CostKind::DMA2:
+                return dma2_;
+            case cost::CostKind::DMA3:
+                return dma3_;
+            case cost::CostKind::DMA4:
+                return dma4_;
+            case cost::CostKind::MAC:
+                return mac_;
+            case cost::CostKind::VECTOR1:
+                return vector1_;
+            case cost::CostKind::VECTOR2:
+                return vector2_;
+        }
+        throw std::invalid_argument("unsupported cost kind");
+    }
+
+private:
+    friend class CostContext;
+    S_INT dma1_ = 0;
+    S_INT dma2_ = 0;
+    S_INT dma3_ = 0;
+    S_INT dma4_ = 0;
+    S_INT mac_ = 0;
+    S_INT vector1_ = 0;
+    S_INT vector2_ = 0;
+};
+
+/*
+功能说明:
+- 在 cost mode 中替代 `KernelContext`，供同一 generated body 的公开 helper 记录成本。
+- DMA 类 kind 累计 raw bytes，`summary()` 输出时统一换算为成本单位。
+
+使用示例:
+- npu_demo::CostContext ctx;
+- ctx.add_cost(npu_demo::VECTOR1, 2);
+- const npu_demo::CostSummary& summary = ctx.summary();
+
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/test_cost_context.py
+- 功能实现: include/npu_demo/Core.h
+*/
+class CostContext {
+public:
+    CostContext() = default;
+
+    /*
+    功能说明:
+    - 累加指定公开 cost kind 的成本值。
+    - DMA kind 的 `value` 表示 raw bytes，MAC/VECTOR kind 的 `value` 表示已换算后的成本单位。
+
+    使用示例:
+    - ctx.add_cost(npu_demo::DMA1, 128);
+    - ctx.add_cost(npu_demo::VECTOR1, 1);
+
+
+    关联文件:
+    - spec: spec/include/npu_demo/npu_demo.md
+    - test: test/include/npu_demo/test_cost_context.py
+    - 功能实现: include/npu_demo/Core.h
+    */
+    inline void add_cost(cost::CostKind kind, S_INT value) {
+        if (value < 0) {
+            throw std::invalid_argument("cost value must be non-negative");
+        }
+        switch (kind) {
+            case cost::CostKind::DMA1:
+                dma1_raw_bytes_ += value;
+                return;
+            case cost::CostKind::DMA2:
+                dma2_raw_bytes_ += value;
+                return;
+            case cost::CostKind::DMA3:
+                dma3_raw_bytes_ += value;
+                return;
+            case cost::CostKind::DMA4:
+                dma4_raw_bytes_ += value;
+                return;
+            case cost::CostKind::MAC:
+                mac_ += value;
+                return;
+            case cost::CostKind::VECTOR1:
+                vector1_ += value;
+                return;
+            case cost::CostKind::VECTOR2:
+                vector2_ += value;
+                return;
+        }
+        throw std::invalid_argument("unsupported cost kind");
+    }
+
+    /*
+    功能说明:
+    - 刷新并返回当前累计值的公开汇总缓存。
+    - DMA raw bytes 在这里统一按 64 bytes 向上取整。
+
+    使用示例:
+    - const npu_demo::CostSummary& summary = ctx.summary();
+
+
+    关联文件:
+    - spec: spec/include/npu_demo/npu_demo.md
+    - test: test/include/npu_demo/test_cost_context.py
+    - 功能实现: include/npu_demo/Core.h
+    */
+    inline const CostSummary& summary() const {
+        summary_cache_.dma1_ = dma1_raw_bytes_ <= 0 ? 0 : (dma1_raw_bytes_ + 63) / 64;
+        summary_cache_.dma2_ = dma2_raw_bytes_ <= 0 ? 0 : (dma2_raw_bytes_ + 63) / 64;
+        summary_cache_.dma3_ = dma3_raw_bytes_ <= 0 ? 0 : (dma3_raw_bytes_ + 63) / 64;
+        summary_cache_.dma4_ = dma4_raw_bytes_ <= 0 ? 0 : (dma4_raw_bytes_ + 63) / 64;
+        summary_cache_.mac_ = mac_;
+        summary_cache_.vector1_ = vector1_;
+        summary_cache_.vector2_ = vector2_;
+        return summary_cache_;
+    }
+
+private:
+    S_INT dma1_raw_bytes_ = 0;
+    S_INT dma2_raw_bytes_ = 0;
+    S_INT dma3_raw_bytes_ = 0;
+    S_INT dma4_raw_bytes_ = 0;
+    S_INT mac_ = 0;
+    S_INT vector1_ = 0;
+    S_INT vector2_ = 0;
+    mutable CostSummary summary_cache_;
+};
+
+/*
+功能说明:
+- 将 `CostSummary` 格式化为稳定 JSON 字符串。
+- 字段顺序固定为 `DMA1/DMA2/DMA3/DMA4/MAC/VECTOR1/VECTOR2`，不输出旧 `DMA` 聚合键。
+
+使用示例:
+- std::string text = npu_demo::format_cost_summary(summary);
+
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/test_cost_context.py
+- 功能实现: include/npu_demo/Core.h
+*/
+inline std::string format_cost_summary(const CostSummary& summary) {
+    std::ostringstream stream;
+    stream << "{\"DMA1\":" << summary.value(cost::CostKind::DMA1)
+           << ",\"DMA2\":" << summary.value(cost::CostKind::DMA2)
+           << ",\"DMA3\":" << summary.value(cost::CostKind::DMA3)
+           << ",\"DMA4\":" << summary.value(cost::CostKind::DMA4)
+           << ",\"MAC\":" << summary.value(cost::CostKind::MAC)
+           << ",\"VECTOR1\":" << summary.value(cost::CostKind::VECTOR1)
+           << ",\"VECTOR2\":" << summary.value(cost::CostKind::VECTOR2)
+           << "}";
+    return stream.str();
+}
+
+}  // namespace npu_demo
 
 #endif  // KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_CORE_H_

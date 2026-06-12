@@ -543,7 +543,9 @@ inline void run_launch_worker(
     Context worker_ctx = ctx;
     KernelRuntimeState worker_runtime;
     const KernelRuntimeState* active_runtime = nullptr;
-    if constexpr (std::is_same<typename std::decay<Context>::type, KernelContext>::value) {
+    if constexpr (
+        std::is_same<typename std::decay<Context>::type, KernelContext>::value ||
+        std::is_same<typename std::decay<Context>::type, CostContext>::value) {
         KernelContextRuntimeAccess::configure(
             worker_runtime,
             block_index,
@@ -853,12 +855,29 @@ inline Status launch(Context& ctx, Args&&... args) {
     const bool __kg_trance_block_trace_enabled = false;
 #endif
 
+    std::tuple<Args...> forwarded_args(std::forward<Args>(args)...);
+    if constexpr (std::is_same<typename std::decay<Context>::type, npu_demo::CostContext>::value) {
+        auto barrier_state = std::make_shared<npu_demo::detail::LaunchBarrierState>(thread);
+        npu_demo::detail::KernelRuntimeState worker_runtime;
+        npu_demo::detail::KernelContextRuntimeAccess::configure(
+            worker_runtime,
+            0,
+            block,
+            0,
+            thread,
+            0,
+            subthread,
+            std::move(barrier_state));
+        npu_demo::detail::ScopedActiveKernelContext scoped_active_ctx(&worker_runtime);
+        npu_demo::detail::invoke_launch_name<name>(ctx, forwarded_args);
+        return StatusCode::kOk;
+    }
+
     std::vector<std::shared_ptr<npu_demo::detail::LaunchBarrierState>> barrier_states;
     barrier_states.reserve(static_cast<unsigned long long>(block));
     for (long long block_index = 0; block_index < block; ++block_index) {
         barrier_states.emplace_back(std::make_shared<npu_demo::detail::LaunchBarrierState>(thread));
     }
-    std::tuple<Args...> forwarded_args(std::forward<Args>(args)...);
     std::vector<std::thread> workers;
     workers.reserve(static_cast<unsigned long long>(block * thread));
 

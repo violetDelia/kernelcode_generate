@@ -2,7 +2,7 @@
 
 
 功能说明:
-- 承接 `CompiledKernel.execute(...)` 的运行时参数封装、ABI slot 构造和动态库 entry 调用。
+- 承接 `CompiledKernel.execute(...)` 的运行时参数封装、ABI slot 构造、动态库 entry 调用和受限文本输出捕获调用。
 - 仅供 `compiler.py` 通过文件级 API 调用，不进入 `kernel_gen.execute_engine` 包根公开 API。
 - 使用 execute_engine 已定义 failure phrase，保持 runtime 参数错误和 symbol 解析错误语义不变。
 
@@ -14,14 +14,16 @@ API 列表:
 - `class AllowAbsentMemoryArg(index: int, dtype: str, rank: int)`
 - `RuntimeInput: TypeAlias`
 - `invoke_compiled_kernel(soname_path: str, entry_point: str, args: tuple[RuntimeInput, ...], allow_absent_memory_args: tuple[AllowAbsentMemoryArg, ...]) -> int`
+- `invoke_compiled_kernel_capture_output(soname_path: str, entry_point: str, args: tuple[RuntimeInput, ...], allow_absent_memory_args: tuple[AllowAbsentMemoryArg, ...], output_capacity: int = 4096) -> tuple[int, str]`
 
 helper 清单:
-- 本文件内部 helper 不进入 `__all__`，只服务 `invoke_compiled_kernel(...)` 的 ABI 封送。
+- 本文件内部 helper 不进入 `__all__`，只服务 `invoke_compiled_kernel(...)` 与 `invoke_compiled_kernel_capture_output(...)` 的 ABI 封送。
 
 使用示例:
-- from kernel_gen.execute_engine.runtime_args import describe_runtime_arg, invoke_compiled_kernel
+- from kernel_gen.execute_engine.runtime_args import describe_runtime_arg, invoke_compiled_kernel, invoke_compiled_kernel_capture_output
 - info = describe_runtime_arg(1.5)
 - status = invoke_compiled_kernel("libkernel.so", "kg_execute_entry", (1, 2.0), ())
+- status, text = invoke_compiled_kernel_capture_output("libkernel.so", "kg_execute_entry", (), ())
 
 关联文件:
 - spec: spec/execute_engine/execute_engine_api.md
@@ -809,6 +811,83 @@ def invoke_compiled_kernel(
     return invoke_entry(ordered_slots)
 
 
+def invoke_compiled_kernel_capture_output(
+    soname_path: str,
+    entry_point: str,
+    args: tuple[RuntimeInput, ...],
+    allow_absent_memory_args: tuple[AllowAbsentMemoryArg, ...],
+    output_capacity: int = 4096,
+) -> tuple[int, str]:
+    """按 execute_engine C ABI 调用已编译 kernel 的输出捕获 companion。
+
+    功能说明:
+    - 复用普通执行入口的运行时参数封送。
+    - companion symbol 固定为 `<entry_point>_capture`，返回原始 status 与 UTF-8 文本。
+    - 输出容量非法、溢出或非 UTF-8 时按 `runtime_throw_or_abort` 失败。
+
+    使用示例:
+    - status, text = invoke_compiled_kernel_capture_output("libkernel.so", "kg_execute_entry", (), ())
+    """
+
+    if not isinstance(output_capacity, int) or output_capacity <= 0:
+        raise _RuntimeArgSupport.runtime_args_error(_RUNTIME_THROW_OR_ABORT, "output_capacity must be positive")
+    ordered_slots = _RuntimeArgSupport.build_arg_slots(args, allow_absent_memory_args)
+    if not isinstance(soname_path, str) or not soname_path:
+        raise _RuntimeArgSupport.runtime_args_error(_RUNTIME_THROW_OR_ABORT, "soname_path is empty")
+    soname = Path(soname_path)
+    companion_entry_point = f"{entry_point}_capture"
+    if not soname.is_file():
+        raise _RuntimeArgSupport.runtime_args_error(_RUNTIME_THROW_OR_ABORT, "soname_path is missing")
+    if soname.stat().st_size == 0:
+        raise _RuntimeArgSupport.runtime_args_error(_SYMBOL_RESOLVE_FAILED, f"entry_point '{companion_entry_point}' is missing")
+    if soname.stat().st_size <= 8:
+        try:
+            if not soname.read_bytes().strip():
+                raise _RuntimeArgSupport.runtime_args_error(_SYMBOL_RESOLVE_FAILED, f"entry_point '{companion_entry_point}' is missing")
+        except OSError:
+            pass
+    try:
+        library = ctypes.CDLL(str(soname))
+    except OSError as exc:
+        raise _RuntimeArgSupport.runtime_args_error(_SYMBOL_RESOLVE_FAILED, f"unable to load shared object: {exc}") from exc
+    try:
+        symbol = getattr(library, companion_entry_point)
+    except AttributeError as exc:
+        raise _RuntimeArgSupport.runtime_args_error(_SYMBOL_RESOLVE_FAILED, f"entry_point '{companion_entry_point}' is missing") from exc
+
+    slot_array, slot_struct, keepalive = _RuntimeArgSupport.marshal_slots_for_abi(ordered_slots)
+    output_buffer = ctypes.create_string_buffer(output_capacity)
+    output_size = ctypes.c_ulonglong(0)
+    symbol.argtypes = [
+        ctypes.POINTER(slot_struct),
+        ctypes.c_ulonglong,
+        ctypes.POINTER(ctypes.c_char),
+        ctypes.c_ulonglong,
+        ctypes.POINTER(ctypes.c_ulonglong),
+    ]
+    symbol.restype = ctypes.c_int
+    result = int(
+        symbol(
+            slot_array,
+            ctypes.c_ulonglong(len(ordered_slots)),
+            output_buffer,
+            ctypes.c_ulonglong(output_capacity),
+            ctypes.byref(output_size),
+        )
+    )
+    _ = keepalive
+    if result != 0:
+        return result, ""
+    text_size = int(output_size.value)
+    if text_size >= output_capacity:
+        raise _RuntimeArgSupport.runtime_args_error(_RUNTIME_THROW_OR_ABORT, "capture output is invalid")
+    try:
+        text = bytes(output_buffer.raw[:text_size]).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _RuntimeArgSupport.runtime_args_error(_RUNTIME_THROW_OR_ABORT, "capture output is invalid") from exc
+    return result, text
+
+
 __all__ = [
     "RuntimeScalarArgInfo",
     "RuntimeMemoryArgInfo",
@@ -817,4 +896,5 @@ __all__ = [
     "AllowAbsentMemoryArg",
     "RuntimeInput",
     "invoke_compiled_kernel",
+    "invoke_compiled_kernel_capture_output",
 ]

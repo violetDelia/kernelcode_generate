@@ -2,8 +2,8 @@
 
 
 功能说明:
-- 覆盖 `dsl_cost_run(func, real_args, pipeline, cost_kind)` 的公开入口保留、参数校验与错误合同。
-- `LaunchKernelCostFuncPass` 下线后，当前入口不再为命名 pipeline 自动生成 cost sibling；缺 sibling 用例只用公开 `PassManager` 与命名 pipeline 观察稳定失败，不直连 lowering 或 emit 的非公开 helper。
+- 覆盖 `dsl_cost_run(func, real_args, pipeline, cost_kind)` 的公开入口、cost mode 正向执行、参数校验与错误合同。
+- 当前入口不再查找 `_cost_<kind>_*` sibling，而是通过 `codegen_mode="cost"` 生成 cost host 并捕获 summary string。
 
 使用示例:
 - pytest -q test/tools/test_dsl_cost_run.py
@@ -19,6 +19,7 @@ from __future__ import annotations
 import importlib
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -56,8 +57,8 @@ REPO_ROOT = _find_repo_root(Path(__file__).resolve().parents[2])
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.core.config import reset_config, set_target
-from kernel_gen.core.error import KernelCodeError
+from kernel_gen.core.config import get_codegen_mode, reset_config, set_codegen_mode, set_dump_dir, set_target
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.operation import store
 from kernel_gen.passes.arch.attach_arch_information import AttachArchInformationPass
 from kernel_gen.passes.decompass import DecompassPass
@@ -105,12 +106,12 @@ def _isolated_npu_demo_target() -> None:
 
 
 def _build_npu_demo_no_cost_pipeline() -> PassManager:
-    """构造不生成 cost sibling 的公开 `PassManager` 链路。
+    """构造不生成旧 cost sibling 的公开 `PassManager` 链路。
 
 
     功能说明:
     - 复用 npu_demo lowering 的公开 pass 顺序，但不生成 `_cost_<kind>_*` sibling。
-    - 用于验证 `dsl_cost_run(...)` 在缺少 `_cost_<kind>_*` sibling 时显式失败且不 fallback 到普通 kernel。
+    - 用于验证 `dsl_cost_run(...)` 已不依赖旧 sibling。
 
     使用示例:
     - pipeline = _build_npu_demo_no_cost_pipeline()
@@ -173,29 +174,144 @@ def _add_with_runtime_float_kernel(
     store(out, lhs + rhs, [0], [128], [1])
 
 
+class _FakeSummaryCompiledKernel:
+    """为 summary 负向测试提供公开 execute 形态的最小 fake。"""
+
+    def __init__(self, summary_text: str) -> None:
+        """保存待返回的 summary 文本。
+
+        功能说明:
+        - 只服务当前测试文件的公开 `dsl_cost_run(...)` summary 负例。
+
+        使用示例:
+        - kernel = _FakeSummaryCompiledKernel("")
+        """
+
+        self.summary_text = summary_text
+
+    def execute(self, args: tuple[object, ...], capture_function_output: bool = False) -> SimpleNamespace:
+        """返回由测试配置的 captured summary 文本。
+
+        功能说明:
+        - 模拟 `CompiledKernel.execute(..., capture_function_output=True)` 的成功返回。
+
+        使用示例:
+        - result = kernel.execute(args=(out, lhs, rhs), capture_function_output=True)
+        """
+
+        assert len(args) == 3
+        assert capture_function_output is True
+        return SimpleNamespace(ok=True, run_stdout=self.summary_text)
+
+
+class _FakeCaptureFailureCompiledKernel:
+    """为 generated cost helper status 负例模拟 execute capture 失败。"""
+
+    def execute(self, args: tuple[object, ...], capture_function_output: bool = False) -> SimpleNamespace:
+        """抛出 execute_engine runtime failure，验证 `dsl_cost_run(...)` 的公开错误映射。
+
+        功能说明:
+        - 模拟 generated cost host 抛出 `kg_cost_unsupported` 后 capture companion 返回失败。
+
+        使用示例:
+        - kernel.execute(args=(out, lhs, rhs), capture_function_output=True)
+        """
+
+        assert len(args) == 3
+        assert capture_function_output is True
+        error = KernelCodeError(ErrorKind.CONTRACT, ErrorModule.EXECUTE_ENGINE, "runtime_throw_or_abort")
+        error.failure_phrase = "runtime_throw_or_abort"
+        raise error
+
+
+class _FakeSummaryExecutionEngine:
+    """为 `dsl_cost_run(...)` summary 解析负例替代真实编译执行。"""
+
+    summary_text = ""
+
+    def __init__(self, target: str) -> None:
+        """校验目标为 npu_demo。
+
+        功能说明:
+        - 保留 `ExecutionEngine(target=...)` 的公开构造形态。
+
+        使用示例:
+        - engine = _FakeSummaryExecutionEngine("npu_demo")
+        """
+
+        assert target == "npu_demo"
+
+    def compile(self, source: str, function: str) -> _FakeSummaryCompiledKernel:
+        """验证 cost source 已生成，并返回固定 summary 的 fake kernel。
+
+        功能说明:
+        - 模拟 `ExecutionEngine.compile(...)`，确保 `dsl_cost_run(...)` 仍走真实 source 生成。
+
+        使用示例:
+        - kernel = engine.compile(source=source, function="add_kernel_cost")
+        """
+
+        assert "std::string& __kg_cost_summary" in source
+        assert function.endswith("_cost")
+        return _FakeSummaryCompiledKernel(self.summary_text)
+
+
+class _FakeCaptureFailureExecutionEngine:
+    """验证 generated cost source 带 helper status check 后模拟 capture 失败。"""
+
+    def __init__(self, target: str) -> None:
+        """校验目标为 npu_demo。
+
+        功能说明:
+        - 保留 `ExecutionEngine(target=...)` 的公开构造形态。
+
+        使用示例:
+        - engine = _FakeCaptureFailureExecutionEngine("npu_demo")
+        """
+
+        assert target == "npu_demo"
+
+    def compile(self, source: str, function: str) -> _FakeCaptureFailureCompiledKernel:
+        """断言 cost source 检查 helper 与 launch status，再返回 capture 失败 fake。
+
+        功能说明:
+        - 防止生成器忽略 `StatusCode::kError` 后继续格式化合法 0 summary。
+
+        使用示例:
+        - kernel = engine.compile(source=source, function="add_kernel_cost")
+        """
+
+        assert "std::string& __kg_cost_summary" in source
+        assert function.endswith("_cost")
+        assert "if (add<" in source
+        assert "if (store<" in source
+        assert "Status __kg_cost_status = npu_demo::launch" in source
+        assert 'throw std::runtime_error("kg_cost_unsupported");' in source
+        return _FakeCaptureFailureCompiledKernel()
+
+
 # TC-DSL-COST-RUN-001
-# 功能说明: 验证 LaunchKernelCostFuncPass 下线后，命名 npu-demo pipeline 不再自动生成 cost sibling。
-# 使用示例: pytest -q test/tools/test_dsl_cost_run.py -k test_dsl_cost_run_named_pipeline_rejects_missing_cost_sibling
+# 功能说明: 验证命名 npu-demo pipeline 通过 cost mode summary capture 返回 VECTOR1 成本。
+# 使用示例: pytest -q test/tools/test_dsl_cost_run.py -k test_dsl_cost_run_named_pipeline_returns_vector1_cost
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_cost_run.py
-def test_dsl_cost_run_named_pipeline_rejects_missing_cost_sibling() -> None:
+def test_dsl_cost_run_named_pipeline_returns_vector1_cost() -> None:
     out = np.full((128,), -1, dtype=np.int32)
     original_out = out.copy()
     lhs = np.arange(128, dtype=np.int32)
     rhs = np.arange(128, dtype=np.int32)
 
-    with pytest.raises(
-        KernelCodeError,
-        match=r"^DslCostRunMissingCostFunction: lowered module does not contain _cost_VECTOR1_ sibling function$",
-    ):
-        dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")
+    set_codegen_mode("cost")
+    cost = dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")
 
+    assert cost == 128
     assert np.array_equal(out, original_out)
+    assert get_codegen_mode() == "cost"
 
 
 # TC-DSL-COST-RUN-004
-# 功能说明: 验证非工具公开 cost kind 仍被 `dsl_cost_run(...)` 拒绝。
+# 功能说明: 验证非 exact kind 与旧 DMA 聚合 kind 均被 `dsl_cost_run(...)` 拒绝。
 # 使用示例: pytest -q test/tools/test_dsl_cost_run.py -k test_dsl_cost_run_rejects_old_cost_kind
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -205,31 +321,32 @@ def test_dsl_cost_run_rejects_old_cost_kind() -> None:
     lhs = np.arange(128, dtype=np.int32)
     rhs = np.arange(128, dtype=np.int32)
 
-    with pytest.raises(
-        KernelCodeError,
-        match=r"^DslCostRunInvalidCostKind: cost_kind must be one of \['DMA', 'MAC'\]$",
-    ):
-        dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "compute")
+    for invalid_kind in ("compute", "DMA"):
+        with pytest.raises(
+            KernelCodeError,
+            match=(
+                r"^DslCostRunInvalidCostKind: cost_kind must be one of "
+                r"\['DMA1', 'DMA2', 'DMA3', 'DMA4', 'MAC', 'VECTOR1', 'VECTOR2'\]$"
+            ),
+        ):
+            dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", invalid_kind)
 
 
 # TC-DSL-COST-RUN-005
-# 功能说明: 验证缺少目标 cost sibling 时公开入口显式失败且不 fallback 到普通 kernel。
-# 使用示例: pytest -q test/tools/test_dsl_cost_run.py -k test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback
+# 功能说明: 验证自定义公开 pipeline 不生成旧 cost sibling 时仍通过 cost mode 正向执行。
+# 使用示例: pytest -q test/tools/test_dsl_cost_run.py -k test_dsl_cost_run_custom_pipeline_returns_cost_without_sibling
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_cost_run.md
 # 对应测试文件路径: test/tools/test_dsl_cost_run.py
-def test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback() -> None:
+def test_dsl_cost_run_custom_pipeline_returns_cost_without_sibling() -> None:
     out = np.full((128,), -1, dtype=np.int32)
     original_out = out.copy()
     lhs = np.arange(128, dtype=np.int32)
     rhs = np.arange(128, dtype=np.int32)
 
-    with pytest.raises(
-        KernelCodeError,
-        match=r"^DslCostRunMissingCostFunction: lowered module does not contain _cost_VECTOR1_ sibling function$",
-    ):
-        dsl_cost_run(add_kernel, (out, lhs, rhs), _build_npu_demo_no_cost_pipeline(), "VECTOR1")
+    cost = dsl_cost_run(add_kernel, (out, lhs, rhs), _build_npu_demo_no_cost_pipeline(), "VECTOR1")
 
+    assert cost == 128
     assert np.array_equal(out, original_out)
 
 
@@ -253,37 +370,114 @@ def test_dsl_cost_run_rejects_non_npu_demo_target() -> None:
 
 
 # TC-DSL-COST-RUN-004
-# 功能说明: 验证 `dsl_cost_run(...)` 仍接受 numpy.ndarray 与 torch.Tensor 混用参数，并在当前无 cost sibling 阶段稳定失败。
-# 使用示例: pytest -q test/tools/test_dsl_cost_run.py -k test_dsl_cost_run_accepts_numpy_torch_mixed_real_args_before_missing_sibling
+# 功能说明: 验证 `dsl_cost_run(...)` 仍接受 numpy.ndarray 与 torch.Tensor 混用参数并正向返回成本。
+# 使用示例: pytest -q test/tools/test_dsl_cost_run.py -k test_dsl_cost_run_accepts_numpy_torch_mixed_real_args
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_cost_run.md
 # 对应测试文件路径: test/tools/test_dsl_cost_run.py
-def test_dsl_cost_run_accepts_numpy_torch_mixed_real_args_before_missing_sibling() -> None:
+def test_dsl_cost_run_accepts_numpy_torch_mixed_real_args() -> None:
     out = torch.empty((128,), dtype=torch.int32)
+    original_out = out.clone()
     lhs = np.arange(128, dtype=np.int32)
     rhs = torch.arange(128, dtype=torch.int32)
 
-    with pytest.raises(
-        KernelCodeError,
-        match=r"^DslCostRunMissingCostFunction: lowered module does not contain _cost_VECTOR1_ sibling function$",
-    ):
-        dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")
+    cost = dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")
+
+    assert cost == 128
+    assert torch.equal(out, original_out)
 
 
 @pytest.mark.parametrize("alpha", (1.25, np.float32(2.5)))
-def test_dsl_cost_run_accepts_float_runtime_scalar_before_missing_sibling(alpha: float | np.floating) -> None:
-    """普通 float / numpy floating 必须先通过 real_args 绑定，再按缺 cost sibling 失败。"""
+def test_dsl_cost_run_accepts_float_runtime_scalar(alpha: float | np.floating) -> None:
+    """普通 float / numpy floating 必须通过 real_args 绑定，并按 cost mode 正向返回。"""
 
     out = np.full((128,), -1, dtype=np.int32)
     original_out = out.copy()
     lhs = np.arange(128, dtype=np.int32)
     rhs = np.arange(128, dtype=np.int32)
 
-    with pytest.raises(KernelCodeError) as exc:
-        dsl_cost_run(_add_with_runtime_float_kernel, (out, lhs, rhs, alpha), "npu-demo-lowering", "VECTOR1")
+    cost = dsl_cost_run(_add_with_runtime_float_kernel, (out, lhs, rhs, alpha), "npu-demo-lowering", "VECTOR1")
 
-    message = str(exc.value)
-    assert message == "DslCostRunMissingCostFunction: lowered module does not contain _cost_VECTOR1_ sibling function"
-    assert "DslRunUnsupportedRealArg" not in message
-    assert "DslRunInvalidTileValue" not in message
+    assert cost == 128
     assert np.array_equal(out, original_out)
+
+
+def test_dsl_cost_run_dump_writes_cost_source_and_no_old_sibling(tmp_path: Path) -> None:
+    """dump 模式写出 cost mode source，且不残留旧 sibling / tuner.cost 主路径。"""
+
+    out = np.full((128,), -1, dtype=np.int32)
+    lhs = np.arange(128, dtype=np.int32)
+    rhs = np.arange(128, dtype=np.int32)
+
+    set_dump_dir(tmp_path)
+    cost = dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")
+    source_path = tmp_path / "add_kernel" / "99-cost-source.cpp"
+    source = source_path.read_text(encoding="utf-8")
+
+    assert cost == 128
+    assert source_path.is_file()
+    assert "void add_kernel_cost(" in source
+    assert "std::string& __kg_cost_summary" in source
+    assert "npu_demo::CostContext ctx;" in source
+    assert "npu_demo::format_cost_summary(ctx.summary())" in source
+    assert "npu_demo::launch<2, 1, 1, 0" in source
+    assert "_cost_VECTOR1_" not in source
+    assert "_cost_DMA" not in source
+    assert "tuner.cost" not in source
+    assert "npu_demo::detail" not in source
+    assert "* 2" not in source
+    assert not (tmp_path / "add_kernel" / "trance").exists()
+
+
+def test_dsl_cost_run_maps_unsupported_cost_helper_to_capture_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CostContext helper/layout 失败不得静默返回合法 0 summary。
+
+    功能说明:
+    - 验证 generated cost source 包含 helper / launch status fail-fast，并把 capture failure 映射为公开工具错误。
+
+    使用示例:
+    - pytest -q test/tools/test_dsl_cost_run.py -k unsupported_cost_helper
+    """
+
+    dsl_run_module = importlib.import_module("kernel_gen.tools.dsl_run")
+    out = np.full((128,), -1, dtype=np.int32)
+    original_out = out.copy()
+    lhs = np.arange(128, dtype=np.int32)
+    rhs = np.arange(128, dtype=np.int32)
+
+    monkeypatch.setattr(dsl_run_module, "ExecutionEngine", _FakeCaptureFailureExecutionEngine)
+    with pytest.raises(KernelCodeError, match=r"^DslCostRunExecutionFailed: cost summary capture failed$"):
+        dsl_run_module.dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")
+
+    assert np.array_equal(out, original_out)
+
+
+@pytest.mark.parametrize(
+    "summary_text",
+    (
+        "",
+        "{not-json",
+        '{"DMA1":0,"DMA2":0,"DMA3":0,"DMA4":0,"MAC":0,"VECTOR1":128}',
+        '{"DMA1":0,"DMA2":0,"DMA3":0,"DMA4":0,"MAC":0,"VECTOR1":"128","VECTOR2":0}',
+    ),
+)
+def test_dsl_cost_run_rejects_invalid_summary_capture(monkeypatch: pytest.MonkeyPatch, summary_text: str) -> None:
+    """summary 空、非 JSON、缺 key 或非整数均映射为公开 cost capture 失败。
+
+    功能说明:
+    - 通过公开 `dsl_cost_run(...)` 链路验证非法 captured summary 不会返回静默 0 cost。
+
+    使用示例:
+    - pytest -q test/tools/test_dsl_cost_run.py -k invalid_summary_capture
+    """
+
+    dsl_run_module = importlib.import_module("kernel_gen.tools.dsl_run")
+    _FakeSummaryExecutionEngine.summary_text = summary_text
+    monkeypatch.setattr(dsl_run_module, "ExecutionEngine", _FakeSummaryExecutionEngine)
+
+    out = np.zeros((128,), dtype=np.int32)
+    lhs = np.arange(128, dtype=np.int32)
+    rhs = np.arange(128, dtype=np.int32)
+
+    with pytest.raises(KernelCodeError, match=r"^DslCostRunExecutionFailed: cost summary capture failed$"):
+        dsl_run_module.dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")

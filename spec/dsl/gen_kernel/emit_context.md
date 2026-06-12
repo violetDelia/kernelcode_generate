@@ -10,6 +10,7 @@
   - target 相关 type / space 文本转换入口
 - `EmitCContext` 只允许无参构造；target 等公开行为配置必须先通过 `kernel_gen.core.config` 设置。
 - `EmitCContext` 只承载单次 emit 发射状态，不承载公开行为配置。
+- `EmitCContext` 不提供 codegen mode 查询 API；需要 mode 分支的发射逻辑必须读取 `kernel_gen.core.config.get_codegen_mode()`。
 
 ## API 列表
 
@@ -55,6 +56,7 @@
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - `EmitCContext` 只定义 emit 上下文，不承接函数级策略。
 - `class EmitCContext()` 不接受 `target=`、`config=`、`indent=`、`naming=`、`type_converter=` 等公开关键字。
+- `class EmitCContext()` 不接受 `mode=` 或 `codegen_mode=`，也不公开同义属性；cost / norm mode 由 `kernel_gen.core.config` 公开 API 统一控制。
 - 命名、局部缓存和转换状态统一收口到 context 单次状态；不得在 target 目录中维护第二套全局状态。
 - 不公开可变状态字典；需要命名递增或局部名称缓存时，使用 `allocate_name(...)`、`lookup_cached_name(...)`、`bind_cached_name(...)`。
 ## API详细说明

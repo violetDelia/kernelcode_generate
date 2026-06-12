@@ -4,6 +4,7 @@
 - 定义 execute_engine 对外稳定的编译请求、执行请求、执行结果、编译产物和引擎入口。
 - 保留 `compiler.py` 旧公开导入路径，并 re-export strategy registry 公开 API。
 - 通过 `builtin_strategy/` package 生成内置后端编译产物，通过 `runtime_args.py` 完成运行时 ABI 调用。
+- `capture_function_output=True` 仅用于 npu_demo 生成源码的 cost summary companion，文本放入 `ExecuteResult.run_stdout`。
 - CUDA SM86 后端通过同一 `ExecutionEngine(target="cuda_sm86")` 公开入口编译并执行 `.so` slot C ABI。
 
 API 列表:
@@ -54,6 +55,7 @@ from dataclasses import dataclass, field
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 import kernel_gen.execute_engine.runtime_args as _runtime_args
 from kernel_gen.execute_engine.runtime_args import (
+    invoke_compiled_kernel_capture_output as _invoke_compiled_kernel_capture_output,
     invoke_compiled_kernel as _invoke_compiled_kernel,
 )
 from kernel_gen.execute_engine.strategy import (
@@ -141,7 +143,7 @@ class ExecuteRequest:
     """执行请求模型。
 
     功能说明:
-    描述运行时参数、可选 entry point 和当前公开禁用的 stream / function output capture。
+    描述运行时参数、可选 entry point 和受限的 npu_demo function output capture。
 
     使用示例:
     ```python
@@ -287,11 +289,6 @@ class CompiledKernel:
                 _STREAM_NOT_SUPPORTED,
                 detail,
             )
-        if capture_function_output:
-            raise _ExecutionEngineSupport.error(
-                _FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED,
-                "ExecuteRequest.capture_function_output is not supported in P0",
-            )
         if self.target not in ("cpu", "npu_demo", "cuda_sm86"):
             raise _ExecutionEngineSupport.error(
                 _EXECUTION_UNSUPPORTED,
@@ -307,6 +304,40 @@ class CompiledKernel:
             raise _ExecutionEngineSupport.error(_SYMBOL_RESOLVE_FAILED, "entry_point is empty")
         if resolved_entry != self.entry_point:
             raise _ExecutionEngineSupport.error(_SYMBOL_RESOLVE_FAILED, "entry_point mismatch")
+
+        if capture_function_output:
+            if self.target != "npu_demo":
+                raise _ExecutionEngineSupport.error(
+                    _FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED,
+                    "ExecuteRequest.capture_function_output is only supported for npu_demo cost summary",
+                )
+            try:
+                status_code, output_text = _invoke_compiled_kernel_capture_output(
+                    self.soname_path,
+                    resolved_entry,
+                    args,
+                    self.allow_absent_memory_args,
+                )
+            except KernelCodeError as exc:
+                if exc.failure_phrase == _SYMBOL_RESOLVE_FAILED and f"entry_point '{resolved_entry}_capture' is missing" in str(exc):
+                    raise _ExecutionEngineSupport.error(
+                        _FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED,
+                        "compiled kernel does not expose function output capture companion",
+                    ) from exc
+                raise
+            if status_code != 0:
+                raise _ExecutionEngineSupport.error(
+                    _RUNTIME_THROW_OR_ABORT,
+                    f"entry_point returned non-zero ({status_code})",
+                )
+            return ExecuteResult(
+                ok=True,
+                status_code=0,
+                failure_phrase=None,
+                compile_stdout=self.compile_stdout,
+                compile_stderr=self.compile_stderr,
+                run_stdout=output_text,
+            )
 
         status_code = _invoke_compiled_kernel(
             self.soname_path,

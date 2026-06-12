@@ -45,7 +45,12 @@ from kernel_gen.execute_engine import (
     ExecuteRequest,
     ExecutionEngine,
 )
-from kernel_gen.execute_engine.runtime_args import RuntimeMemoryArgInfo, RuntimeScalarArgInfo, describe_runtime_arg
+from kernel_gen.execute_engine.runtime_args import (
+    RuntimeMemoryArgInfo,
+    RuntimeScalarArgInfo,
+    describe_runtime_arg,
+    invoke_compiled_kernel_capture_output,
+)
 from kernel_gen.symbol_variable.type import NumericType
 
 
@@ -613,6 +618,254 @@ def test_execute_engine_invoke_real_entry_runtime_arg_matrix(
         assert result.ok is True
         assert result.status_code == 0
         assert result.failure_phrase is None
+    finally:
+        kernel.close()
+
+
+def test_execute_engine_npu_demo_capture_function_output_returns_run_stdout() -> None:
+    """验证 npu_demo generated cost summary sink 可通过 capture companion 返回 run_stdout。"""
+
+    summary = '{"DMA1":0,"DMA2":0,"DMA3":0,"DMA4":0,"MAC":0,"VECTOR1":128,"VECTOR2":0}'
+    source = f"""
+#include "include/npu_demo/npu_demo.h"
+using namespace npu_demo;
+
+void cost_entry(std::string& __kg_cost_summary) {{
+    __kg_cost_summary = R"JSON({summary})JSON";
+}}
+"""
+    kernel = ExecutionEngine(target="npu_demo").compile(source=source, function="cost_entry")
+    try:
+        result = kernel.execute(args=(), capture_function_output=True)
+        unit = (Path(kernel.soname_path).parent / "kernel.cpp").read_text(encoding="utf-8")
+
+        assert result.ok is True
+        assert result.run_stdout == summary
+        assert 'extern "C" int kg_execute_entry_capture' in unit
+        assert "std::string __kg_cost_summary;" in unit
+    finally:
+        kernel.close()
+
+
+def test_execute_engine_npu_demo_capture_missing_companion_is_unsupported() -> None:
+    """普通 npu_demo 函数缺少 capture companion 时仍按固定失败短语拒绝。"""
+
+    source = """
+#include "include/npu_demo/npu_demo.h"
+using namespace npu_demo;
+
+void ordinary_entry() {}
+"""
+    kernel = ExecutionEngine(target="npu_demo").compile(source=source, function="ordinary_entry")
+    try:
+        with pytest.raises(KernelCodeError) as exc:
+            kernel.execute(args=(), capture_function_output=True)
+
+        assert exc.value.failure_phrase == "function_output_capture_not_supported"
+    finally:
+        kernel.close()
+
+
+def test_execute_engine_npu_demo_capture_nonzero_status_maps_runtime_failure() -> None:
+    """capture companion 捕获 C++ 异常并返回非零 status，facade 映射为 runtime 失败。"""
+
+    source = """
+#include "include/npu_demo/npu_demo.h"
+using namespace npu_demo;
+
+void cost_entry(std::string& __kg_cost_summary) {
+    (void)__kg_cost_summary;
+    throw std::runtime_error("kg_cost_unsupported");
+}
+"""
+    kernel = ExecutionEngine(target="npu_demo").compile(source=source, function="cost_entry")
+    try:
+        with pytest.raises(KernelCodeError) as exc:
+            kernel.execute(args=(), capture_function_output=True)
+
+        assert exc.value.failure_phrase == "runtime_throw_or_abort"
+    finally:
+        kernel.close()
+
+
+def test_execute_engine_capture_cost_helper_status_failure_maps_runtime_failure() -> None:
+    """generated cost host 的 helper status 检查抛错后必须映射为 runtime 失败。
+
+    功能说明:
+    - 验证 `CostContext` helper 返回非 `StatusCode::kOk` 时，生成器约定的 `kg_cost_unsupported` 异常会经 capture companion 映射为 runtime 失败。
+
+    使用示例:
+    - pytest -q test/execute_engine/test_invoke.py -k capture_cost_helper_status_failure
+    """
+
+    source = """
+#include "include/npu_demo/npu_demo.h"
+using namespace npu_demo;
+
+void cost_entry(std::string& __kg_cost_summary) {
+    int target_data[128] = {0};
+    CostContext ctx;
+    Memory<TSM, int> target(target_data, {128}, {1});
+    Memory<GM, int> source(nullptr, {128}, {1});
+    if (slice(ctx, target, source, {0}, {128}, {1}) != StatusCode::kOk) {
+        throw std::runtime_error("kg_cost_unsupported");
+    }
+    __kg_cost_summary = format_cost_summary(ctx.summary());
+}
+"""
+    kernel = ExecutionEngine(target="npu_demo").compile(source=source, function="cost_entry")
+    try:
+        with pytest.raises(KernelCodeError) as exc:
+            kernel.execute(args=(), capture_function_output=True)
+
+        assert exc.value.failure_phrase == "runtime_throw_or_abort"
+    finally:
+        kernel.close()
+
+
+def test_execute_engine_capture_cost_elementwise_status_failure_maps_runtime_failure() -> None:
+    """elementwise CostContext helper 非法 shape 必须经 generated host 映射为 runtime 失败。
+
+    功能说明:
+    - 覆盖 `add(out[4], lhs[2], rhs[4])` 这类当前静默 `VECTOR1` summary 反例。
+
+    使用示例:
+    - pytest -q test/execute_engine/test_invoke.py -k cost_elementwise_status_failure
+    """
+
+    source = """
+#include "include/npu_demo/npu_demo.h"
+using namespace npu_demo;
+
+void cost_entry(std::string& __kg_cost_summary) {
+    int out_data[4] = {0};
+    int lhs_data[2] = {0};
+    int rhs_data[4] = {0};
+    CostContext ctx;
+    Memory<GM, int> out(out_data, {4}, {1});
+    Memory<GM, int> lhs(lhs_data, {2}, {1});
+    Memory<GM, int> rhs(rhs_data, {4}, {1});
+    if (add<GM, int, int>(ctx, out, lhs, rhs) != StatusCode::kOk) {
+        throw std::runtime_error("kg_cost_unsupported");
+    }
+    __kg_cost_summary = format_cost_summary(ctx.summary());
+}
+"""
+    kernel = ExecutionEngine(target="npu_demo").compile(source=source, function="cost_entry")
+    try:
+        with pytest.raises(KernelCodeError) as exc:
+            kernel.execute(args=(), capture_function_output=True)
+
+        assert exc.value.failure_phrase == "runtime_throw_or_abort"
+    finally:
+        kernel.close()
+
+
+def test_execute_engine_capture_direct_api_rejects_invalid_output_capacity() -> None:
+    """文件级 capture API 必须拒绝非正 output_capacity。
+
+    功能说明:
+    - 覆盖 direct capture API 的容量参数负向错误语义。
+
+    使用示例:
+    - pytest -q test/execute_engine/test_invoke.py -k invalid_output_capacity
+    """
+
+    with pytest.raises(KernelCodeError) as exc:
+        invoke_compiled_kernel_capture_output("missing.so", "kg_execute_entry", (), (), output_capacity=0)
+
+    assert exc.value.failure_phrase == "runtime_throw_or_abort"
+
+
+def test_execute_engine_capture_direct_api_missing_companion_uses_symbol_failure() -> None:
+    """直连 capture API 缺 companion 时返回 symbol_resolve_failed。
+
+    功能说明:
+    - 验证文件级 capture API 不把 missing companion 改写成 facade 层 unsupported 短语。
+
+    使用示例:
+    - pytest -q test/execute_engine/test_invoke.py -k missing_companion_uses_symbol_failure
+    """
+
+    source = """
+#include "include/npu_demo/npu_demo.h"
+using namespace npu_demo;
+
+void ordinary_entry() {}
+"""
+    kernel = ExecutionEngine(target="npu_demo").compile(source=source, function="ordinary_entry")
+    try:
+        with pytest.raises(KernelCodeError) as exc:
+            invoke_compiled_kernel_capture_output(
+                kernel.soname_path,
+                kernel.entry_point,
+                (),
+                kernel.allow_absent_memory_args,
+            )
+
+        assert exc.value.failure_phrase == "symbol_resolve_failed"
+    finally:
+        kernel.close()
+
+
+def test_execute_engine_capture_overflow_maps_runtime_failure() -> None:
+    """capture companion 输出超过默认容量时，公开 execute 入口映射为 runtime 失败。
+
+    功能说明:
+    - 验证 generated cost summary 超过 capture buffer 时不会被截断为合法 `run_stdout`。
+
+    使用示例:
+    - pytest -q test/execute_engine/test_invoke.py -k capture_overflow
+    """
+
+    summary = "x" * 5000
+    source = f"""
+#include "include/npu_demo/npu_demo.h"
+using namespace npu_demo;
+
+void cost_entry(std::string& __kg_cost_summary) {{
+    __kg_cost_summary = R"TEXT({summary})TEXT";
+}}
+"""
+    kernel = ExecutionEngine(target="npu_demo").compile(source=source, function="cost_entry")
+    try:
+        with pytest.raises(KernelCodeError) as exc:
+            kernel.execute(args=(), capture_function_output=True)
+
+        assert exc.value.failure_phrase == "runtime_throw_or_abort"
+    finally:
+        kernel.close()
+
+
+def test_execute_engine_capture_direct_api_rejects_invalid_utf8() -> None:
+    """direct capture API 遇到非 UTF-8 输出必须按 runtime 失败拒绝。
+
+    功能说明:
+    - 验证 direct capture API 的解码失败收口为公开 runtime failure。
+
+    使用示例:
+    - pytest -q test/execute_engine/test_invoke.py -k invalid_utf8
+    """
+
+    source = """
+#include "include/npu_demo/npu_demo.h"
+using namespace npu_demo;
+
+void cost_entry(std::string& __kg_cost_summary) {
+    __kg_cost_summary.assign(1, static_cast<char>(0xFF));
+}
+"""
+    kernel = ExecutionEngine(target="npu_demo").compile(source=source, function="cost_entry")
+    try:
+        with pytest.raises(KernelCodeError) as exc:
+            invoke_compiled_kernel_capture_output(
+                kernel.soname_path,
+                kernel.entry_point,
+                (),
+                kernel.allow_absent_memory_args,
+            )
+
+        assert exc.value.failure_phrase == "runtime_throw_or_abort"
     finally:
         kernel.close()
 
