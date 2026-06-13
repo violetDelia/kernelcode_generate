@@ -4,7 +4,7 @@
 - 定义 tuner.select op。
 
 API 列表:
-- `class TunerSelectOp(patterns: Sequence[str | SymbolRefAttr], result_type: Attribute = SymbolValueType.from_expr("pattern_id"))`
+- `class TunerSelectOp(patterns: Sequence[str | SymbolRefAttr], result_type: Attribute = SymbolValueType.from_expr("pattern_id"), *, args: Sequence[SSAValue | Operation] = (), tuner_args: Sequence[SSAValue | Operation] = ())`
 
 使用示例:
 - `from kernel_gen.dialect.tuner.operation import ...`
@@ -24,7 +24,7 @@ from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
 from kernel_gen.core.contracts import raise_verify_error
 from xdsl.dialects.builtin import ArrayAttr, StringAttr, SymbolRefAttr
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
-from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, opt_attr_def, result_def, var_operand_def
+from xdsl.irdl import AttrSizedOperandSegments, IRDLOperation, attr_def, irdl_op_definition, opt_attr_def, result_def, var_operand_def
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
 
@@ -88,23 +88,32 @@ class TunerSelectOp(IRDLOperation):
 
     name = "tuner.select"
 
+    args = var_operand_def(Attribute)
+    tuner_args = var_operand_def(Attribute)
     patterns = attr_def(ArrayAttr[Attribute])
     _parse_diagnostic = opt_attr_def(StringAttr, attr_name="_tuner_select_parse_diagnostic")
     result = result_def(Attribute)
+
+    irdl_options = (AttrSizedOperandSegments(as_property=True),)
 
     def __init__(
         self: "TunerSelectOp",
         patterns: Sequence[str | SymbolRefAttr],
         result_type: Attribute = SymbolValueType.from_expr("pattern_id"),
+        *,
+        args: Sequence[SSAValue | Operation] = (),
+        tuner_args: Sequence[SSAValue | Operation] = (),
     ) -> None:
         """初始化 tuner.select。
 
         功能说明:
         - 将候选 pattern 符号列表写入 `patterns` attr。
+        - `args` 透传给真实 pattern launch，`tuner_args` 标记 selector function 使用的 runtime state。
         - 结果类型固定为 `!symbol.int<#symbol.expr<pattern_id>>`。
 
         使用示例:
         - TunerSelectOp(["matmul_entry_pattern0", "matmul_entry_pattern1"])
+        - TunerSelectOp(["p0"], args=(out,), tuner_args=())
 
         关联文件:
         - spec: spec/dialect/tuner.md
@@ -113,6 +122,7 @@ class TunerSelectOp(IRDLOperation):
         """
 
         super().__init__(
+            operands=[list(args), list(tuner_args)],
             attributes={"patterns": ArrayAttr([_pattern_symbol_attr(pattern, self.name) for pattern in patterns])},
             result_types=[result_type],
         )
@@ -121,17 +131,19 @@ class TunerSelectOp(IRDLOperation):
     def _from_parsed(
         cls: type["TunerSelectOp"],
         patterns: ArrayAttr[Attribute],
+        args: Sequence[SSAValue | Operation],
+        tuner_args: Sequence[SSAValue | Operation],
         result_type: Attribute,
         parse_diagnostic: str | None,
     ) -> "TunerSelectOp":
         """从文本解析结果构造 tuner.select。
 
         功能说明:
-        - 该内部入口只服务 parser，把非法 attr 内容延迟到 verifier 按公开错误语义报错。
+        - 该内部入口只服务 parser，把非法 attr / type-list 内容延迟到 verifier 按公开错误语义报错。
         - 不出现在 spec/API 列表、公开 constructor 签名或测试公开调用形态中。
 
         使用示例:
-        - op = TunerSelectOp._from_parsed(patterns, result_type, "tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]")
+        - op = TunerSelectOp._from_parsed(patterns, args, tuner_args, result_type, None)
 
         关联文件:
         - spec: spec/dialect/tuner.md
@@ -143,14 +155,15 @@ class TunerSelectOp(IRDLOperation):
         if parse_diagnostic is not None:
             attrs["_tuner_select_parse_diagnostic"] = StringAttr(parse_diagnostic)
         op = cls.__new__(cls)
-        IRDLOperation.__init__(op, attributes=attrs, result_types=[result_type])
+        IRDLOperation.__init__(op, operands=[list(args), list(tuner_args)], attributes=attrs, result_types=[result_type])
         return op
 
     def verify_(self: "TunerSelectOp") -> None:
-        """校验 tuner.select patterns 与 result type。
+        """校验 tuner.select patterns、operand groups 与 result type。
 
         功能说明:
         - `patterns` 必须是非空 `ArrayAttr[SymbolRefAttr]`。
+        - `args` 与 `tuner_args` 是两组独立 variadic operands，由 IRDL segment sizes 维护。
         - result 必须固定为 `!symbol.int<#symbol.expr<pattern_id>>`。
 
         使用示例:
@@ -177,10 +190,12 @@ class TunerSelectOp(IRDLOperation):
         """打印 tuner.select 自定义文本语法。
 
         功能说明:
-        - 输出 `tuner.select {patterns = [@p0, @p1]} : !symbol.int<#symbol.expr<pattern_id>>`。
+        - 两组 operands 都为空时输出旧式短语法。
+        - 仅打印非空 `args(...)` / `tuner_args(...)` operand 组和对应 type list。
 
         使用示例:
         - TunerSelectOp(["p0"]).print(printer)
+        - TunerSelectOp(["p0"], args=(arg,)).print(printer)
 
         关联文件:
         - spec: spec/dialect/tuner.md
@@ -188,9 +203,45 @@ class TunerSelectOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/tuner/
         """
 
+        if self.args:
+            printer.print_string(" args(")
+            for index, arg in enumerate(self.args):
+                if index:
+                    printer.print_string(", ")
+                printer.print_ssa_value(SSAValue.get(arg))
+            printer.print_string(")")
+        if self.tuner_args:
+            printer.print_string(" tuner_args(")
+            for index, arg in enumerate(self.tuner_args):
+                if index:
+                    printer.print_string(", ")
+                printer.print_ssa_value(SSAValue.get(arg))
+            printer.print_string(")")
         printer.print_string(" ")
-        printer.print_attr_dict(self.attributes)
+        printer.print_attr_dict(
+            {
+                name: attr
+                for name, attr in self.attributes.items()
+                if name != "_tuner_select_parse_diagnostic"
+            }
+        )
         printer.print_string(" : ")
+        if self.args:
+            printer.print_string("args(")
+            for index, arg in enumerate(self.args):
+                if index:
+                    printer.print_string(", ")
+                printer.print_attribute(SSAValue.get(arg).type)
+            printer.print_string(") ")
+        if self.tuner_args:
+            printer.print_string("tuner_args(")
+            for index, arg in enumerate(self.tuner_args):
+                if index:
+                    printer.print_string(", ")
+                printer.print_attribute(SSAValue.get(arg).type)
+            printer.print_string(") ")
+        if self.args or self.tuner_args:
+            printer.print_string("-> ")
         printer.print_attribute(self.result.type)
 
     @classmethod
@@ -198,7 +249,8 @@ class TunerSelectOp(IRDLOperation):
         """解析 tuner.select 自定义文本语法。
 
         功能说明:
-        - 解析 attr dict 与固定 result type。
+        - 解析旧式空 operand 语法与 `args(...)` / `tuner_args(...)` 显式 operand 语法。
+        - 两组 type list 分别与实际 operands 数量和类型一致，否则按公开诊断失败。
 
         使用示例:
         - TunerSelectOp.parse(parser)
@@ -209,9 +261,39 @@ class TunerSelectOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/tuner/
         """
 
+        args: list[SSAValue] = []
+        tuner_args: list[SSAValue] = []
+        saw_args_group = parser.parse_optional_keyword("args") is not None
+        if saw_args_group:
+            parser.parse_punctuation("(", f"Expected '(' after args in {cls.name}.")
+            if parser.parse_optional_punctuation(")") is None:
+                args.append(parser.parse_operand("Expected tuner.select args operand."))
+                while parser.parse_optional_punctuation(",") is not None:
+                    args.append(parser.parse_operand("Expected tuner.select args operand."))
+                parser.parse_punctuation(")", f"Expected ')' after args in {cls.name}.")
+        saw_tuner_args_group = parser.parse_optional_keyword("tuner_args") is not None
+        if saw_tuner_args_group:
+            parser.parse_punctuation("(", f"Expected '(' after tuner_args in {cls.name}.")
+            if parser.parse_optional_punctuation(")") is None:
+                tuner_args.append(parser.parse_operand("Expected tuner.select tuner_args operand."))
+                while parser.parse_optional_punctuation(",") is not None:
+                    tuner_args.append(parser.parse_operand("Expected tuner.select tuner_args operand."))
+                parser.parse_punctuation(")", f"Expected ')' after tuner_args in {cls.name}.")
         attrs = dict(parser.parse_optional_attr_dict() or {})
-        parser.parse_characters(":", f" in {cls.name}")
-        result_type = parser.parse_type()
+        parser.parse_punctuation(":", f"Expected ':' before type list in {cls.name}.")
+        arg_types: list[Attribute] = []
+        tuner_arg_types: list[Attribute] = []
+        if saw_args_group or saw_tuner_args_group:
+            if saw_args_group:
+                parser.parse_keyword("args", f" in {cls.name}")
+                arg_types = parser.parse_comma_separated_list(parser.Delimiter.PAREN, parser.parse_type)
+            if saw_tuner_args_group:
+                parser.parse_keyword("tuner_args", f" in {cls.name}")
+                tuner_arg_types = parser.parse_comma_separated_list(parser.Delimiter.PAREN, parser.parse_type)
+            parser.parse_punctuation("->", f"Expected '-> result_type' in {cls.name}.")
+            result_type = parser.parse_type()
+        else:
+            result_type = parser.parse_type()
         patterns = attrs.pop("patterns", None)
         if patterns is None:
             raise_verify_error(_ERROR_SCENE, "tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]")
@@ -222,7 +304,21 @@ class TunerSelectOp(IRDLOperation):
         parse_diagnostic = None
         if not patterns.data or any(not isinstance(pattern, SymbolRefAttr) for pattern in patterns.data):
             parse_diagnostic = "tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]"
-        return cls._from_parsed(patterns, result_type, parse_diagnostic)
+        if saw_args_group:
+            if len(arg_types) != len(args):
+                parse_diagnostic = parse_diagnostic or "tuner.select args type list must match operands"
+            else:
+                for operand, operand_type in zip(args, arg_types, strict=True):
+                    if SSAValue.get(operand).type != operand_type:
+                        parse_diagnostic = parse_diagnostic or "tuner.select args type list must match operands"
+        if saw_tuner_args_group:
+            if len(tuner_arg_types) != len(tuner_args):
+                parse_diagnostic = parse_diagnostic or "tuner.select tuner_args type list must match operands"
+            else:
+                for operand, operand_type in zip(tuner_args, tuner_arg_types, strict=True):
+                    if SSAValue.get(operand).type != operand_type:
+                        parse_diagnostic = parse_diagnostic or "tuner.select tuner_args type list must match operands"
+        return cls._from_parsed(patterns, args, tuner_args, result_type, parse_diagnostic)
 
 __all__ = [
     "TunerSelectOp",

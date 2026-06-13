@@ -1,8 +1,8 @@
 """npu_demo tuner.select emitter.
 
 功能说明:
-- 将 `tuner.select` 发射为稳定的 `S_INT <name> = 0;`。
-- 第一版 dispatcher 固定选择 pattern0，后续 tuner 接入可替换该值来源。
+- 将普通节点级 `tuner.select` fallback 发射为稳定的 `S_INT <name> = 0;`。
+- entry dispatcher module 路径由 `KernelEmitter` 生成 pattern enum 与 selector function；本文件只保留非 dispatcher fallback。
 
 API 列表:
 - 无公开 API。
@@ -29,7 +29,7 @@ def _emit_npu_demo_tuner_select(op: TunerSelectOp, ctx) -> str:
 
     功能说明:
     - 通过公开 emit registry 把选择值绑定为 `S_INT` 局部变量。
-    - 当前合同固定默认值为 0。
+    - 当前 fallback 合同固定默认值为 0。
 
     使用示例:
     - line = _emit_npu_demo_tuner_select(op, ctx)

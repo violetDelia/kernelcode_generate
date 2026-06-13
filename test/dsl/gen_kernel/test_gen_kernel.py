@@ -26,6 +26,7 @@ import os
 import shutil
 import sys
 import importlib
+import re
 import subprocess
 import tempfile
 
@@ -2926,6 +2927,72 @@ def test_gen_kernel_emits_npu_demo_entry_dispatcher_after_device_functions() -> 
     assert "npu_demo::launch<2, 1, 1, 0, entry_pattern1_device>(ctx);" in source
 
 
+def test_gen_kernel_emits_npu_demo_entry_dispatcher_enum_default_selector() -> None:
+    module_text = """builtin.module {
+  func.func @entry() attributes {entry_point} {
+    %select = tuner.select {patterns = [@entry_pattern0, @entry_pattern1, @entry_pattern2]} : !symbol.int<#symbol.expr<pattern_id>>
+    %zero = "symbol.const"() {value = #builtin.int<0>} : () -> !symbol.int<#symbol.expr<0>>
+    %is_pattern0 = "symbol.eq"(%select, %zero) : (!symbol.int<#symbol.expr<pattern_id>>, !symbol.int<#symbol.expr<0>>) -> i1
+    scf.if %is_pattern0 {
+      %b0 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+      %t0 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+      %s0 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+      %m0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+      arch.launch<%b0, %t0, %s0, %m0>(@entry_pattern0_device) : () -> ()
+    } else {
+      %one = "symbol.const"() {value = #builtin.int<1>} : () -> !symbol.int<#symbol.expr<1>>
+      %is_pattern1 = "symbol.eq"(%select, %one) : (!symbol.int<#symbol.expr<pattern_id>>, !symbol.int<#symbol.expr<1>>) -> i1
+      scf.if %is_pattern1 {
+        %b1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+        %t1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+        %s1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+        %m1 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+        arch.launch<%b1, %t1, %s1, %m1>(@entry_pattern1_device) : () -> ()
+      } else {
+        %b2 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+        %t2 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+        %s2 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+        %m2 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+        arch.launch<%b2, %t2, %s2, %m2>(@entry_pattern2_device) : () -> ()
+      }
+    }
+    func.return
+  }
+  func.func @entry_pattern0_device() {
+    func.return
+  }
+  func.func @entry_pattern1_device() {
+    func.return
+  }
+  func.func @entry_pattern2_device() {
+    func.return
+  }
+}
+"""
+    module = Parser(build_default_context(), module_text).parse_module()
+
+    source = gen_kernel(module, _npu_ctx())
+
+    enum_match = re.search(r"enum class\s+([A-Za-z_]\w*)\s*:\s*S_INT", source)
+    assert enum_match is not None
+    enum_name = enum_match.group(1)
+    assert "pattern0 = 0" in source
+    assert "pattern1 = 1" in source
+    assert "pattern2 = 2" in source
+    assert f"return {enum_name}::pattern0;" in source
+    assert re.search(rf"{enum_name}\s+pattern_id\s*=\s*[A-Za-z_]\w*\(\);", source)
+    assert f"if (pattern_id == {enum_name}::pattern0)" in source
+    assert f"if (pattern_id == {enum_name}::pattern1)" in source
+    assert source.count("npu_demo::KernelContext") >= 3
+    assert source.count("npu_demo::launch<") == 3
+    assert "entry_pattern0_device" in source
+    assert "entry_pattern1_device" in source
+    assert "entry_pattern2_device" in source
+    assert "npu_demo::CostContext" not in source
+    assert "candidate_cost" not in source
+    assert "best_cost" not in source
+
+
 def test_gen_kernel_emits_npu_demo_entry_dispatcher_generic_symbol_guard() -> None:
     """验证 npu_demo final host 支持 generic `symbol.const` / `symbol.eq` guard。
 
@@ -2974,7 +3041,8 @@ def test_gen_kernel_emits_npu_demo_entry_dispatcher_generic_symbol_guard() -> No
     assert source.index("void entry_pattern1_device(npu_demo::KernelContext& ctx)") < source.index("void entry()")
     assert "S_INT" in source
     assert " = 0;" in source
-    assert "bool" in source
+    assert "enum class" in source
+    assert "::pattern0" in source
     assert " == " in source
     assert "if (" in source
     assert "npu_demo::launch<2, 1, 1, 0, entry_pattern0_device>(ctx);" in source

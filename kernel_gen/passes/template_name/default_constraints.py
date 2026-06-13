@@ -3,7 +3,7 @@
 
 功能说明:
 - 注册仓库内置 dialect op 的 template-name 约束。
-- 默认约束覆盖 `dma.*`、`kernel.*`、`memory.get_data`、`arch.get_dynamic_memory` 与透明 cast。
+- 默认约束覆盖 `dma.*`、`kernel.*`、`tuner.select`、`memory.get_data`、`arch.get_dynamic_memory` 与透明 cast。
 - 当前文件内 builder 只作为注册表回调，不作为跨模块公开 API。
 
 API 列表:
@@ -195,6 +195,7 @@ def register_default_template_constraints() -> None:
         "dma.subview",
         "memory.get_data",
         "kernel.matmul",
+        "tuner.select",
         "symbol.get_dim",
         "symbol.get_stride",
     ):

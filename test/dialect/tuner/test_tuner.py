@@ -302,6 +302,39 @@ builtin.module {
     assert printed == _print_ir(reparsed).rstrip()
 
 
+def test_tuner_select_args_and_tuner_args_round_trip() -> None:
+    signature = inspect.signature(TunerSelectOp)
+    assert tuple(signature.parameters)[:2] == ("patterns", "result_type")
+    assert signature.parameters["args"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert signature.parameters["tuner_args"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert signature.parameters["args"].default == ()
+    assert signature.parameters["tuner_args"].default == ()
+
+    ctx = _build_context()
+    module = Parser(
+        ctx,
+        """
+builtin.module {
+  func.func @entry(%arg0 : !symbol.int<#symbol.expr<M>>, %arg1 : !symbol.int<#symbol.expr<N>>, %tile : !symbol.int<#symbol.expr<TILE>>) {
+    %a = tuner.select args(%arg0, %arg1) {patterns = [@entry_pattern0, @entry_pattern1]} : args(!symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>>) -> !symbol.int<#symbol.expr<pattern_id>>
+    %b = tuner.select tuner_args(%tile) {patterns = [@entry_pattern0, @entry_pattern1]} : tuner_args(!symbol.int<#symbol.expr<TILE>>) -> !symbol.int<#symbol.expr<pattern_id>>
+    %c = tuner.select args(%arg0) tuner_args(%tile) {patterns = [@entry_pattern0, @entry_pattern1, @entry_pattern2]} : args(!symbol.int<#symbol.expr<M>>) tuner_args(!symbol.int<#symbol.expr<TILE>>) -> !symbol.int<#symbol.expr<pattern_id>>
+    func.return
+  }
+}
+""",
+    ).parse_module()
+
+    module.verify()
+    printed = _print_ir(module).rstrip()
+    reparsed = Parser(ctx, printed).parse_module()
+    reparsed.verify()
+    assert "args(%arg0, %arg1)" in printed
+    assert "tuner_args(%tile)" in printed
+    assert "args(!symbol.int<#symbol.expr<M>>) tuner_args(!symbol.int<#symbol.expr<TILE>>) ->" in printed
+    assert printed == _print_ir(reparsed).rstrip()
+
+
 # TC-TUNER-008
 # 测试目的: 验证 tuner.select 拒绝空 patterns、非 flat SymbolRefAttr 与非 pattern_id 结果类型。
 # 对应功能实现文件路径: kernel_gen/dialect/tuner/
@@ -334,6 +367,45 @@ builtin.module {
     ).parse_module()
     with pytest.raises(KernelCodeError, match="tuner.select patterns must be non-empty"):
         module_bad.verify()
+
+    invalid_type_cases = [
+        (
+            """
+builtin.module {
+  func.func @entry(%arg0 : !symbol.int<#symbol.expr<M>>) {
+    %pattern_id = tuner.select args(%arg0) {patterns = [@entry_pattern0]} : args(!symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>>) -> !symbol.int<#symbol.expr<pattern_id>>
+    func.return
+  }
+}
+""",
+            "tuner.select args type list must match operands",
+        ),
+        (
+            """
+builtin.module {
+  func.func @entry(%arg0 : !symbol.int<#symbol.expr<M>>) {
+    %pattern_id = tuner.select args(%arg0) {patterns = [@entry_pattern0]} : args(!symbol.int<#symbol.expr<N>>) -> !symbol.int<#symbol.expr<pattern_id>>
+    func.return
+  }
+}
+""",
+            "tuner.select args type list must match operands",
+        ),
+        (
+            """
+builtin.module {
+  func.func @entry(%tile : !symbol.int<#symbol.expr<TILE>>) {
+    %pattern_id = tuner.select tuner_args(%tile) {patterns = [@entry_pattern0]} : tuner_args(!symbol.int<#symbol.expr<TILE>>, !symbol.int<#symbol.expr<N>>) -> !symbol.int<#symbol.expr<pattern_id>>
+    func.return
+  }
+}
+""",
+            "tuner.select tuner_args type list must match operands",
+        ),
+    ]
+    for text, message in invalid_type_cases:
+        with pytest.raises(KernelCodeError, match=message):
+            Parser(ctx, text).parse_module().verify()
 
 
 # TC-TUNER-009

@@ -2,7 +2,7 @@
 
 功能说明:
 - 在唯一 `entry_point` host 中识别一个或多个 out/lhs/rhs 均为 TSM 的 `kernel.matmul`。
-- 生成两个 pattern 函数，并把 host 改写为 `tuner.select + scf.if + tuner.launch` dispatcher。
+- 生成两个 pattern 函数，并把 host 改写为携带 runtime `args` 的 `tuner.select + scf.if + tuner.launch` dispatcher。
 - 没有合格 TSM matmul 时保持 no-op；entry 调 helper 或 pattern 名称冲突时 fail-fast。
 
 API 列表:
@@ -166,29 +166,12 @@ def _clone_pattern_func(entry_func: func.FuncOp, pattern_name: str, pattern_id: 
     return pattern_func
 
 
-def _launch_branch(callee: str, args: tuple[SSAValue, ...], arg_types: tuple[Attribute, ...]) -> Region:
-    """构造单个 `tuner.launch + scf.yield` 分支。
-
-    功能说明:
-    - args 来自 host wrapper block arguments，按原顺序透传给 pattern 函数。
-
-    使用示例:
-    - region = _launch_branch("entry_pattern0", tuple(block.args), tuple(input_types))
-    """
-
-    _ = arg_types
-    block = Block()
-    block.add_op(TunerLaunchOp(callee, args))
-    block.add_op(scf.YieldOp())
-    return Region(block)
-
-
 def _build_host_dispatcher(entry_func: func.FuncOp, pattern_names: tuple[str, str]) -> func.FuncOp:
     """构造替换 entry 的 host dispatcher。
 
     功能说明:
     - 保持函数名、签名和原 attributes。
-    - body 固定为 `tuner.select -> symbol.const 0 -> symbol.eq -> scf.if -> func.return`。
+    - body 固定为 `tuner.select args(...) -> symbol.const 0 -> symbol.eq -> scf.if -> func.return`。
     - pattern 引用只存在于 `tuner.select.patterns`，不得生成 `tuner.pattern_ref` IR op。
 
     使用示例:
@@ -198,11 +181,12 @@ def _build_host_dispatcher(entry_func: func.FuncOp, pattern_names: tuple[str, st
     input_types = list(entry_func.function_type.inputs.data)
     output_types = list(entry_func.function_type.outputs.data)
     if output_types:
-        raise _kernel_pattern_error("entry_point dispatcher must have zero results")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "kernel-pattern-attach entry_point dispatcher must have zero results")
     block = Block(arg_types=input_types)
     for new_arg, old_arg in zip(block.args, entry_func.args, strict=True):
         new_arg.name_hint = old_arg.name_hint
-    select = TunerSelectOp(pattern_names)
+    launch_args = tuple(block.args)
+    select = TunerSelectOp(pattern_names, args=launch_args, tuner_args=())
     generic_symbol_const = UnregisteredOp.with_name("symbol.const")
     zero = generic_symbol_const.create(
         attributes={"value": IntAttr(0)},
@@ -213,12 +197,17 @@ def _build_host_dispatcher(entry_func: func.FuncOp, pattern_names: tuple[str, st
         operands=[select.result, zero.results[0]],
         result_types=[i1],
     )
-    launch_args = tuple(block.args)
+    then_block = Block()
+    then_block.add_op(TunerLaunchOp(pattern_names[0], launch_args))
+    then_block.add_op(scf.YieldOp())
+    else_block = Block()
+    else_block.add_op(TunerLaunchOp(pattern_names[1], launch_args))
+    else_block.add_op(scf.YieldOp())
     if_op = scf.IfOp(
         compare.results[0],
         [],
-        _launch_branch(pattern_names[0], launch_args, tuple(input_types)),
-        _launch_branch(pattern_names[1], launch_args, tuple(input_types)),
+        Region(then_block),
+        Region(else_block),
     )
     block.add_ops([select, zero, compare, if_op, func.ReturnOp()])
     dispatcher = func.FuncOp(

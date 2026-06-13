@@ -98,7 +98,8 @@ def test_kernel_pattern_attach_generates_dispatcher_and_two_patterns() -> None:
 
     assert "func.func @matmul_entry(" in text
     assert "attributes {entry_point}" in text
-    assert "tuner.select {patterns = [@matmul_entry_pattern0, @matmul_entry_pattern1]}" in text
+    assert "tuner.select args(%out, %lhs, %rhs) {patterns = [@matmul_entry_pattern0, @matmul_entry_pattern1]}" in text
+    assert "tuner_args(" not in text
     assert "tuner.launch(@matmul_entry_pattern0" in text
     assert "tuner.launch(@matmul_entry_pattern1" in text
     assert "func.func @matmul_entry_pattern0" in text
@@ -136,7 +137,8 @@ builtin.module {{
     KernelPatternAttachPass().apply(Context(), module)
     text = _print_ir(module)
 
-    assert "tuner.select {patterns = [@matmul_entry_pattern0, @matmul_entry_pattern1]}" in text
+    assert "tuner.select args(%out, %lhs, %rhs, %cond) {patterns = [@matmul_entry_pattern0, @matmul_entry_pattern1]}" in text
+    assert "tuner_args(" not in text
     assert "func.func @matmul_entry_pattern0" in text
     assert "func.func @matmul_entry_pattern1" in text
     assert text.count('"kernel.matmul"') == 2
@@ -178,7 +180,8 @@ builtin.module {{
     KernelPatternAttachPass().apply(Context(), module)
     text = _print_ir(module)
 
-    assert "tuner.select {patterns = [@matmul_entry_pattern0, @matmul_entry_pattern1]}" in text
+    assert "tuner.select args(%out, %lhs, %rhs) {patterns = [@matmul_entry_pattern0, @matmul_entry_pattern1]}" in text
+    assert "tuner_args(" not in text
     assert "func.func @matmul_entry_pattern0" in text
     assert "func.func @matmul_entry_pattern1" in text
     assert text.count('"kernel.matmul"') == 4

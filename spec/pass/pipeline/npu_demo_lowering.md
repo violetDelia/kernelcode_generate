@@ -78,6 +78,7 @@
 - 明确 standalone `SymbolBufferHoistPass` 不再作为本 pipeline 顶层阶段出现；buffer 外提只通过 `symbol-hoist-pipeline` 内部 stage 完成。
 - 明确 `tile-analysis` 位于第一段 `memory-plan -> symbol-hoist-pipeline -> cse -> canonicalize` 之后、`kernel-pattern-attach` 之前，只记录 tile 分析结果，不生成 tile 循环。
 - 明确 `kernel-pattern-attach -> transform-apply` 位于 `tile-analysis` 之后，先生成 pattern dispatcher，再按 pattern attr 分别执行 `lower-dma-memory-hierarchy` 和 `canonicalize`。
+- enum/default selector 路径中，默认 lowering 只保证 `kernel-pattern-attach -> transform-apply -> attach-arch-information -> outline-device-kernel -> template-name-infer` 的公开 handoff 顺序；entry dispatcher 的 enum selector source 形态由 `gen_kernel(...)` 在源码生成阶段承接。
 - 明确顶层 pipeline 不再直接插入 standalone `LowerDmaMemoryHierarchyPass`；lower-dma 只通过 `kernel.transform_pipeline` 间接作用于 pattern 函数。
 - 明确当前 pipeline 在第三段 cleanup 后接入 `MultiBufferAnalysisPass(memory_stage=2, target=<pipeline target>) -> MultiBufferApplyPass(target=<pipeline target>, alignment=1024)`；不新增 pipeline option。
 - 明确 `transform-apply` 后再次运行 `memory-plan -> symbol-hoist-pipeline -> cse -> canonicalize -> kernel-aggregate -> kernel-decompose -> memory-plan -> symbol-hoist-pipeline -> cse -> canonicalize -> multi-buffer-analysis -> multi-buffer-apply -> loop-soft-pipeline -> producer-consumer-analysis`，再进入 `MemoryPoolPass(rewrite=True, alignment=1024)`。
@@ -180,6 +181,7 @@
   - `producer-consumer-analysis` 位于 `loop-soft-pipeline` 之后、`memory-pool` 之前，只写普通、控制流分类或 ring-aware 分析 attr，不生成 `arch.wait` / `arch.sign`，且该阶段必须仍可观察 typed `dma.alloc` 或 ring current 形态。
   - `memory-pool` 固定 `rewrite=True` 与 `alignment=1024`，将片上 `dma.alloc` 改写为 `arch.get_dynamic_memory + dma.reinterpret`。
   - memory-pool 后必须依次运行 `cse -> canonicalize -> arch-parallelize -> attach-arch-information -> outline-device-kernel -> template-name-infer`。
+  - enum/default selector path 必须通过 `kernel-pattern-attach -> transform-apply -> attach-arch-information -> outline-device-kernel -> template-name-infer` 这条 handoff 链路进入最终 `gen_kernel(...)`；pipeline 本身不生成 selector function，也不生成 runtime cost selector。
   - `attach-arch-information` 在本 pipeline 中只保留一次，位于 `arch-parallelize` 后、`outline-device-kernel` 前，并特化 memory-pool 后新生成的 `arch.get_dynamic_memory`。
   - 公开 `arch-parallelize` 阶段必须支持结构改写为 block-strided IR，带 `entry_point` 属性的 host dispatcher 保持 no-op。
   - 无 `symbol.for` 的非入口直线 kernel 生成 block0 guard，memory-pool 生成的 loop 前 setup 前缀可通过，不支持结构按 `ArchParallelizePass` 公开错误失败。

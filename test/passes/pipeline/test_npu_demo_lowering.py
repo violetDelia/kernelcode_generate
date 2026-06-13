@@ -719,6 +719,14 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "outline-device-kernel",
         "template-name-infer",
     ]
+    selector_handoff = [
+        "kernel-pattern-attach",
+        "transform-apply",
+        "attach-arch-information",
+        "outline-device-kernel",
+        "template-name-infer",
+    ]
+    assert [name for name in _PIPELINE_PASS_ORDER if name in selector_handoff] == selector_handoff
 
 
 def test_npu_demo_lowering_pipeline_rejects_unknown_option() -> None:

@@ -169,6 +169,7 @@ func.func @matmul_kernel(%lhs: !nn.memory<value>, %rhs: !nn.memory<value>, %out:
 - `tuner.launch(@pattern, args...)` 只能引用同 module 内带完整 launch attrs 的 pattern 函数；未知 callee 或缺 launch attrs 必须失败。
 - pattern dispatcher 路径中，host `entry_point` 函数保持原名和属性；原 pattern wrapper 被删除，替换为 `<pattern>_device` 函数。
 - 降成 `arch.launch` 时，四个 extent 必须在 launch 所在 block 内以 `symbol.const` 物化，保证 SSA 支配关系。
+- enum/default selector 路径不要求 outline 阶段保留或生成 selector cost metadata；本 pass 只负责把已选分支内的 `tuner.launch` 降为等价 `arch.launch @<pattern>_device`，不修改 `tuner.select` 的 `args` / `tuner_args` 合同。
 
 ### 输出 IR 合同：`host wrapper + device body`
 

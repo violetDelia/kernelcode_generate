@@ -4,7 +4,7 @@
 
 - 定义 `kernel-pattern-attach` pass 的公开合同。
 - 该 pass 在唯一 `entry_point` host 中识别一个或多个 out / lhs / rhs 均为 TSM 的 `kernel.matmul`，生成 host dispatcher 与两个 pattern 函数。
-- dispatcher 固定使用 `tuner.select + symbol.const 0 + symbol.eq + scf.if + tuner.launch`；pattern 函数携带 `kernel.pattern_id` 与 `kernel.transform_pipeline`。
+- dispatcher 固定使用 `tuner.select args(...) + symbol.const 0 + symbol.eq + scf.if + tuner.launch`；`tuner.select` 与每个 `tuner.launch` 都透传 entry runtime operands，默认 `tuner_args=()` 且不打印空 `tuner_args()`；pattern 函数携带 `kernel.pattern_id` 与 `kernel.transform_pipeline`。
 - pattern 引用只允许写在 `tuner.select` 的 `patterns` attr 中；不得生成 `tuner.pattern_ref` IR op。
 - 没有合格 TSM matmul 时保持 no-op；entry 调 helper、pattern 名称冲突等边界必须 fail-fast。
 
@@ -37,7 +37,7 @@
 - pattern0 / pattern1 都复制完整 entry body；所有合格 `kernel.matmul` 与其它 kernel op 都必须分别出现在两个 pattern body 中。
 - pattern0 的 `kernel.transform_pipeline` 固定为 `--pass "lower-dma-memory-hierarchy={fold=true,apply_op=matmul{[\"\", \"tlm1\", \"tlm2\"]}}" --pass canonicalize`。
 - pattern1 的 `kernel.transform_pipeline` 固定为 `--pass "lower-dma-memory-hierarchy={fold=true,apply_op=matmul{[\"\", \"tlm2\", \"tlm1\"]}}" --pass canonicalize`。
-- dispatcher 必须保留原 entry 函数名、签名与 `entry_point` 属性，并透传原 block arguments 到两个 `tuner.launch`。
+- dispatcher 必须保留原 entry 函数名、签名与 `entry_point` 属性，并透传原 block arguments 到 `tuner.select.args` 和两个 `tuner.launch`。
 - pattern 函数不得保留 `entry_point`；必须分别写入 `kernel.pattern_id = 0/1`。
 - entry 中出现 `func.call`、待生成 pattern 名称已存在或 entry 有非空 result 时必须稳定失败。
 
@@ -107,6 +107,7 @@
   - entry 中出现 `func.call`、待生成 pattern 名称已存在或 entry 有非空 result 时必须稳定失败。
   - pattern 函数不得保留 `entry_point`；必须写入 `kernel.pattern_id` 和固定 `kernel.transform_pipeline` 字符串。
   - dispatcher 只通过 `tuner.select` 的 `patterns` attr 引用 pattern；不得生成 `tuner.pattern_ref` IR op。
+  - dispatcher 必须把原 entry block arguments 写入 `tuner.select args(...)` 和每个 `tuner.launch`；默认不提供 selector state，因此不得打印空 `tuner_args()` 组。
 
 ## 测试
 

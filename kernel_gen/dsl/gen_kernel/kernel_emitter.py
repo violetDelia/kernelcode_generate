@@ -56,6 +56,7 @@ from kernel_gen.dialect.dma import DmaCastOp, DmaReshapeOp, DmaViewOp
 from kernel_gen.dialect.memory import MemoryGetDataOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType, copy_memory_type
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolNeOp, SymbolValueType
+from kernel_gen.dialect.tuner import TunerSelectOp
 from kernel_gen.core.config import get_codegen_mode, restore_config, set_target, snapshot_config
 from kernel_gen.target import registry as target_registry
 
@@ -100,6 +101,7 @@ class KernelEmitter:
     ) -> None:
         self.ctx = ctx
         self._emit_op_impl = emit_op
+        self._npu_demo_tuner_selectors: dict[int, dict[str, Any]] = {}
 
 
     def _normalize_memory_stmt(self, stmt: str) -> str:
@@ -217,6 +219,20 @@ class KernelEmitter:
         return emit_c_value(value, self.ctx)
 
     def emit_op(self, op: Operation) -> str:
+        if self.ctx.is_target("npu_demo") and isinstance(op, TunerSelectOp):
+            selector = self._npu_demo_tuner_selectors.get(id(op.result))
+            if selector is None:
+                return self._emit_op_impl(op, self.ctx)
+            result_name = self.ctx.lookup_name(op.result)
+            if result_name is None:
+                result_name = self.ctx.bind_name(op.result, "pattern_id")
+            enum_name = str(selector["enum_name"])
+            selector_name = str(selector["selector_name"])
+            pattern_count = int(selector["pattern_count"])
+            selector_args = ", ".join(emit_c_value(SSAValue.get(arg), self.ctx) for arg in op.tuner_args)
+            self.ctx.bind_cached_name("npu_demo_tuner_select_enum", id(op.result), enum_name)
+            self.ctx.bind_cached_name("npu_demo_tuner_select_pattern_count", id(op.result), str(pattern_count))
+            return f"{self.ctx.current_indent}{enum_name} {result_name} = {selector_name}({selector_args});"
         return self._emit_op_impl(op, self.ctx)
 
     def _signature_type_to_c(self, attr: Any) -> str:
@@ -568,7 +584,13 @@ class KernelEmitter:
                         continue
                 names.append(f"arg{index}")
             return names
-        return [f"arg{index}" for index, _ in enumerate(func_op.args)]
+        for index, arg in enumerate(func_op.args):
+            hint = getattr(arg, "name_hint", None)
+            if isinstance(hint, str) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", hint):
+                names.append(hint)
+                continue
+            names.append(f"arg{index}")
+        return names
 
     def emit(self, op_or_func: Any) -> str:
         """按输入类型发射源码文本。
@@ -596,42 +618,100 @@ class KernelEmitter:
                 for op in self._walk_ops(dispatcher_func):
                     if isinstance(op, ArchLaunchOp):
                         callee_names.add(self._launch_callee_name(op, dispatcher_func.sym_name.data))
-                emitted_sources: list[str] = []
-                for func_op in funcs:
-                    if func_op is dispatcher_func:
+                dispatcher_arg_names = self._arg_names(dispatcher_func)
+                for arg_name, arg_value in zip(dispatcher_arg_names, dispatcher_func.args, strict=True):
+                    self.ctx.bind_name(arg_value, arg_name)
+                selector_sources: list[str] = []
+                selector_map: dict[int, dict[str, Any]] = {}
+                entry_fragment = self._template_instance_seed_fragment(dispatcher_func.sym_name.data)
+                enum_base = "".join(part[:1].upper() + part[1:] for part in re.split(r"[^0-9A-Za-z]+", dispatcher_func.sym_name.data) if part)
+                if not enum_base:
+                    enum_base = "Kernel"
+                if enum_base[0].isdigit():
+                    enum_base = f"Kernel{enum_base}"
+                select_index = 0
+                for item in self._walk_ops(dispatcher_func):
+                    if not isinstance(item, TunerSelectOp):
                         continue
-                    if func_op.sym_name.data in callee_names:
-                        func_name = func_op.sym_name.data
-                        input_types = list(func_op.function_type.inputs.data)
-                        result_types = list(func_op.function_type.outputs.data)
-                        if result_types:
-                            raise self._error(func_name, "npu_demo entry dispatcher launch body must not return values")
-                        arg_names = self._arg_names(func_op)
-                        params: list[str] = ["npu_demo::KernelContext& ctx"]
-                        for arg_name, arg_type, arg_value in zip(arg_names, input_types, func_op.args, strict=True):
-                            self.ctx.bind_name(arg_value, arg_name)
-                            if isinstance(arg_type, NnMemoryType):
-                                params.append(f"{self._type_to_c(arg_type)}& {arg_name}")
-                                continue
-                            params.append(f"{self._type_to_c(arg_type)} {arg_name}")
-                        template_prefix = self._template_prefix_from_types(input_types)
-                        signature = f"{template_prefix}void {func_name}({', '.join(params)})"
-                        self.ctx.push_indent()
-                        body = self._emit_default_function_body(func_op)
-                        self.ctx.pop_indent()
-                        if body:
-                            source = self._prepend_template_instance_seed_lines(func_op, f"{signature} {{\n{body}\n}}")
+                    pattern_attrs = list(item.patterns.data)
+                    if not pattern_attrs:
+                        raise self.ctx.emit_error("tuner.select", "npu_demo tuner.select patterns must be non-empty")
+                    for pattern_attr in pattern_attrs:
+                        if not isinstance(pattern_attr, SymbolRefAttr) or pattern_attr.nested_references.data:
+                            raise self.ctx.emit_error("tuner.select", "npu_demo tuner.select patterns must be flat symbols")
+                    suffix = "" if select_index == 0 else str(select_index)
+                    enum_name = f"{enum_base}Pattern{suffix}"
+                    selector_name = f"select_{entry_fragment}_pattern{suffix}"
+                    enum_members = [f"    pattern{index} = {index}," for index, _ in enumerate(pattern_attrs)]
+                    selector_params: list[str] = []
+                    for tuner_arg in item.tuner_args:
+                        value = SSAValue.get(tuner_arg)
+                        arg_name = self.ctx.lookup_name(value) or self.ctx.create_or_get_name(value)
+                        if isinstance(value.type, NnMemoryType):
+                            selector_params.append(f"{self._type_to_c(value.type)}& {arg_name}")
                         else:
-                            source = self._prepend_template_instance_seed_lines(func_op, f"{signature} {{\n}}")
-                        metadata_comment = self._allow_absent_memory_metadata_comment(func_op)
-                        if metadata_comment:
-                            emitted_sources.append(f"{metadata_comment}\n{source}")
-                        else:
-                            emitted_sources.append(source)
-                        continue
-                    emitted_sources.append(self.emit_func(func_op))
-                emitted_sources.append(self.emit_func(dispatcher_func))
-                return "\n\n".join(emitted_sources)
+                            selector_params.append(f"{self._type_to_c(value.type)} {arg_name}")
+                    selector_sources.append(
+                        "\n".join(
+                            [
+                                f"enum class {enum_name} : S_INT {{",
+                                *enum_members,
+                                "};",
+                                "",
+                                f"{enum_name} {selector_name}({', '.join(selector_params)}) {{",
+                                f"    return {enum_name}::pattern0;",
+                                "}",
+                            ]
+                        )
+                    )
+                    selector_map[id(item.result)] = {
+                        "enum_name": enum_name,
+                        "selector_name": selector_name,
+                        "pattern_count": len(pattern_attrs),
+                    }
+                    select_index += 1
+
+                previous_tuner_selectors = self._npu_demo_tuner_selectors
+                self._npu_demo_tuner_selectors = selector_map
+                try:
+                    emitted_sources: list[str] = [*selector_sources]
+                    for func_op in funcs:
+                        if func_op is dispatcher_func:
+                            continue
+                        if func_op.sym_name.data in callee_names:
+                            func_name = func_op.sym_name.data
+                            input_types = list(func_op.function_type.inputs.data)
+                            result_types = list(func_op.function_type.outputs.data)
+                            if result_types:
+                                raise self._error(func_name, "npu_demo entry dispatcher launch body must not return values")
+                            arg_names = self._arg_names(func_op)
+                            params: list[str] = ["npu_demo::KernelContext& ctx"]
+                            template_prefix = self._template_prefix_from_types(input_types)
+                            for arg_name, arg_type, arg_value in zip(arg_names, input_types, func_op.args, strict=True):
+                                self.ctx.bind_name(arg_value, arg_name)
+                                if isinstance(arg_type, NnMemoryType):
+                                    params.append(f"{self._type_to_c(arg_type)}& {arg_name}")
+                                    continue
+                                params.append(f"{self._type_to_c(arg_type)} {arg_name}")
+                            signature = f"{template_prefix}void {func_name}({', '.join(params)})"
+                            self.ctx.push_indent()
+                            body = self._emit_default_function_body(func_op)
+                            self.ctx.pop_indent()
+                            if body:
+                                source = self._prepend_template_instance_seed_lines(func_op, f"{signature} {{\n{body}\n}}")
+                            else:
+                                source = self._prepend_template_instance_seed_lines(func_op, f"{signature} {{\n}}")
+                            metadata_comment = self._allow_absent_memory_metadata_comment(func_op)
+                            if metadata_comment:
+                                emitted_sources.append(f"{metadata_comment}\n{source}")
+                            else:
+                                emitted_sources.append(source)
+                            continue
+                        emitted_sources.append(self.emit_func(func_op))
+                    emitted_sources.append(self.emit_func(dispatcher_func))
+                    return "\n\n".join(emitted_sources)
+                finally:
+                    self._npu_demo_tuner_selectors = previous_tuner_selectors
 
             body_func, wrapper_func = self._classify_npu_demo_launch_module(op_or_func)
             codegen_mode = get_codegen_mode()
@@ -1489,23 +1569,45 @@ class KernelEmitter:
         功能说明:
         - `kernel-pattern-attach` 为匹配公开 IR 合同会生成 generic `"symbol.const"()`。
         - `npu_demo` final host 允许 xDSL `builtin.unregistered` + `op_name__="symbol.const"` 形态。
-        - 这里按公开 attr/result 形态绑定为 `S_INT` 局部变量，避免后续 `symbol.eq` 取值失败。
+        - 用于 enum selector 比较的 pattern id 常量不生成局部变量，避免阻断互斥分支链。
 
         使用示例:
         - stmt = self._emit_generic_symbol_const(op)
         """
 
-        if isinstance(op, SymbolConstOp) or self._generic_symbol_op_name(op) != "symbol.const":
+        op_name = op.name
+        if op.name == "builtin.unregistered":
+            if not self.ctx.is_target("npu_demo"):
+                return None
+            op_name_attr = op.attributes.get("op_name__")
+            if isinstance(op_name_attr, StringAttr):
+                op_name = op_name_attr.data
+        if isinstance(op, SymbolConstOp) or op_name != "symbol.const":
             return None
         if len(op.results) != 1:
-            raise self._error(op.name, "generic symbol.const must have one result")
+            raise self.ctx.emit_error(op.name, "generic symbol.const must have one result")
         value_attr = op.attributes.get("value")
         if isinstance(value_attr, IntAttr):
             value = value_attr.data
         elif isinstance(value_attr, IntegerAttr):
             value = value_attr.value.data
         else:
-            raise self._error(op.name, "generic symbol.const value must be int attr")
+            raise self.ctx.emit_error(op.name, "generic symbol.const value must be int attr")
+        for use in op.results[0].uses:
+            user = use.operation
+            if len(user.operands) != 2:
+                continue
+            user_name = user.name
+            user_name_attr = user.attributes.get("op_name__")
+            if isinstance(user_name_attr, StringAttr):
+                user_name = user_name_attr.data
+            if user_name != "symbol.eq" or use.index not in (0, 1):
+                continue
+            other_value = SSAValue.get(user.operands[1 - use.index])
+            enum_name = self.ctx.lookup_cached_name("npu_demo_tuner_select_enum", id(other_value))
+            pattern_count = self.ctx.lookup_cached_name("npu_demo_tuner_select_pattern_count", id(other_value))
+            if enum_name is not None and pattern_count is not None and 0 <= value < int(pattern_count):
+                return ""
         name = self.ctx.create_or_get_name(op.results[0])
         return f"{self.ctx.current_indent}S_INT {name} = {value};"
 
@@ -1537,19 +1639,66 @@ class KernelEmitter:
         功能说明:
         - `kernel-pattern-attach` 输出 generic `"symbol.eq"` 以保持 IR 合同文本。
         - `npu_demo` final host 允许 xDSL `builtin.unregistered` + `op_name__="symbol.eq"` 形态。
-        - 源码生成阶段仍按公开 operands/result type 生成布尔局部变量。
+        - 若比较的是 `tuner.select` enum 结果与整数 pattern id，则把比较结果绑定为
+          enum comparison 表达式，让后续 `scf.if` 直接使用互斥 selector 条件。
 
         使用示例:
         - stmt = self._emit_generic_symbol_eq(op)
         """
 
-        if isinstance(op, SymbolEqOp) or self._generic_symbol_op_name(op) != "symbol.eq":
+        op_name = op.name
+        op_name_attr = op.attributes.get("op_name__")
+        if isinstance(op_name_attr, StringAttr):
+            op_name = op_name_attr.data
+        if op_name != "symbol.eq":
             return None
         if len(op.operands) != 2 or len(op.results) != 1:
-            raise self._error(op.name, "generic symbol.eq must have two operands and one result")
-        lhs_expr = emit_c_value(op.operands[0], self.ctx)
-        rhs_expr = emit_c_value(op.operands[1], self.ctx)
-        result_type = self._type_to_c(op.results[0].type)
+            raise self.ctx.emit_error(op.name, "generic symbol.eq must have two operands and one result")
+        lhs_value = SSAValue.get(op.operands[0])
+        rhs_value = SSAValue.get(op.operands[1])
+        lhs_enum = self.ctx.lookup_cached_name("npu_demo_tuner_select_enum", id(lhs_value))
+        rhs_enum = self.ctx.lookup_cached_name("npu_demo_tuner_select_enum", id(rhs_value))
+        lhs_pattern_count = self.ctx.lookup_cached_name("npu_demo_tuner_select_pattern_count", id(lhs_value))
+        rhs_pattern_count = self.ctx.lookup_cached_name("npu_demo_tuner_select_pattern_count", id(rhs_value))
+        lhs_const: int | None = None
+        rhs_const: int | None = None
+        lhs_owner = lhs_value.owner
+        rhs_owner = rhs_value.owner
+        if isinstance(lhs_owner, SymbolConstOp):
+            lhs_const = lhs_owner.value.data
+        else:
+            lhs_owner_name_attr = getattr(lhs_owner, "attributes", {}).get("op_name__")
+            lhs_owner_name = lhs_owner_name_attr.data if isinstance(lhs_owner_name_attr, StringAttr) else getattr(lhs_owner, "name", "")
+            lhs_value_attr = getattr(lhs_owner, "attributes", {}).get("value")
+            if lhs_owner_name == "symbol.const" and isinstance(lhs_value_attr, IntAttr):
+                lhs_const = lhs_value_attr.data
+            elif lhs_owner_name == "symbol.const" and isinstance(lhs_value_attr, IntegerAttr):
+                lhs_const = lhs_value_attr.value.data
+        if isinstance(rhs_owner, SymbolConstOp):
+            rhs_const = rhs_owner.value.data
+        else:
+            rhs_owner_name_attr = getattr(rhs_owner, "attributes", {}).get("op_name__")
+            rhs_owner_name = rhs_owner_name_attr.data if isinstance(rhs_owner_name_attr, StringAttr) else getattr(rhs_owner, "name", "")
+            rhs_value_attr = getattr(rhs_owner, "attributes", {}).get("value")
+            if rhs_owner_name == "symbol.const" and isinstance(rhs_value_attr, IntAttr):
+                rhs_const = rhs_value_attr.data
+            elif rhs_owner_name == "symbol.const" and isinstance(rhs_value_attr, IntegerAttr):
+                rhs_const = rhs_value_attr.value.data
+        if lhs_enum is not None and lhs_pattern_count is not None and rhs_const is not None:
+            pattern_count = int(lhs_pattern_count)
+            if 0 <= rhs_const < pattern_count:
+                lhs_expr = emit_c_value(lhs_value, self.ctx)
+                self.ctx.bind_name(op.results[0], f"{lhs_expr} == {lhs_enum}::pattern{rhs_const}")
+                return ""
+        if rhs_enum is not None and rhs_pattern_count is not None and lhs_const is not None:
+            pattern_count = int(rhs_pattern_count)
+            if 0 <= lhs_const < pattern_count:
+                rhs_expr = emit_c_value(rhs_value, self.ctx)
+                self.ctx.bind_name(op.results[0], f"{rhs_expr} == {rhs_enum}::pattern{lhs_const}")
+                return ""
+        lhs_expr = emit_c_value(lhs_value, self.ctx)
+        rhs_expr = emit_c_value(rhs_value, self.ctx)
+        result_type = self.ctx.dispatch_type(op.results[0].type)
         result_name = self.ctx.create_or_get_name(op.results[0])
         return f"{self.ctx.current_indent}{result_type} {result_name} = ({lhs_expr} == {rhs_expr});"
 

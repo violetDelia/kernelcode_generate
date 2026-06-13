@@ -35,6 +35,7 @@ from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dialect.dma import DmaCopyOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr
+from kernel_gen.dialect.tuner import TunerSelectOp
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
 from kernel_gen.passes.template_name.graph import Same, TemplateNameGraph, TemplateNameValue
 from kernel_gen.passes.template_name.infer import TemplateNameInferPass
@@ -226,6 +227,42 @@ def test_template_name_infer_links_entry_point_host_pattern_args() -> None:
     )
     pattern1 = _empty_func_op(
         "entry_point_template_host_pattern1",
+        (_memory_type(), _memory_type()),
+        transform_pipeline="COMPILE_ARGS: --pass lower-dma-memory-hierarchy",
+    )
+    module = ModuleOp([host, pattern0, pattern1])
+
+    TemplateNameInferPass().apply(Context(), module)
+
+    assert [arg.type.template_name.data for arg in host.args] == ["T1", "T2"]
+    assert [arg.type.template_name.data for arg in pattern0.args] == ["T1", "T2"]
+    assert [arg.type.template_name.data for arg in pattern1.args] == ["T1", "T2"]
+
+
+def test_template_name_infer_accepts_tuner_select_memory_args() -> None:
+    """验证 tuner.select args 只校验 memory 参数，不把不同 pattern args 合并。"""
+
+    memory0 = _memory_type()
+    memory1 = _memory_type()
+    host_block = Block(arg_types=[memory0, memory1])
+    select = TunerSelectOp(
+        ["entry_pattern0", "entry_pattern1"],
+        args=tuple(host_block.args),
+    )
+    host_block.add_ops([select, func.ReturnOp()])
+    host = func.FuncOp(
+        "entry",
+        FunctionType.from_lists([memory0, memory1], []),
+        Region(host_block),
+    )
+    host.attributes["entry_point"] = UnitAttr()
+    pattern0 = _empty_func_op(
+        "entry_pattern0",
+        (_memory_type(), _memory_type()),
+        transform_pipeline="COMPILE_ARGS: --pass lower-dma-memory-hierarchy",
+    )
+    pattern1 = _empty_func_op(
+        "entry_pattern1",
         (_memory_type(), _memory_type()),
         transform_pipeline="COMPILE_ARGS: --pass lower-dma-memory-hierarchy",
     )

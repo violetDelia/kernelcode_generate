@@ -19,10 +19,12 @@ API 列表:
 
 from __future__ import annotations
 
-from xdsl.dialects.builtin import StringAttr, UnregisteredOp
+from xdsl.dialects.builtin import IntAttr, IntegerAttr, StringAttr, UnregisteredOp
+from xdsl.ir import SSAValue
 
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
+    SymbolConstOp,
     SymbolDivOp,
     SymbolEqOp,
     SymbolFloorDivOp,
@@ -159,6 +161,47 @@ def _emit_npu_demo_symbol_binary_or_compare_value(value, ctx) -> str:
         if isinstance(value.type, SymbolValueType):
             return value.type.expr.expr.data
         raise ctx.emit_error(owner.name, "symbol.const result must be !symbol.int")
+    if owner_name == "symbol.eq":
+        lhs_value = SSAValue.get(owner.operands[0])
+        rhs_value = SSAValue.get(owner.operands[1])
+        lhs_enum = ctx.lookup_cached_name("npu_demo_tuner_select_enum", id(lhs_value))
+        rhs_enum = ctx.lookup_cached_name("npu_demo_tuner_select_enum", id(rhs_value))
+        lhs_pattern_count = ctx.lookup_cached_name("npu_demo_tuner_select_pattern_count", id(lhs_value))
+        rhs_pattern_count = ctx.lookup_cached_name("npu_demo_tuner_select_pattern_count", id(rhs_value))
+        lhs_const: int | None = None
+        rhs_const: int | None = None
+        lhs_owner = lhs_value.owner
+        rhs_owner = rhs_value.owner
+        if isinstance(lhs_owner, SymbolConstOp):
+            lhs_const = lhs_owner.value.data
+        else:
+            lhs_owner_name_attr = getattr(lhs_owner, "attributes", {}).get("op_name__")
+            lhs_owner_name = lhs_owner_name_attr.data if isinstance(lhs_owner_name_attr, StringAttr) else getattr(lhs_owner, "name", "")
+            lhs_value_attr = getattr(lhs_owner, "attributes", {}).get("value")
+            if lhs_owner_name == "symbol.const" and isinstance(lhs_value_attr, IntAttr):
+                lhs_const = lhs_value_attr.data
+            elif lhs_owner_name == "symbol.const" and isinstance(lhs_value_attr, IntegerAttr):
+                lhs_const = lhs_value_attr.value.data
+        if isinstance(rhs_owner, SymbolConstOp):
+            rhs_const = rhs_owner.value.data
+        else:
+            rhs_owner_name_attr = getattr(rhs_owner, "attributes", {}).get("op_name__")
+            rhs_owner_name = rhs_owner_name_attr.data if isinstance(rhs_owner_name_attr, StringAttr) else getattr(rhs_owner, "name", "")
+            rhs_value_attr = getattr(rhs_owner, "attributes", {}).get("value")
+            if rhs_owner_name == "symbol.const" and isinstance(rhs_value_attr, IntAttr):
+                rhs_const = rhs_value_attr.data
+            elif rhs_owner_name == "symbol.const" and isinstance(rhs_value_attr, IntegerAttr):
+                rhs_const = rhs_value_attr.value.data
+        if lhs_enum is not None and lhs_pattern_count is not None and rhs_const is not None:
+            pattern_count = int(lhs_pattern_count)
+            if 0 <= rhs_const < pattern_count:
+                lhs_expr = emit_c_value(lhs_value, ctx)
+                return f"{lhs_expr} == {lhs_enum}::pattern{rhs_const}"
+        if rhs_enum is not None and rhs_pattern_count is not None and lhs_const is not None:
+            pattern_count = int(rhs_pattern_count)
+            if 0 <= lhs_const < pattern_count:
+                rhs_expr = emit_c_value(rhs_value, ctx)
+                return f"{rhs_expr} == {rhs_enum}::pattern{lhs_const}"
     lhs = emit_c_value(owner.operands[0], ctx)
     rhs = emit_c_value(owner.operands[1], ctx)
     if isinstance(owner, SymbolMinOp) or owner_name == "symbol.min":

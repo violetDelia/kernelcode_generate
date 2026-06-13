@@ -8,7 +8,7 @@ API 列表:
 - `class TunerCostOp(operands: list[SSAValue | Operation], *, cost_kind: Attribute, op_name: Attribute, extra_attrs: dict[str, Attribute] | None = None, result_type: Attribute = SymbolValueType.from_expr("COST"))`
 - `class TunerLaunchOp(callee: str | SymbolRefAttr, args: Sequence[SSAValue | Operation] = ())`
 - `class TunerParamOp(result_type: Attribute)`
-- `class TunerSelectOp(patterns: Sequence[str | SymbolRefAttr], result_type: Attribute = SymbolValueType.from_expr("pattern_id"))`
+- `class TunerSelectOp(patterns: Sequence[str | SymbolRefAttr], result_type: Attribute = SymbolValueType.from_expr("pattern_id"), *, args: Sequence[SSAValue | Operation] = (), tuner_args: Sequence[SSAValue | Operation] = ())`
 
 使用示例:
 - `from kernel_gen.dialect.tuner import Tuner, TunerCostOp, TunerSelectOp`

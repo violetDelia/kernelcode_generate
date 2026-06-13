@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-- 定义当前仓库内置 DMA / Kernel / 透明 cast memory op 的默认 template-name 约束注册入口。
+- 定义当前仓库内置 DMA / Kernel / Tuner / 透明 cast memory op 的默认 template-name 约束注册入口。
 - 本文件只注册约束，不承载 pass 遍历、graph 求解或 IR 写回逻辑。
 - 当前文件内 builder 只作为注册表回调，不是跨文件公开 API。
 
@@ -21,8 +21,9 @@
 - `dma.copy`、`dma.reshape`、`dma.slice`、`dma.deslice`、`dma.load`、`dma.store`、`dma.broadcast`、`dma.transpose` 等同 dtype/layout 流转 op 使用 Same 语义。
 - `dma.view` 与 `dma.reinterpret` 普通 source/result 使用 Same 语义；当 source 是一维 `i8` byte backing pool 且 result 是 typed memory 时，仅校验 source/result，不把 byte pool 与 typed view/reinterpret 合并为同一 template family。
 - `kernel.binary_elewise`、`kernel.exp`、`kernel.reduce`、`kernel.reduce_min`、`kernel.img2col1d`、`kernel.img2col2d`、`kernel.select` 使用 Same 语义。
-- `arch.get_dynamic_memory`、`arch.launch`、`dma.alloc`、`dma.make_ring`、`dma.current_ring`、`dma.advance_ring`、`dma.fill`、`dma.free`、`dma.cast`、`dma.subview`、`kernel.matmul`、`symbol.get_dim`、`symbol.get_stride` 使用 VerifyOnly 语义。
+- `arch.get_dynamic_memory`、`arch.launch`、`dma.alloc`、`dma.make_ring`、`dma.current_ring`、`dma.advance_ring`、`dma.fill`、`dma.free`、`dma.cast`、`dma.subview`、`kernel.matmul`、`tuner.select`、`symbol.get_dim`、`symbol.get_stride` 使用 VerifyOnly 语义。
 - `kernel.matmul` 的 out/lhs/rhs 不由 matmul 本身合并为同一 family。
+- `tuner.select` 的 memory operands 只表示 pattern launch args 或 selector state，不由 selector 本身合并为同一 family。
 - `nn.*` op 约束不属于本计划完成态。
 
 ## API 详细说明

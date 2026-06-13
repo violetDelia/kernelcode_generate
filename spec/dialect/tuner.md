@@ -11,7 +11,7 @@
 - `class Tuner(Dialect)`
 - `class TunerParamOp(result_type: Attribute)`
 - `class TunerCostOp(operands: list[SSAValue | Operation], *, cost_kind: Attribute, op_name: Attribute, extra_attrs: dict[str, Attribute] | None = None, result_type: Attribute = SymbolValueType.from_expr("COST"))`
-- `class TunerSelectOp(patterns: Sequence[str | SymbolRefAttr], result_type: Attribute = SymbolValueType.from_expr("pattern_id"))`
+- `class TunerSelectOp(patterns: Sequence[str | SymbolRefAttr], result_type: Attribute = SymbolValueType.from_expr("pattern_id"), *, args: Sequence[SSAValue | Operation] = (), tuner_args: Sequence[SSAValue | Operation] = ())`
 - `class TunerLaunchOp(callee: str | SymbolRefAttr, args: Sequence[SSAValue | Operation] = ())`
 
 ## 文档信息
@@ -53,8 +53,10 @@
 - `tuner.cost` 的 `cost_kind` 必须为非空字符串 attr，`op_name` 必须为非空字符串。
 - `tuner.cost` 不再公开 `kind`、`device_func` 两个 attrs；若实现仍生成这两个字段，verifier 必须显式拒绝。
 - `tuner.cost` 不求值、不查表、不裁剪节点；“不同 `cost_kind` 下某类 op 是否为 0”属于后续 evaluator 语义。
-- `tuner.select` 只接受非空 `ArrayAttr[SymbolRefAttr] patterns`，每个 pattern 必须是 flat `@symbol`，结果类型固定为 `!symbol.int<#symbol.expr<pattern_id>>`。
-- `tuner.select` 第一版源码发射固定选择 pattern0，即 npu_demo EmitC 生成 `S_INT <name> = 0;`。
+- `tuner.select` 只接受非空 `ArrayAttr[SymbolRefAttr] patterns`，每个 pattern 必须是 flat `@symbol`，结果类型固定为 `!symbol.int<#symbol.expr<pattern_id>>`；重复 pattern 不作为稳定失败，列表位置代表候选 id。
+- `tuner.select` 支持两组可区分 variadic operands：`args` 表示透传给真实 pattern launch 的 runtime operands，`tuner_args` 表示传给 selector function 的选择相关 runtime state；两组都为空时打印旧式短语法，只打印非空 `args(...)` / `tuner_args(...)` 组及其 type list。
+- `tuner.select args(...)` 的 `args` 不自动传给 selector function，除非同一个 value 也显式出现在 `tuner_args(...)` 中。
+- npu_demo entry dispatcher module 路径为 `tuner.select` 生成 entry 级 pattern enum 与 selector function，selector function 返回 enum 且首版固定返回 `pattern0`；普通节点级 `tuner.select` fallback 仍可生成 `S_INT <name> = 0;` 作为默认 pattern0 占位。
 - `tuner.launch` 只接受 flat `@callee` 与按原顺序透传的 operands，无 result；文本中的 arg type list 必须与 operands 数量和类型完全一致。
 - 裸 `tuner.launch` 不允许进入源码生成；必须先由 `outline-device-kernel` 降为 `arch.launch`。
 - 本方言不定义任何超参数值求解、范围约束、搜索策略、默认值逻辑或真实 cost evaluator。
@@ -121,22 +123,28 @@
 - 功能说明：表示 cost function 内某个原 op 的局部成本，记录原 op operands、原 attrs 与 pass-owned metadata，并返回 `!symbol.int<#symbol.expr<expr>>` 局部成本值。
 - 注意事项：`operands` 按原 op operands 原顺序透传，原 op 无 operands 时传空列表；`cost_kind` 表示当前 cost function 的统计视角，允许任意非空字符串 attr；`op_name` 必须为非空字符串 attr；`extra_attrs` 用于平铺保留原 op attributes；若原 op 存在业务字段 `kind`，生成方必须先改名为领域字段，例如 `kernel_kind`；`tuner.cost` 自身不公开旧 metadata attr `kind` 或 `device_func`，verifier 必须拒绝这两个字段；结果类型固定为单结果 `!symbol.int<#symbol.expr<expr>>`；本 op 无 region、不支持多结果、不负责把局部成本汇总成函数返回值。
 
-### `class TunerSelectOp(patterns: Sequence[str | SymbolRefAttr], result_type: Attribute = SymbolValueType.from_expr("pattern_id"))`
+### `class TunerSelectOp(patterns: Sequence[str | SymbolRefAttr], result_type: Attribute = SymbolValueType.from_expr("pattern_id"), *, args: Sequence[SSAValue | Operation] = (), tuner_args: Sequence[SSAValue | Operation] = ())`
 
-- api：`class TunerSelectOp(patterns: Sequence[str | SymbolRefAttr], result_type: Attribute = SymbolValueType.from_expr("pattern_id"))`
+- api：`class TunerSelectOp(patterns: Sequence[str | SymbolRefAttr], result_type: Attribute = SymbolValueType.from_expr("pattern_id"), *, args: Sequence[SSAValue | Operation] = (), tuner_args: Sequence[SSAValue | Operation] = ())`
 - 参数：
   - `patterns`：候选 pattern 函数符号列表；类型 `Sequence[str | SymbolRefAttr]`；必须非空；字符串按 flat symbol 名称规整为 `SymbolRefAttr`；嵌套 symbol ref、空 symbol 和非 symbol attr 必须拒绝。
   - `result_type`：选择结果类型；类型 `Attribute`；默认值 `SymbolValueType.from_expr("pattern_id")`；必须等于 `!symbol.int<#symbol.expr<pattern_id>>`。
+  - `args`：透传给真实 pattern launch 的 runtime operands；类型 `Sequence[SSAValue | Operation]`；默认空序列；文本 type list 必须与 operands 数量和类型完全一致。
+  - `tuner_args`：传给 selector function 的选择相关 runtime state；类型 `Sequence[SSAValue | Operation]`；默认空序列；文本 type list 必须与 operands 数量和类型完全一致；不自动包含 `args`。
 - 返回值：`TunerSelectOp` 实例。
 - 使用示例：
 
   ```python
   from kernel_gen.dialect.tuner import TunerSelectOp
 
-  select = TunerSelectOp(["matmul_entry_pattern0", "matmul_entry_pattern1"])
+  select = TunerSelectOp(
+      ["matmul_entry_pattern0", "matmul_entry_pattern1"],
+      args=(out, lhs, rhs),
+      tuner_args=(),
+  )
   ```
 - 功能说明：在 host dispatcher 中声明从候选 pattern 中选择一个 pattern id。
-- 注意事项：本 op 不定义真实调度策略；npu_demo 源码发射当前固定选择 `0`；不得使用普通整数、index 或其它 symbol 表达替代 `pattern_id` 结果类型。
+- 注意事项：本 op 不定义真实调度策略；canonical printer 只打印非空 operand 组，两组均空时保留 `tuner.select {patterns = [...]} : !symbol.int<#symbol.expr<pattern_id>>` 旧式语法；只有 `args` 非空时打印 `args(...) : args(...) -> result`，只有 `tuner_args` 非空时打印 `tuner_args(...) : tuner_args(...) -> result`，两组都非空时同时打印两组；不得使用普通整数、index 或其它 symbol 表达替代 `pattern_id` 结果类型；不新增 `patterns` 唯一性硬检查。
 
 ### `class TunerLaunchOp(callee: str | SymbolRefAttr, args: Sequence[SSAValue | Operation] = ())`
 
@@ -160,12 +168,12 @@
 - 测试文件：
   - `test/dialect/tuner/`
 - 执行命令：
-  - `pytest -q test/dialect/tuner/ -k "tuner_cost"`
+  - `pytest -q test/dialect/tuner/test_tuner.py`
 
 ### 测试目标
 
 - 验证 `tuner.cost` 的 parse/print、operand 透传、`!symbol.int<#symbol.expr<...>>` 结果类型、open-kind verifier 与错误路径。
-- 验证 `tuner.select` 的 `patterns`、`pattern_id` 结果类型与 `tuner.launch` 的 flat callee、arg type list、空 result 边界。
+- 验证 `tuner.select` 的 `patterns`、`args` / `tuner_args` 四种 canonical syntax、`pattern_id` 结果类型、type list 失败边界与 `tuner.launch` 的 flat callee、arg type list、空 result 边界。
 
 ### 功能与用例清单
 

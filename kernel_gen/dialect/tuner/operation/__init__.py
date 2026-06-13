@@ -6,7 +6,7 @@
 API 列表:
 - `class TunerParamOp(result_type: Attribute)`
 - `class TunerCostOp(...)`
-- `class TunerSelectOp(...)`
+- `class TunerSelectOp(patterns: Sequence[str | SymbolRefAttr], result_type: Attribute = SymbolValueType.from_expr("pattern_id"), *, args: Sequence[SSAValue | Operation] = (), tuner_args: Sequence[SSAValue | Operation] = ())`
 - `class TunerLaunchOp(...)`
 
 使用示例:

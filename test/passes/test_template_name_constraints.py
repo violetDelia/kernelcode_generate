@@ -33,6 +33,7 @@ from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAdvanceRingOp, DmaCopyOp, DmaCurrentRingOp, DmaMakeRingOp, DmaRingType
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
+from kernel_gen.dialect.tuner import TunerSelectOp
 from kernel_gen.passes.template_name.constraints import (
     SameSpec,
     TemplateValueRef,
@@ -162,3 +163,18 @@ def test_template_name_default_constraints_register_dma_ring_ops_verify_only() -
     assert all(isinstance(item, VerifyOnly) for item in build_template_constraints(make_ring))
     assert all(isinstance(item, VerifyOnly) for item in build_template_constraints(current))
     assert all(isinstance(item, VerifyOnly) for item in build_template_constraints(advance))
+
+
+def test_template_name_default_constraints_register_tuner_select_verify_only() -> None:
+    """验证默认约束覆盖 tuner.select memory operands，且不合并不同 pattern args。"""
+
+    register_default_template_constraints()
+    select = TunerSelectOp(
+        ["entry_pattern0", "entry_pattern1"],
+        args=(create_ssa_value(_memory_type()), create_ssa_value(_memory_type())),
+    )
+    constraints = build_template_constraints(select)
+
+    assert len(constraints) == 2
+    assert all(isinstance(item, VerifyOnly) for item in constraints)
+    assert not any(isinstance(item, Same) for item in constraints)

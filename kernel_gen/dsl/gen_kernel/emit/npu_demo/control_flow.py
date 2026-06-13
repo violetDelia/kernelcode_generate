@@ -21,8 +21,9 @@ from __future__ import annotations
 
 from xdsl.dialects import func, scf
 from xdsl.dialects.builtin import IntAttr, IntegerAttr, StringAttr
-from xdsl.ir import Operation, Region
+from xdsl.ir import Operation, Region, SSAValue
 
+from kernel_gen.dialect.symbol import SymbolConstOp
 from ..register import emit_c_impl
 
 
@@ -49,12 +50,17 @@ def _emit_generic_symbol_const(op: Operation, ctx) -> str | None:
     功能说明:
     - `kernel-pattern-attach` 为锁定公开 IR 文本会生成 generic `"symbol.const"()`。
     - 当 dispatcher 被 `arch-parallelize` 包入 `scf.if` 后，本 helper 在分支发射路径中绑定该 SSA 名称。
+    - 用于 enum selector 比较的 pattern id 常量不生成局部变量，避免阻断互斥分支链。
 
     使用示例:
     - stmt = _emit_generic_symbol_const(op, ctx)
     """
 
-    if _generic_op_name(op) != "symbol.const":
+    op_name = op.name
+    op_name_attr = op.attributes.get("op_name__")
+    if isinstance(op_name_attr, StringAttr):
+        op_name = op_name_attr.data
+    if op_name != "symbol.const":
         return None
     if len(op.results) != 1:
         raise ctx.emit_error("symbol.const", "generic symbol.const must have one result")
@@ -65,6 +71,21 @@ def _emit_generic_symbol_const(op: Operation, ctx) -> str | None:
         value = value_attr.value.data
     else:
         raise ctx.emit_error("symbol.const", "generic symbol.const value must be int attr")
+    for use in op.results[0].uses:
+        user = use.operation
+        if len(user.operands) != 2:
+            continue
+        user_name = user.name
+        user_name_attr = user.attributes.get("op_name__")
+        if isinstance(user_name_attr, StringAttr):
+            user_name = user_name_attr.data
+        if user_name != "symbol.eq" or use.index not in (0, 1):
+            continue
+        other_value = SSAValue.get(user.operands[1 - use.index])
+        enum_name = ctx.lookup_cached_name("npu_demo_tuner_select_enum", id(other_value))
+        pattern_count = ctx.lookup_cached_name("npu_demo_tuner_select_pattern_count", id(other_value))
+        if enum_name is not None and pattern_count is not None and 0 <= value < int(pattern_count):
+            return ""
     result_name = ctx.create_or_get_name(op.results[0])
     return f"{ctx.current_indent}S_INT {result_name} = {value};"
 
@@ -75,19 +96,67 @@ def _emit_generic_symbol_eq(op: Operation, ctx) -> str | None:
     功能说明:
     - 将 generic compare 转成布尔局部变量，并复用公开 `emit_c_value(...)` 处理左右操作数。
     - 仅处理 `kernel-pattern-attach` dispatcher 生成的二元比较形态。
+    - selector enum 场景中，把 compare result 绑定为 enum comparison 表达式，让 `scf.if`
+      条件直接体现互斥 pattern 分支。
 
     使用示例:
     - stmt = _emit_generic_symbol_eq(op, ctx)
     """
 
-    if _generic_op_name(op) != "symbol.eq":
+    op_name = op.name
+    op_name_attr = op.attributes.get("op_name__")
+    if isinstance(op_name_attr, StringAttr):
+        op_name = op_name_attr.data
+    if op_name != "symbol.eq":
         return None
     if len(op.operands) != 2 or len(op.results) != 1:
         raise ctx.emit_error("symbol.eq", "generic symbol.eq must have two operands and one result")
     from .. import emit_c_value
 
-    lhs_expr = emit_c_value(op.operands[0], ctx)
-    rhs_expr = emit_c_value(op.operands[1], ctx)
+    lhs_value = SSAValue.get(op.operands[0])
+    rhs_value = SSAValue.get(op.operands[1])
+    lhs_enum = ctx.lookup_cached_name("npu_demo_tuner_select_enum", id(lhs_value))
+    rhs_enum = ctx.lookup_cached_name("npu_demo_tuner_select_enum", id(rhs_value))
+    lhs_pattern_count = ctx.lookup_cached_name("npu_demo_tuner_select_pattern_count", id(lhs_value))
+    rhs_pattern_count = ctx.lookup_cached_name("npu_demo_tuner_select_pattern_count", id(rhs_value))
+    lhs_const: int | None = None
+    rhs_const: int | None = None
+    lhs_owner = lhs_value.owner
+    rhs_owner = rhs_value.owner
+    if isinstance(lhs_owner, SymbolConstOp):
+        lhs_const = lhs_owner.value.data
+    else:
+        lhs_owner_name_attr = getattr(lhs_owner, "attributes", {}).get("op_name__")
+        lhs_owner_name = lhs_owner_name_attr.data if isinstance(lhs_owner_name_attr, StringAttr) else getattr(lhs_owner, "name", "")
+        lhs_value_attr = getattr(lhs_owner, "attributes", {}).get("value")
+        if lhs_owner_name == "symbol.const" and isinstance(lhs_value_attr, IntAttr):
+            lhs_const = lhs_value_attr.data
+        elif lhs_owner_name == "symbol.const" and isinstance(lhs_value_attr, IntegerAttr):
+            lhs_const = lhs_value_attr.value.data
+    if isinstance(rhs_owner, SymbolConstOp):
+        rhs_const = rhs_owner.value.data
+    else:
+        rhs_owner_name_attr = getattr(rhs_owner, "attributes", {}).get("op_name__")
+        rhs_owner_name = rhs_owner_name_attr.data if isinstance(rhs_owner_name_attr, StringAttr) else getattr(rhs_owner, "name", "")
+        rhs_value_attr = getattr(rhs_owner, "attributes", {}).get("value")
+        if rhs_owner_name == "symbol.const" and isinstance(rhs_value_attr, IntAttr):
+            rhs_const = rhs_value_attr.data
+        elif rhs_owner_name == "symbol.const" and isinstance(rhs_value_attr, IntegerAttr):
+            rhs_const = rhs_value_attr.value.data
+    if lhs_enum is not None and lhs_pattern_count is not None and rhs_const is not None:
+        pattern_count = int(lhs_pattern_count)
+        if 0 <= rhs_const < pattern_count:
+            lhs_expr = emit_c_value(lhs_value, ctx)
+            ctx.bind_name(op.results[0], f"{lhs_expr} == {lhs_enum}::pattern{rhs_const}")
+            return ""
+    if rhs_enum is not None and rhs_pattern_count is not None and lhs_const is not None:
+        pattern_count = int(rhs_pattern_count)
+        if 0 <= lhs_const < pattern_count:
+            rhs_expr = emit_c_value(rhs_value, ctx)
+            ctx.bind_name(op.results[0], f"{rhs_expr} == {rhs_enum}::pattern{lhs_const}")
+            return ""
+    lhs_expr = emit_c_value(lhs_value, ctx)
+    rhs_expr = emit_c_value(rhs_value, ctx)
     result_type = ctx.dispatch_type(op.results[0].type)
     result_name = ctx.create_or_get_name(op.results[0])
     return f"{ctx.current_indent}{result_type} {result_name} = ({lhs_expr} == {rhs_expr});"
