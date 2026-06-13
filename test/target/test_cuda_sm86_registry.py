@@ -3,7 +3,7 @@
 
 功能说明:
 - 通过公开 target registry API 验证 `cuda_sm86` 内置 target 可查询。
-- 锁定 CUDA SM86 首版只复用既有 hardware 字段，不新增 compute capability 字段。
+- 锁定 CUDA SM86 首版只复用既有 hardware 字段，不新增运行时 SM 探测字段。
 
 使用示例:
 - pytest -q test/target/test_cuda_sm86_registry.py

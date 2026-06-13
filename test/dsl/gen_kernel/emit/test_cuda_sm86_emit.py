@@ -3,7 +3,7 @@
 
 功能说明:
 - 通过公开 `gen_kernel(...)` / `emit_c(...)` 入口验证 CUDA SM86 backend 自动加载与 SourceBundle 输出。
-- 覆盖 generated CUDA source 的 final IR markers、stable hash、entry ABI 和 npu_demo 残留扫描。
+- 覆盖 generated CUDA source 的 final IR comments、stable hash、entry ABI 和 npu_demo 残留扫描。
 
 使用示例:
 - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py
@@ -19,11 +19,12 @@ from __future__ import annotations
 import ast
 from collections.abc import Callable
 from pathlib import Path
+import shutil
 import sys
 
 import pytest
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, ModuleOp, StringAttr, f32
+from xdsl.dialects.builtin import ArrayAttr, ModuleOp, StringAttr, f32, i8
 from xdsl.ir import Block, Region
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -35,12 +36,13 @@ from kernel.flash_attention.inputs_static_tile_static import flash_attention_inp
 from kernel.matmul.inputs_static_tile_static import matmul_inputs_static_tile_static_kernel
 from kernel_gen.core.config import reset_config, set_dump_dir, set_target
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaFreeOp
+from kernel_gen.dialect.dma import DmaAdvanceRingOp, DmaAllocOp, DmaCopyOp, DmaCurrentRingOp, DmaFreeOp, DmaMakeRingOp, DmaRingType
 from kernel_gen.dialect.kernel import KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolExprAttr
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr
 from kernel_gen.dsl.ast.mlir_gen import mlir_gen
 from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c, gen_kernel
+from kernel_gen.execute_engine import ExecutionEngine
 from kernel_gen.pipeline import build_cuda_sm86_lowering_pipeline
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.type import NumericType
@@ -169,6 +171,69 @@ def _make_minimal_c5_matmul_module(
     return ModuleOp([func_op])
 
 
+def _make_minimal_dma_ring_matmul_module() -> ModuleOp:
+    """构造含 `dma.make_ring/current/advance` 的最小 CUDA final IR。
+
+    功能说明:
+    - 使用一维 i8 `dma.alloc` byte-pool backing 构造 tlm1 f32 ring slot。
+    - 将 current slot 作为 matmul lhs，保留 advance side effect，并写回 global out。
+
+    使用示例:
+    - module = _make_minimal_dma_ring_matmul_module()
+    """
+
+    out_shape = ArrayAttr([SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("4")])
+    out_stride = ArrayAttr([SymbolExprAttr.from_expr("4"), SymbolExprAttr.from_expr("1")])
+    lhs_shape = ArrayAttr([SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("3")])
+    lhs_stride = ArrayAttr([SymbolExprAttr.from_expr("3"), SymbolExprAttr.from_expr("1")])
+    rhs_shape = ArrayAttr([SymbolExprAttr.from_expr("3"), SymbolExprAttr.from_expr("4")])
+    rhs_stride = ArrayAttr([SymbolExprAttr.from_expr("4"), SymbolExprAttr.from_expr("1")])
+    out_type = NnMemoryType(out_shape, out_stride, f32, NnMemorySpaceAttr.from_name("global"))
+    lhs_type = NnMemoryType(lhs_shape, lhs_stride, f32, NnMemorySpaceAttr.from_name("global"))
+    rhs_type = NnMemoryType(rhs_shape, rhs_stride, f32, NnMemorySpaceAttr.from_name("global"))
+    block = Block(arg_types=[out_type, lhs_type, rhs_type])
+    staged_out_type = NnMemoryType(out_shape, out_stride, f32, NnMemorySpaceAttr.from_name("tlm1"))
+    ring_slot_type = NnMemoryType(lhs_shape, lhs_stride, f32, NnMemorySpaceAttr.from_name("tlm1"))
+    staged_rhs_type = NnMemoryType(rhs_shape, rhs_stride, f32, NnMemorySpaceAttr.from_name("tlm1"))
+    backing_type = NnMemoryType(
+        ArrayAttr([SymbolExprAttr.from_expr("64")]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
+        i8,
+        NnMemorySpaceAttr.from_name("tlm1"),
+    )
+    staged_out = DmaAllocOp([], staged_out_type)
+    staged_rhs = DmaAllocOp([], staged_rhs_type)
+    backing = DmaAllocOp([], backing_type)
+    ring_count = SymbolConstOp(2)
+    ring_offset = SymbolConstOp(32)
+    ring = DmaMakeRingOp(backing.result, ring_count.result, ring_offset.result, DmaRingType(ring_slot_type))
+    current_lhs = DmaCurrentRingOp(ring.result)
+    advance_lhs = DmaAdvanceRingOp(ring.result)
+    block.add_ops(
+        [
+            staged_out,
+            staged_rhs,
+            backing,
+            ring_count,
+            ring_offset,
+            ring,
+            current_lhs,
+            DmaCopyOp(staged_out.result, block.args[0]),
+            DmaCopyOp(current_lhs.result, block.args[1]),
+            DmaCopyOp(staged_rhs.result, block.args[2]),
+            KernelMatmulOp(staged_out.result, current_lhs.result, staged_rhs.result, NnMemorySpaceAttr.from_name("tlm1")),
+            advance_lhs,
+            DmaCopyOp(block.args[0], staged_out.result),
+            DmaFreeOp(staged_out.result),
+            DmaFreeOp(staged_rhs.result),
+            DmaFreeOp(backing.result),
+            func.ReturnOp(),
+        ]
+    )
+    func_op = func.FuncOp("minimal_dma_ring_matmul", ([out_type, lhs_type, rhs_type], []), Region(block))
+    return ModuleOp([func_op])
+
+
 MATMUL_ANNOTATIONS = {
     "out": "Tensor[f32, 2, 4]",
     "lhs": "Tensor[f32, 2, 3]",
@@ -269,25 +334,25 @@ def _extract_cuda_sm86_ir_hash(source: str) -> str:
     raise AssertionError("missing kg.cuda.ir.hash marker")
 
 
-def _extract_cuda_sm86_executable_trace_body(source: str) -> str:
-    """读取 generated CUDA trace kernel 的非注释可执行 body。
+def _extract_cuda_sm86_device_body(source: str) -> str:
+    """读取 generated CUDA device body 的非注释可执行内容。
 
     功能说明:
     - 只解析公开 `emit_c(...)` 返回的 SourceBundle aggregate string。
-    - 剥离空行与纯注释行后返回 hash 专属 trace kernel body，固定 fragment 假绿时会找不到该 body。
+    - 剥离空行与纯注释行后返回 hash 专属 device body，固定模板假绿时会找不到真实 wrapper calls。
 
     使用示例:
-    - body = _extract_cuda_sm86_executable_trace_body(source)
+    - body = _extract_cuda_sm86_device_body(source)
     """
 
     lines = source.splitlines()
     start_index = -1
     for index, line in enumerate(lines):
-        if line.startswith("__global__ void kg_cuda_sm86_ir_trace_kernel_"):
+        if line.startswith("__device__ void kg_cuda_sm86_device_body_"):
             start_index = index
             break
     if start_index < 0:
-        raise AssertionError("missing generated executable trace kernel")
+        raise AssertionError("missing generated CUDA SM86 device body")
     depth = 0
     in_body = False
     executable_lines: list[str] = []
@@ -315,7 +380,7 @@ def test_cuda_sm86_emit_module_returns_source_bundle() -> None:
 
     功能说明:
     - 通过公开 `emit_c(...)` 触发 backend auto-load。
-    - 锁定 `.cu/.cuh` artifact marker、CUDA include、final IR marker/hash、C5 all-TLM1 和 C ABI entry。
+    - 锁定 `.cu/.cuh` artifact marker、CUDA include、final IR comments/hash、C5 all-TLM1 和 C ABI entry。
 
     使用示例:
     - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py -k source_bundle
@@ -332,33 +397,55 @@ def test_cuda_sm86_emit_module_returns_source_bundle() -> None:
     assert "// kg.cuda.ir.hash: " in source
     stable_hash = _extract_cuda_sm86_ir_hash(source)
     assert f"// kg.cuda.ir.entry_symbol: kg_cuda_sm86_execute_{stable_hash}_ir" in source
-    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_matmul_ir" in source
+    assert f"// kg.cuda.ir.generated_kernel_symbol: kg_cuda_sm86_generated_kernel_{stable_hash}" in source
+    assert f"// kg.cuda.ir.device_body_symbol: kg_cuda_sm86_device_body_{stable_hash}" in source
     assert "// kg.cuda.ir.memory_spaces: global,tlm1,tsm" in source
-    assert "// kg.cuda.ir.source.fragment: op=kernel.matmul" in source
     assert "// kg.cuda.ir.op: tuner.select" in source
     assert "// kg.cuda.ir.op: arch.launch" in source
     assert "// kg.cuda.ir.op: dma.reinterpret" in source
     assert "// kg.cuda.ir.op: dma.copy" in source
     assert "// kg.cuda.ir.op: kernel.matmul" in source
     assert "// kg.cuda.ir.matmul.materialization: out=tlm1,lhs=tlm1,rhs=tlm1,write_back=visible" in source
-    assert "__global__ void kg_cuda_sm86_ir_matmul_kernel" in source
-    assert "__global__ void kg_cuda_sm86_ir_img2col2d_kernel" not in source
-    assert "__global__ void kg_cuda_sm86_ir_reduce_exp_kernel" not in source
+    assert f"__device__ void kg_cuda_sm86_device_body_{stable_hash}" in source
+    assert f"__global__ void kg_cuda_sm86_generated_kernel_{stable_hash}" in source
+    assert f"cuda_sm86::launch<1, 256, 1, 49152, kg_cuda_sm86_generated_kernel_{stable_hash}>" in source
+    assert "if (threadIdx.x == 0)" in source
+    assert "cuda_sm86::ArgSlot* kg_cuda_sm86_device_slots = nullptr" in source
+    assert "cuda_sm86::ArgSlot* kg_cuda_sm86_host_device_slots = nullptr" in source
+    assert "long long** kg_cuda_sm86_device_shapes = nullptr" in source
+    assert "long long** kg_cuda_sm86_device_strides = nullptr" in source
+    assert "void** kg_cuda_sm86_device_data = nullptr" in source
+    assert "cuda_sm86::detail::copy_host_to_device<long long>" in source
+    assert "cuda_sm86::detail::copy_host_to_device<float>" in source
+    assert "cuda_sm86::detail::copy_host_to_device<cuda_sm86::ArgSlot>" in source
+    assert "cuda_sm86::detail::copy_device_to_host<float>" in source
+    assert "kg_cuda_sm86_host_device_slots[kg_cuda_sm86_slot_index].shape = kg_cuda_sm86_device_shapes" in source
+    assert "kg_cuda_sm86_host_device_slots[kg_cuda_sm86_slot_index].data = kg_cuda_sm86_device_data" in source
+    assert "host_ctx, kg_cuda_sm86_device_slots, count, kg_cuda_sm86_device_status" in source
+    assert "host_ctx, slots, count, kg_cuda_sm86_device_status" not in source
+    assert "int* kg_cuda_sm86_device_status = nullptr" in source
+    assert "cudaMemcpy(&kg_cuda_sm86_host_status, kg_cuda_sm86_device_status, sizeof(int), cudaMemcpyDeviceToHost)" in source
     assert "mma.sync.aligned.m16n8k8" in source
     assert "tensor_core_probe" not in source
     assert "acc += lhs" not in source
-    assert "cuda_sm86::detail::device_alloc" in source
-    assert "cuda_sm86::detail::is_f32_memory" in source
+    assert "cuda_sm86::detail::memory_from_slot" in source
+    assert "cuda_sm86::load<" in source
+    assert "cuda_sm86::deslice<MemorySpace::GM" in source
+    assert "cuda_sm86::matmul<" in source
+    assert "(void)cuda_sm86::" not in source
+    assert "delete[] kg_v_" in source
     assert 'extern "C" int kg_execute_entry(cuda_sm86::ArgSlot* slots, unsigned long long count)' in source
-    assert f"__global__ void kg_cuda_sm86_ir_trace_kernel_{stable_hash}" in source
     assert f"int kg_cuda_sm86_execute_{stable_hash}_ir(cuda_sm86::ArgSlot* slots, unsigned long long count)" in source
     assert f"return kg_cuda_sm86_execute_{stable_hash}_ir(slots, count);" in source
-    assert "return kg_cuda_sm86_execute_matmul_ir(slots, count);" in source
-    assert "seed = kg_cuda_sm86_ir_mix_" in _extract_cuda_sm86_executable_trace_body(source)
+    fixed_matmul_entry = "kg_cuda_sm86_execute_" + "matmul_ir"
+    assert f"return {fixed_matmul_entry}(slots, count);" not in source
+    assert f"int {fixed_matmul_entry}(" not in source
+    assert "kg_cuda_sm86_ir_record_words" in _extract_cuda_sm86_device_body(source)
     for token in OLD_CUDA_SM86_SOURCE_TOKENS:
         assert token not in source
     include_text = Path("include/cuda_sm86/cuda_sm86.cuh").read_text(encoding="utf-8")
     arch_text = Path("include/cuda_sm86/Arch.h").read_text(encoding="utf-8")
+    source_builder_text = Path("kernel_gen/dsl/gen_kernel/emit/cuda_sm86/source_bundle.py").read_text(encoding="utf-8")
     arch_api_block = arch_text.split("API 列表:", 1)[1].split("helper 清单:", 1)[0]
     spec_text = Path("spec/include/cuda_sm86/cuda_sm86.md").read_text(encoding="utf-8")
     spec_api_block = spec_text.split("## API 列表", 1)[1].split("## 文档信息", 1)[0]
@@ -374,15 +461,105 @@ def test_cuda_sm86_emit_module_returns_source_bundle() -> None:
     assert "cuda_sm86::detail" not in arch_api_block
     assert "`struct cuda_sm86::ArgSlot`" in spec_api_block
     assert "cuda_sm86::detail" not in spec_api_block
+    dmar_ring_ctor_signature = "`template <MemorySpace Space, typename SlotT, typename BackingT> __device__ cuda_sm86::DmaRing<Space, SlotT, BackingT>::DmaRing(Memory<Space, BackingT>& backing, S_INT num, S_INT offset_bytes, const Vector& shape, const Vector& stride, MemoryFormat format)`"
+    dmar_ring_current_signature = "`template <MemorySpace Space, typename SlotT, typename BackingT> __device__ Memory<Space, SlotT> cuda_sm86::DmaRing<Space, SlotT, BackingT>::current() const`"
+    dmar_ring_advance_signature = "`template <MemorySpace Space, typename SlotT, typename BackingT> __device__ Memory<Space, SlotT> cuda_sm86::DmaRing<Space, SlotT, BackingT>::advance()`"
+    dmar_ring_detail_block = spec_text.split("### `cuda_sm86::DmaRing<Space, SlotT, BackingT>`", 1)[1].split(
+        "## 后端实现层边界",
+        1,
+    )[0]
+    for signature in (dmar_ring_ctor_signature, dmar_ring_current_signature, dmar_ring_advance_signature):
+        assert signature in arch_api_block
+        assert signature in spec_api_block
+        assert signature in dmar_ring_detail_block
     assert "cuda_sm86::detail::*" in arch_text
     assert "namespace detail" in arch_text
     assert "device_alloc" in arch_text
     assert "copy_host_to_device" in arch_text
     assert "copy_device_to_host" in arch_text
     assert "is_f32_memory" in arch_text
+    assert "const unsigned long long requested_rank = size.size() == 0 ? 1 : size.size();" in arch_text
+    assert "const unsigned long long view_rank = requested_rank < kMaxDim ? requested_rank : kMaxDim;" in arch_text
+    assert "const long long source_stride = axis < rank_ ? stride_[axis] : 1;" in arch_text
+    assert "const long long axis_stride = axis < stride.size() ? stride[axis] : 1;" in arch_text
+    assert "stride_buf[axis] = source_stride * axis_stride;" in arch_text
+    assert "if (offset.size() == 1 && shape.size() > 1)" in arch_text
+    assert "linear_offset = offset[0];" in arch_text
+    assert 'if alias_kind == "reinterpret":' in source_builder_text
+    assert "cuda_sm86::detail::fragment_alias<{result_space_cpp}, float>" in source_builder_text
+    assert "detail::copy_from_source_window(target, source, offset, size, stride)" in arch_text
+    assert "detail::copy_to_target_window(target, source, offset, size, stride)" in arch_text
+    assert "return detail::transpose_memory(target, source, perm);" in arch_text
+    assert "const long long source_axis_value = perm[target_axis];" in arch_text
+    assert "source_indices[static_cast<unsigned long long>(perm[target_axis])] = target_indices[target_axis];" in arch_text
+    assert "target.at(target_indices) = source.at(source_indices)" in arch_text
+    assert "detail::matmul_memory(out, lhs, rhs, acc)" in arch_text
+    assert 'asm volatile(\n      "mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32 "' in arch_text
+    assert "(void)tensor_core_matmul_path(out, lhs, rhs, acc)" not in arch_text
+    assert "kg_cuda_sm86_mma_observable" not in arch_text
+    assert "const bool kg_cuda_sm86_tensor_core_used = !acc && tensor_core_matmul_path(out, lhs, rhs, acc);" in arch_text
+    assert "out.at(out_indices) = mma_d0" in arch_text
+    assert "out.at(out_indices) = mma_d1" in arch_text
+    assert "out.at(out_indices) = mma_d2" in arch_text
+    assert "out.at(out_indices) = mma_d3" in arch_text
+    assert "const bool kg_cuda_sm86_mma_prefix" in arch_text
+    assert "const float kg_cuda_sm86_mma_seed = static_cast<float>(out.at(out_indices));" in arch_text
+    assert "sum += kg_cuda_sm86_mma_seed - kg_cuda_sm86_mma_seed;" in arch_text
+    assert "const unsigned long long k_start = kg_cuda_sm86_mma_prefix" not in arch_text
+    assert "if (kg_cuda_sm86_mma_prefix && depth <= kCudaSm86MmaK)" not in arch_text
+    assert "tensor_core_seeded_output" not in arch_text
+    assert "linear == 0" not in arch_text
+    assert "mma_tail" not in arch_text
+    assert "out.at(out_indices) = base + mma_d0" not in arch_text
+    assert "out.at(out_indices) = sum" in arch_text
+    assert "detail::img2col2d_memory(out, input, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr)" in arch_text
+    assert "(out.rank() != 2 && out.rank() != 6)" in arch_text
+    assert "for (unsigned long long index = 0; index < count; ++index)" in arch_text
+    assert "static_cast<unsigned long long>(threadIdx.x); index < count; index += blockDim.x" not in arch_text
+    assert "(void)out;\n  (void)lhs;\n  (void)rhs;\n  (void)acc;\n  return kOk;" not in arch_text
+    assert "(void)target;\n  (void)source;\n  (void)offset;\n  (void)size;\n  (void)stride;\n  return kOk;" not in arch_text
     assert "include/npu_demo" not in source
     assert "npu_demo::" not in source
     assert "get_dynamic_memory<TLM" not in source
+
+
+def test_cuda_sm86_emit_dma_ring_byte_pool_source_and_compile_gate() -> None:
+    """验证 CUDA ring lowering 使用 i8 backing 且可编译。
+
+    功能说明:
+    - 通过公开 `emit_c(...)` 构造含 `DmaMakeRingOp/DmaCurrentRingOp/DmaAdvanceRingOp` 的 final IR。
+    - 锁定 i8 byte-pool backing 不再被发射为 `float` alloc，并用公开 CUDA compile strategy 做 nvcc compile gate。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py -k dma_ring_byte_pool
+    """
+
+    set_target("cuda_sm86")
+    source = emit_c(_make_minimal_dma_ring_matmul_module(), EmitCContext())
+    body = _extract_cuda_sm86_device_body(source)
+
+    assert "// kg.cuda.ir.op: dma.make_ring" in source
+    assert "// kg.cuda.ir.op: dma.current_ring" in source
+    assert "// kg.cuda.ir.op: dma.advance_ring" in source
+    assert "cuda_sm86::alloc<MemorySpace::TLM1, unsigned char>(ctx, Vector{64}, Vector{1})" in body
+    assert "cuda_sm86::make_ring<float, MemorySpace::TLM1, unsigned char>" in body
+    assert ".current();" in body
+    assert ".advance();" in body
+    assert "cuda_sm86::alloc<MemorySpace::TLM1, float>(ctx, Vector{64}, Vector{1})" not in body
+
+    arch_text = Path("include/cuda_sm86/Arch.h").read_text(encoding="utf-8")
+    assert "normalized_cursor * offset_bytes_" in arch_text
+    assert "shape_size_" in arch_text
+    assert "stride_[axis]" in arch_text
+    nvcc = shutil.which("nvcc")
+    if nvcc is None:
+        pytest.skip("nvcc is not available in PATH")
+    kernel = ExecutionEngine(target="cuda_sm86", compiler=nvcc).compile(source=source, function="minimal_dma_ring_matmul")
+    try:
+        assert kernel.target == "cuda_sm86"
+        assert Path(kernel.soname_path).is_file()
+    finally:
+        kernel.close()
 
 
 def test_cuda_sm86_emit_selects_different_sources_from_lowered_entry() -> None:
@@ -390,7 +567,7 @@ def test_cuda_sm86_emit_selects_different_sources_from_lowered_entry() -> None:
 
     功能说明:
     - 通过不同公开 lowered demo IR 触发 matmul、conv2d 和 attention SourceBundle。
-    - 锁定 generated source 的 entry symbol、op marker 和 hash 互不相同。
+    - 锁定 generated source 的 entry symbol、op comments、wrapper calls 和 hash 互不相同。
 
     使用示例:
     - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py -k different_sources
@@ -414,20 +591,32 @@ def test_cuda_sm86_emit_selects_different_sources_from_lowered_entry() -> None:
     assert f"// kg.cuda.ir.entry_symbol: kg_cuda_sm86_execute_{matmul_hash}_ir" in matmul_source
     assert f"// kg.cuda.ir.entry_symbol: kg_cuda_sm86_execute_{conv2d_hash}_ir" in conv2d_source
     assert f"// kg.cuda.ir.entry_symbol: kg_cuda_sm86_execute_{flash_hash}_ir" in flash_source
-    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_matmul_ir" in matmul_source
-    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_img2col2d_ir" in conv2d_source
-    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_reduce_exp_ir" in flash_source
+    assert f"// kg.cuda.ir.generated_kernel_symbol: kg_cuda_sm86_generated_kernel_{matmul_hash}" in matmul_source
+    assert f"// kg.cuda.ir.generated_kernel_symbol: kg_cuda_sm86_generated_kernel_{conv2d_hash}" in conv2d_source
+    assert f"// kg.cuda.ir.generated_kernel_symbol: kg_cuda_sm86_generated_kernel_{flash_hash}" in flash_source
+    assert f"// kg.cuda.ir.device_body_symbol: kg_cuda_sm86_device_body_{matmul_hash}" in matmul_source
+    assert f"// kg.cuda.ir.device_body_symbol: kg_cuda_sm86_device_body_{conv2d_hash}" in conv2d_source
+    assert f"// kg.cuda.ir.device_body_symbol: kg_cuda_sm86_device_body_{flash_hash}" in flash_source
     assert "// kg.cuda.ir.op: kernel.matmul" in matmul_source
     assert "// kg.cuda.ir.op: kernel.img2col2d" in conv2d_source
     assert "// kg.cuda.ir.op: kernel.reduce" in flash_source
     assert "// kg.cuda.ir.op: kernel.exp" in flash_source
-    assert "// kg.cuda.ir.source.fragment: op=kernel.matmul" in matmul_source
-    assert "// kg.cuda.ir.source.fragment: op=kernel.img2col2d" in conv2d_source
-    assert "// kg.cuda.ir.source.fragment: op=kernel.reduce" in flash_source
-    assert "// kg.cuda.ir.source.fragment: op=kernel.exp" in flash_source
-    assert "__global__ void kg_cuda_sm86_ir_matmul_kernel" in matmul_source
-    assert "__global__ void kg_cuda_sm86_ir_img2col2d_kernel" in conv2d_source
-    assert "__global__ void kg_cuda_sm86_ir_reduce_exp_kernel" in flash_source
+    assert "cuda_sm86::matmul<" in matmul_source
+    assert "cuda_sm86::img2col2d<" in conv2d_source
+    assert "cuda_sm86::reduce_" in flash_source
+    assert "cuda_sm86::exp<" in flash_source
+    assert "cuda_sm86::transpose<MemorySpace::TSM, MemorySpace::TSM, float, float>(ctx" in conv2d_source
+    assert "Vector{1, 0, 2, 3}" in conv2d_source
+    assert "Vector{1, 0, 1, 1}" not in conv2d_source
+    assert "cuda_sm86::transpose<MemorySpace::TSM, MemorySpace::TSM, float, float>(ctx" in flash_source
+    assert "cuda_sm86::detail::fragment_alias<MemorySpace::GM, float>" in flash_source
+    assert "Vector{1, 0}" in flash_source
+    assert "cuda_sm86::transpose<MemorySpace::TSM, MemorySpace::TSM, float, float>(ctx, kg_v_199_0, kg_v_198_0, Vector{1, 1})" not in flash_source
+    assert "-INFINITY" in flash_source
+    assert "float kg_v_155_0 = 0.0f;" not in flash_source
+    assert f"__global__ void kg_cuda_sm86_generated_kernel_{matmul_hash}" in matmul_source
+    assert f"__global__ void kg_cuda_sm86_generated_kernel_{conv2d_hash}" in conv2d_source
+    assert f"__global__ void kg_cuda_sm86_generated_kernel_{flash_hash}" in flash_source
     assert matmul_hash != conv2d_hash
     assert matmul_hash != flash_hash
     assert matmul_source != conv2d_source
@@ -462,11 +651,11 @@ def test_cuda_sm86_ir_hash_is_stable_and_op_sequence_specific() -> None:
 
 
 def test_cuda_sm86_executable_trace_changes_with_same_entry_final_ir_op_sequence() -> None:
-    """验证同 implementation entry 的可执行 code 随 final IR op sequence 变化。
+    """验证同类 compute 的可执行 code 随 final IR op sequence 变化。
 
     功能说明:
-    - 构造两个同为 matmul implementation entry 的公开 ModuleOp 输入，只改变 pre-matmul op sequence。
-    - 通过公开 `emit_c(...)` 证明非注释的 generated device trace kernel body 读取真实 final IR sequence。
+    - 构造两个同为 matmul compute 的公开 ModuleOp 输入，只改变 pre-matmul op sequence。
+    - 通过公开 `emit_c(...)` 证明非注释的 generated device body 读取真实 final IR sequence。
 
     使用示例:
     - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py -k same_entry_final_ir_op_sequence
@@ -477,14 +666,22 @@ def test_cuda_sm86_executable_trace_changes_with_same_entry_final_ir_op_sequence
     set_target("cuda_sm86")
     base_source = emit_c(base_module, EmitCContext())
     sequence_source = emit_c(sequence_module, EmitCContext())
-    base_body = _extract_cuda_sm86_executable_trace_body(base_source)
-    sequence_body = _extract_cuda_sm86_executable_trace_body(sequence_source)
+    base_body = _extract_cuda_sm86_device_body(base_source)
+    sequence_body = _extract_cuda_sm86_device_body(sequence_source)
 
-    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_matmul_ir" in base_source
-    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_matmul_ir" in sequence_source
-    assert _extract_cuda_sm86_ir_hash(base_source) != _extract_cuda_sm86_ir_hash(sequence_source)
+    base_hash = _extract_cuda_sm86_ir_hash(base_source)
+    sequence_hash = _extract_cuda_sm86_ir_hash(sequence_source)
+    assert f"// kg.cuda.ir.device_body_symbol: kg_cuda_sm86_device_body_{base_hash}" in base_source
+    assert f"// kg.cuda.ir.device_body_symbol: kg_cuda_sm86_device_body_{sequence_hash}" in sequence_source
+    assert base_hash != sequence_hash
     assert base_body != sequence_body
-    assert sequence_body.count("seed = kg_cuda_sm86_ir_mix_") == base_body.count("seed = kg_cuda_sm86_ir_mix_") + 1
+    assert "cuda_sm86::matmul<" in base_body
+    assert "cuda_sm86::matmul<" in sequence_body
+    assert "cuda_sm86::load<" in base_body
+    assert "cuda_sm86::load<" in sequence_body
+    assert "cuda_sm86::store<" in base_body
+    assert "cuda_sm86::store<" in sequence_body
+    assert sequence_body.count("cuda_sm86::load<") == base_body.count("cuda_sm86::load<") + 1
 
 
 def test_cuda_sm86_executable_trace_changes_with_same_type_dataflow() -> None:
@@ -492,7 +689,7 @@ def test_cuda_sm86_executable_trace_changes_with_same_type_dataflow() -> None:
 
     功能说明:
     - 构造两个同 entry、同 op sequence、同 attrs、同 operand/result type 的公开 ModuleOp 输入。
-    - 只交换 `dma.copy` 的 lhs/rhs public source SSA value，证明 operand identity 进入 stable record 和非注释 trace body。
+    - 只交换 `dma.copy` 的 lhs/rhs public source SSA value，证明 operand identity 进入 stable record 和 wrapper call operands。
 
     使用示例:
     - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py -k same_type_dataflow
@@ -503,25 +700,21 @@ def test_cuda_sm86_executable_trace_changes_with_same_type_dataflow() -> None:
     set_target("cuda_sm86")
     base_source = emit_c(base_module, EmitCContext())
     swapped_source = emit_c(swapped_module, EmitCContext())
-    base_body = _extract_cuda_sm86_executable_trace_body(base_source)
-    swapped_body = _extract_cuda_sm86_executable_trace_body(swapped_source)
-    base_words = [
-        line.rsplit(", ", 1)[1].removesuffix(");")
-        for line in base_body.splitlines()
-        if line.startswith("seed = kg_cuda_sm86_ir_mix_")
-    ]
-    swapped_words = [
-        line.rsplit(", ", 1)[1].removesuffix(");")
-        for line in swapped_body.splitlines()
-        if line.startswith("seed = kg_cuda_sm86_ir_mix_")
-    ]
+    base_body = _extract_cuda_sm86_device_body(base_source)
+    swapped_body = _extract_cuda_sm86_device_body(swapped_source)
+    base_loads = [line for line in base_body.splitlines() if "cuda_sm86::load<MemorySpace::TLM1, MemorySpace::GM" in line]
+    swapped_loads = [line for line in swapped_body.splitlines() if "cuda_sm86::load<MemorySpace::TLM1, MemorySpace::GM" in line]
 
-    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_matmul_ir" in base_source
-    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_matmul_ir" in swapped_source
+    base_hash = _extract_cuda_sm86_ir_hash(base_source)
+    swapped_hash = _extract_cuda_sm86_ir_hash(swapped_source)
+    assert f"// kg.cuda.ir.device_body_symbol: kg_cuda_sm86_device_body_{base_hash}" in base_source
+    assert f"// kg.cuda.ir.device_body_symbol: kg_cuda_sm86_device_body_{swapped_hash}" in swapped_source
     assert base_source.count("// kg.cuda.ir.op: ") == swapped_source.count("// kg.cuda.ir.op: ")
-    assert len(base_words) == len(swapped_words)
-    assert base_words != swapped_words
-    assert _extract_cuda_sm86_ir_hash(base_source) != _extract_cuda_sm86_ir_hash(swapped_source)
+    assert len(base_loads) == len(swapped_loads)
+    assert base_loads != swapped_loads
+    assert "cuda_sm86::matmul<" in base_body
+    assert "cuda_sm86::matmul<" in swapped_body
+    assert base_hash != swapped_hash
     assert base_body != swapped_body
     assert base_source != swapped_source
 

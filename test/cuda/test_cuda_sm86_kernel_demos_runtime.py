@@ -1,9 +1,10 @@
-"""CUDA SM86 kernel demo runtime integration tests.
+"""CUDA SM86 target kernel demo runtime integration tests.
 
 功能说明:
 - 在具备 CUDA toolkit 与 GPU 的环境中，通过 9 个现有 kernel demo 的公开 kernel 函数生成 IR。
 - 每个 case 都执行 `cuda-sm86-lowering -> emit_c(target="cuda_sm86") -> ExecutionEngine(target="cuda_sm86") -> execute`。
 - 测试只验证本计划确认的 matmul / conv2d / flash_attention demo 范围，不扩大到任意 DSL kernel。
+- 当前任务正式 runtime 验收现场为 `nvcc + SM89 CUDA device`；`cuda_sm86` 仍是已确认 target/API 名。
 
 使用示例:
 - pytest -q test/cuda/test_cuda_sm86_kernel_demos_runtime.py -m cuda
@@ -24,6 +25,7 @@ import shutil
 import subprocess
 import sys
 from typing import TypeAlias
+from unittest.mock import Mock
 
 import pytest
 
@@ -71,6 +73,12 @@ class KernelDemoCase:
     kernel_fn: KernelFn
     annotations: dict[str, str]
     compile_args: tuple[CompileArg, ...]
+    conv_input_shape: tuple[int, int, int, int] | None = None
+    conv_weight_shape: tuple[int, int, int, int] | None = None
+    conv_stride: tuple[int, int] = (1, 1)
+    conv_dilation: tuple[int, int] = (1, 1)
+    conv_padding: tuple[int, int, int, int] = (1, 0, 1, 0)
+    conv_runtime_scalars: tuple[int, ...] = ()
 
 
 def _memory(shape: list[int | str], dtype: NumericType = NumericType.Float32) -> Memory:
@@ -162,12 +170,32 @@ def _emit_cuda_demo_source(case: KernelDemoCase) -> str:
         reset_config()
 
 
+def _extract_cuda_sm86_ir_hash(source: str) -> str:
+    """读取 CUDA SM86 SourceBundle 的 final IR hash。
+
+    功能说明:
+    - 解析公开 `emit_c(...)` 返回的 aggregate source marker。
+    - 找不到 marker 时显式失败，避免后续 hash-specific entry 断言假阳性。
+
+    使用示例:
+    - stable_hash = _extract_cuda_sm86_ir_hash(source)
+    """
+
+    marker_prefix = "// kg.cuda.ir.hash: "
+    for line in source.splitlines():
+        if line.startswith(marker_prefix):
+            stable_hash = line.removeprefix(marker_prefix)
+            if stable_hash:
+                return stable_hash
+    raise AssertionError("missing CUDA SM86 IR hash")
+
+
 def _require_cuda_environment() -> None:
     """校验 CUDA runtime gate 环境。
 
     功能说明:
-    - 缺 `nvcc` 或 CUDA device 时按计划记录为环境缺失 skip。
-    - 存在环境时不跳过，确保 9-demo runtime gate 真实编译执行。
+    - 缺 `nvcc`、CUDA device 或 SM89 device 时按计划记录为环境缺失 skip。
+    - 只有发现 SM89 device 时才不跳过，确保本任务 runtime 验收在用户确认的 SM89 现场执行。
 
     使用示例:
     - _require_cuda_environment()
@@ -175,9 +203,55 @@ def _require_cuda_environment() -> None:
 
     if shutil.which("nvcc") is None:
         pytest.skip("nvcc is not available in PATH")
-    gpu_probe = subprocess.run(["nvidia-smi"], capture_output=True, text=True, check=False)
+    gpu_probe = subprocess.run(
+        ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     if gpu_probe.returncode != 0:
         pytest.skip("CUDA device is not available")
+    sm_versions = tuple(line.strip() for line in gpu_probe.stdout.splitlines() if line.strip())
+    if "8.9" not in sm_versions:
+        found = ", ".join(sm_versions) if sm_versions else "<none>"
+        pytest.skip(f"SM89 CUDA device is not available; found {found}")
+
+
+def test_cuda_sm86_runtime_preflight_accepts_sm89(monkeypatch: pytest.MonkeyPatch) -> None:
+    """验证 runtime preflight 接受 SM89 正式验收现场。
+
+    功能说明:
+    - 用公开 `pytest` monkeypatch 模拟 `nvcc` 与 `nvidia-smi compute_cap=8.9`。
+    - 锁定本任务用户确认后的 SM89 runtime 完成态不会被当成非 SM89 环境 skip。
+
+    使用示例:
+    - pytest -q test/cuda/test_cuda_sm86_kernel_demos_runtime.py -m cuda -k preflight_accepts_sm89
+    """
+
+    gpu_probe = subprocess.CompletedProcess(args=("nvidia-smi",), returncode=0, stdout="8.9\n", stderr="")
+    monkeypatch.setattr(shutil, "which", {"nvcc": "/usr/local/cuda/bin/nvcc"}.get)
+    monkeypatch.setattr(subprocess, "run", Mock(return_value=gpu_probe))
+
+    _require_cuda_environment()
+
+
+def test_cuda_sm86_runtime_preflight_rejects_non_sm89(monkeypatch: pytest.MonkeyPatch) -> None:
+    """验证 runtime preflight 不把非 SM89 现场记作通过。
+
+    功能说明:
+    - 用公开 `pytest` monkeypatch 模拟 `compute_cap=8.6`。
+    - 锁定非 SM89 CUDA device 在进入 `kg_execute_entry` / `cuda_sm86::launch` 前 skip。
+
+    使用示例:
+    - pytest -q test/cuda/test_cuda_sm86_kernel_demos_runtime.py -m cuda -k preflight_rejects_non_sm89
+    """
+
+    gpu_probe = subprocess.CompletedProcess(args=("nvidia-smi",), returncode=0, stdout="8.6\n", stderr="")
+    monkeypatch.setattr(shutil, "which", {"nvcc": "/usr/local/cuda/bin/nvcc"}.get)
+    monkeypatch.setattr(subprocess, "run", Mock(return_value=gpu_probe))
+
+    with pytest.raises(pytest.skip.Exception, match="SM89 CUDA device is not available; found 8.6"):
+        _require_cuda_environment()
 
 
 def _softmax_attention_reference(q_value, k_value, v_value):
@@ -271,26 +345,25 @@ CONV2D_DEMO_CASES = (
     KernelDemoCase(
         "kernel/conv2d/inputs_static_tile_static.py",
         conv2d_inputs_static_tile_static_kernel,
-        {
-            "out": "Tensor[f32, 1, 3, 4, 5]",
-            "input_tensor": "Tensor[f32, 1, 2, 4, 5]",
-            "weight": "Tensor[f32, 3, 2, 2, 2]",
-            "bias": "Tensor[f32, 3]",
-        },
-        (_memory([1, 3, 4, 5]), _memory([1, 2, 4, 5]), _memory([3, 2, 2, 2]), _memory([3])),
+        {},
+        (_memory([4, 20, 32, 29]), _memory([4, 49, 248, 232]), _memory([20, 49, 3, 5]), _memory([20])),
+        conv_input_shape=(4, 49, 248, 232),
+        conv_weight_shape=(20, 49, 3, 5),
+        conv_stride=(8, 8),
+        conv_padding=(3, 3, 4, 0),
     ),
     KernelDemoCase(
         "kernel/conv2d/inputs_static_tile_dynamic.py",
         conv2d_inputs_static_tile_dynamic_kernel,
         {
             "out": "Tensor[f32, 1, 3, 4, 5]",
-            "input_tensor": "Tensor[f32, 1, 2, 4, 5]",
+            "input_tensor": "Tensor[f32, 1, 2, 21, 29]",
             "weight": "Tensor[f32, 3, 2, 2, 2]",
             "bias": "Tensor[f32, 3]",
         },
         (
             _memory([1, 3, 4, 5]),
-            _memory([1, 2, 4, 5]),
+            _memory([1, 2, 21, 29]),
             _memory([3, 2, 2, 2]),
             _memory([3]),
             _symbol("TF"),
@@ -299,6 +372,11 @@ CONV2D_DEMO_CASES = (
             _symbol("THO"),
             _symbol("TWO"),
         ),
+        conv_input_shape=(1, 2, 21, 29),
+        conv_weight_shape=(3, 2, 2, 2),
+        conv_stride=(8, 8),
+        conv_padding=(4, 3, 4, 3),
+        conv_runtime_scalars=(7, 18, 3, 9, 8),
     ),
     KernelDemoCase(
         "kernel/conv2d/inputs_dynamic_tile_dynamic.py",
@@ -328,6 +406,9 @@ CONV2D_DEMO_CASES = (
             _symbol("THO"),
             _symbol("TWO"),
         ),
+        conv_input_shape=(1, 2, 4, 5),
+        conv_weight_shape=(3, 2, 2, 2),
+        conv_runtime_scalars=(1, 1, 1, 1, 1),
     ),
 )
 
@@ -373,7 +454,7 @@ def test_cuda_sm86_demo_sources_are_lowered_ir_specific() -> None:
 
     功能说明:
     - 通过 3 类现有 demo 公开入口生成 CUDA source。
-    - 锁定 final IR marker、entry symbol 和 hash 随真实 op 集合变化。
+    - 锁定 final IR comments、entry symbol、generated kernel/device body 和 hash 随真实 op 集合变化。
 
     使用示例:
     - pytest -q test/cuda/test_cuda_sm86_kernel_demos_runtime.py -m cuda -k sources_are_lowered
@@ -382,25 +463,33 @@ def test_cuda_sm86_demo_sources_are_lowered_ir_specific() -> None:
     matmul_source = _emit_cuda_demo_source(MATMUL_DEMO_CASES[0])
     conv2d_source = _emit_cuda_demo_source(CONV2D_DEMO_CASES[0])
     flash_source = _emit_cuda_demo_source(FLASH_ATTENTION_DEMO_CASES[0])
+    matmul_hash = _extract_cuda_sm86_ir_hash(matmul_source)
+    conv2d_hash = _extract_cuda_sm86_ir_hash(conv2d_source)
+    flash_hash = _extract_cuda_sm86_ir_hash(flash_source)
 
-    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_matmul_ir" in matmul_source
-    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_img2col2d_ir" in conv2d_source
-    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_reduce_exp_ir" in flash_source
-    assert "__global__ void kg_cuda_sm86_ir_trace_kernel_" in matmul_source
-    assert "__global__ void kg_cuda_sm86_ir_trace_kernel_" in conv2d_source
-    assert "__global__ void kg_cuda_sm86_ir_trace_kernel_" in flash_source
+    assert f"// kg.cuda.ir.generated_kernel_symbol: kg_cuda_sm86_generated_kernel_{matmul_hash}" in matmul_source
+    assert f"// kg.cuda.ir.generated_kernel_symbol: kg_cuda_sm86_generated_kernel_{conv2d_hash}" in conv2d_source
+    assert f"// kg.cuda.ir.generated_kernel_symbol: kg_cuda_sm86_generated_kernel_{flash_hash}" in flash_source
+    assert f"// kg.cuda.ir.device_body_symbol: kg_cuda_sm86_device_body_{matmul_hash}" in matmul_source
+    assert f"// kg.cuda.ir.device_body_symbol: kg_cuda_sm86_device_body_{conv2d_hash}" in conv2d_source
+    assert f"// kg.cuda.ir.device_body_symbol: kg_cuda_sm86_device_body_{flash_hash}" in flash_source
+    assert "__global__ void kg_cuda_sm86_generated_kernel_" in matmul_source
+    assert "__global__ void kg_cuda_sm86_generated_kernel_" in conv2d_source
+    assert "__global__ void kg_cuda_sm86_generated_kernel_" in flash_source
+    assert "__device__ void kg_cuda_sm86_device_body_" in matmul_source
+    assert "__device__ void kg_cuda_sm86_device_body_" in conv2d_source
+    assert "__device__ void kg_cuda_sm86_device_body_" in flash_source
     assert "// kg.cuda.ir.op: kernel.matmul" in matmul_source
     assert "// kg.cuda.ir.op: kernel.img2col2d" in conv2d_source
     assert "// kg.cuda.ir.op: kernel.reduce" in flash_source
     assert "// kg.cuda.ir.op: kernel.exp" in flash_source
-    assert "// kg.cuda.ir.source.fragment: op=kernel.matmul" in matmul_source
-    assert "// kg.cuda.ir.source.fragment: op=kernel.img2col2d" in conv2d_source
-    assert "// kg.cuda.ir.source.fragment: op=kernel.reduce" in flash_source
-    assert "// kg.cuda.ir.source.fragment: op=kernel.exp" in flash_source
-    assert "kg_cuda_sm86_ir_matmul_kernel" in matmul_source
-    assert "kg_cuda_sm86_ir_img2col2d_kernel" not in matmul_source
-    assert "kg_cuda_sm86_ir_img2col2d_kernel" in conv2d_source
-    assert "kg_cuda_sm86_ir_reduce_exp_kernel" in flash_source
+    assert "cuda_sm86::matmul<" in matmul_source
+    assert "cuda_sm86::img2col2d<" in conv2d_source
+    assert "cuda_sm86::reduce_" in flash_source
+    assert "cuda_sm86::exp<" in flash_source
+    assert "kg_cuda_sm86_execute_" + "matmul_ir" not in matmul_source
+    assert "kg_cuda_sm86_execute_" + "img2col2d_ir" not in conv2d_source
+    assert "kg_cuda_sm86_execute_" + "reduce_exp_ir" not in flash_source
     assert "mma.sync.aligned.m16n8k8" in matmul_source
     assert matmul_source != conv2d_source
     assert matmul_source != flash_source
@@ -455,17 +544,18 @@ def test_cuda_sm86_conv2d_demo_runtime_cases(case: KernelDemoCase) -> None:
     numpy = pytest.importorskip("numpy")
     compiled_kernel = _compile_cuda_demo_kernel(case)
     try:
-        stride = (1, 1)
-        dilation = (1, 1)
-        padding = (1, 0, 1, 0)
-        input_tensor = numpy.arange(1 * 2 * 4 * 5, dtype=numpy.float32).reshape(1, 2, 4, 5)
-        weight = numpy.arange(3 * 2 * 2 * 2, dtype=numpy.float32).reshape(3, 2, 2, 2) / numpy.float32(7.0)
-        bias = numpy.arange(3, dtype=numpy.float32)
-        expected_absent = _conv2d_reference(input_tensor, weight, None, stride, dilation, padding)
-        expected_present = _conv2d_reference(input_tensor, weight, bias, stride, dilation, padding)
+        if case.conv_input_shape is None or case.conv_weight_shape is None:
+            raise AssertionError("conv runtime case must define input and weight shapes")
+        input_count = int(numpy.prod(case.conv_input_shape))
+        weight_count = int(numpy.prod(case.conv_weight_shape))
+        input_tensor = numpy.arange(input_count, dtype=numpy.float32).reshape(case.conv_input_shape)
+        weight = numpy.arange(weight_count, dtype=numpy.float32).reshape(case.conv_weight_shape) / numpy.float32(7.0)
+        bias = numpy.arange(case.conv_weight_shape[0], dtype=numpy.float32)
+        expected_absent = _conv2d_reference(input_tensor, weight, None, case.conv_stride, case.conv_dilation, case.conv_padding)
+        expected_present = _conv2d_reference(input_tensor, weight, bias, case.conv_stride, case.conv_dilation, case.conv_padding)
         absent_out = numpy.zeros_like(expected_absent)
         present_out = numpy.zeros_like(expected_present)
-        conv_scalars = (*stride, *dilation, *padding, 1, 1, 1, 1, 1)
+        conv_scalars = (*case.conv_runtime_scalars,)
         absent_result = compiled_kernel.execute(args=(absent_out, input_tensor, weight, None, *conv_scalars))
         present_result = compiled_kernel.execute(args=(present_out, input_tensor, weight, bias, *conv_scalars))
         assert case.path.startswith("kernel/conv2d/")

@@ -1,4 +1,4 @@
-"""CUDA SM86 generated runtime source fragments.
+"""CUDA SM86 generated runtime source blocks.
 
 功能说明:
 - 承载 generated `kernel.cu` 内部 common runtime helper source 和 generated entry header source。

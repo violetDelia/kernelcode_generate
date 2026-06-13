@@ -550,3 +550,77 @@ def testcuda_sm86_final_ir_builder_stays_package_local_by_text() -> None:
         text = path.read_text(encoding="utf-8")
         for token in old_tokens:
             assert token not in text, (path, token)
+
+
+def testcuda_sm86_source_builder_public_methods_match_exact_sets_by_text() -> None:
+    """Assert CudaSm86SourceBuilder public methods are listed in exact sets.
+
+    功能说明:
+    - 只用 AST 和文本对照 `source_bundle.py`，不 import 或 direct call package-local helper。
+    - 锁定无下划线 `CudaSm86SourceBuilder` 方法必须同步到文件级 API 列表和 cuda_sm86 spec exact set。
+
+    使用示例:
+    - pytest.main(["test/repo_conformance/test_private_api_boundaries.py", "-k", "cuda_sm86_source_builder_public_methods"])
+    """
+
+    root = _PrivateApiBoundaryHelpers.repo_root()
+    source_path = root / "kernel_gen" / "dsl" / "gen_kernel" / "emit" / "cuda_sm86" / "source_bundle.py"
+    spec_path = root / "spec" / "dsl" / "gen_kernel" / "emit" / "cuda_sm86.md"
+    source_text = source_path.read_text(encoding="utf-8")
+    spec_text = spec_path.read_text(encoding="utf-8")
+    source_tree = ast.parse(source_text)
+    builder_class = next(
+        node for node in source_tree.body if isinstance(node, ast.ClassDef) and node.name == "CudaSm86SourceBuilder"
+    )
+    expected_lines: list[str] = []
+    for node in builder_class.body:
+        if not isinstance(node, ast.FunctionDef) or node.name.startswith("_"):
+            continue
+        args = node.args.args[1:]
+        defaults = [None] * (len(args) - len(node.args.defaults)) + list(node.args.defaults)
+        rendered_args: list[str] = []
+        for arg, default in zip(args, defaults):
+            rendered_arg = arg.arg
+            if arg.annotation is not None:
+                rendered_arg += f": {ast.unparse(arg.annotation)}"
+            if default is not None:
+                rendered_arg += f" = {ast.unparse(default)}"
+            rendered_args.append(rendered_arg)
+        if node.args.vararg is not None:
+            rendered_arg = f"*{node.args.vararg.arg}"
+            if node.args.vararg.annotation is not None:
+                rendered_arg += f": {ast.unparse(node.args.vararg.annotation)}"
+            rendered_args.append(rendered_arg)
+        elif node.args.kwonlyargs:
+            rendered_args.append("*")
+        for arg, default in zip(node.args.kwonlyargs, node.args.kw_defaults):
+            rendered_arg = arg.arg
+            if arg.annotation is not None:
+                rendered_arg += f": {ast.unparse(arg.annotation)}"
+            if default is not None:
+                rendered_arg += f" = {ast.unparse(default)}"
+            rendered_args.append(rendered_arg)
+        if node.args.kwarg is not None:
+            rendered_arg = f"**{node.args.kwarg.arg}"
+            if node.args.kwarg.annotation is not None:
+                rendered_arg += f": {ast.unparse(node.args.kwarg.annotation)}"
+            rendered_args.append(rendered_arg)
+        return_type = "None" if node.returns is None else ast.unparse(node.returns)
+        expected_lines.append(f"- `CudaSm86SourceBuilder.{node.name}({', '.join(rendered_args)}) -> {return_type}`")
+
+    source_api_block = source_text.split("API 列表:", maxsplit=1)[1].split("使用示例:", maxsplit=1)[0]
+    spec_exact_set = spec_text.split("package-local 文件级 API exact set：", maxsplit=1)[1].split(
+        "`runtime.py`",
+        maxsplit=1,
+    )[0]
+    source_missing = [line for line in expected_lines if line not in source_api_block]
+    spec_missing = [line for line in expected_lines if line not in spec_exact_set]
+    assert len(expected_lines) == 55, f"public_methods={len(expected_lines)}"
+    assert not source_missing, (
+        f"source_bundle.py API list missing (public_methods={len(expected_lines)} "
+        f"missing_source={len(source_missing)}):\n" + "\n".join(source_missing)
+    )
+    assert not spec_missing, (
+        f"cuda_sm86 spec exact set missing (public_methods={len(expected_lines)} "
+        f"missing_spec={len(spec_missing)}):\n" + "\n".join(spec_missing)
+    )

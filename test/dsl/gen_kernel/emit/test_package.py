@@ -103,6 +103,33 @@ def _target_ctx(target: str) -> EmitCContext:
     return EmitCContext()
 
 
+def test_cuda_sm86_emit_spec_uses_generated_kernel_contract() -> None:
+    """验证通用 emit spec 中的 CUDA SM86 合同不保留旧 source fragment 口径。
+
+    功能说明:
+    - 读取 `spec/dsl/gen_kernel/emit.md` 的 `target="cuda_sm86"` 模块级补充。
+    - 锁定当前合同为 generated kernel、device body、wrapper call 与 operand binding。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k cuda_sm86_emit_spec_uses_generated_kernel_contract
+    """
+
+    spec_text = (REPO_ROOT / "spec" / "dsl" / "gen_kernel" / "emit.md").read_text(encoding="utf-8")
+    cuda_sm86_lines = [line for line in spec_text.splitlines() if 'target="cuda_sm86"' in line]
+
+    assert len(cuda_sm86_lines) == 1
+    cuda_sm86_contract = cuda_sm86_lines[0]
+    assert "source marker" not in cuda_sm86_contract
+    assert "source fragment" not in cuda_sm86_contract
+    assert "executable trace wrapper" not in cuda_sm86_contract
+    assert "hash marker" in cuda_sm86_contract
+    assert "trace comment" in cuda_sm86_contract
+    assert "generated kernel" in cuda_sm86_contract
+    assert "device body" in cuda_sm86_contract
+    assert "wrapper call" in cuda_sm86_contract
+    assert "operand binding" in cuda_sm86_contract
+
+
 def test_emit_c_public_entry_matches_gen_kernel_for_empty_func() -> None:
     block = Block(arg_types=[])
     block.add_op(func.ReturnOp())
