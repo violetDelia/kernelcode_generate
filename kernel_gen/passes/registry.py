@@ -6,7 +6,8 @@
 - 为工具层（如 ircheck）提供稳定名称解析能力，避免依赖具体 Python import path。
 - 内置 pass 包含 `memory-plan`，其 `insert-free` / `reuse` 专属 option 由 pass 自身解析，
   registry 只解析通用 `fold`。
-- 内置 pass 包含 `multi-buffer`，其 `memory-stage` 专属 option 由 pass 自身解析，
+- 内置 pass 包含 `multi-buffer-analysis`、`multi-buffer-apply` 与 `multi-buffer`，其
+  `memory-stage` / `target` / `alignment` 专属 option 由 pass 自身解析，
   registry 只解析通用 `fold`。
 - 内置 pass 包含 `producer-consumer-analysis`，其第一阶段不接受 pass 专属 option，
   registry 只解析通用 `fold`。
@@ -527,7 +528,7 @@ def load_builtin_passes() -> None:
     )
     from kernel_gen.passes.kernel.kernel_aggregate import KernelAggregatePass
     from kernel_gen.passes.kernel.kernel_decompose import KernelDecomposePass
-    from kernel_gen.passes.memory.multi_buffer import MultiBufferPass
+    from kernel_gen.passes.memory.multi_buffer import MultiBufferAnalysisPass, MultiBufferApplyPass, MultiBufferPass
     from kernel_gen.passes.memory.memory_pool import MemoryPoolPass
     from kernel_gen.passes.memory.memory_plan import MemoryPlanPass
     from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
@@ -553,6 +554,8 @@ def load_builtin_passes() -> None:
         KernelPatternAttachPass,
         KernelAggregatePass,
         KernelDecomposePass,
+        MultiBufferAnalysisPass,
+        MultiBufferApplyPass,
         MultiBufferPass,
         OutlineDeviceKernelPass,
         SymbolBufferHoistPass,

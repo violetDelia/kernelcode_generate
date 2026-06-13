@@ -19,6 +19,8 @@ API 列表:
 
 from __future__ import annotations
 
+from xdsl.dialects.builtin import StringAttr, UnregisteredOp
+
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolDivOp,
@@ -33,6 +35,7 @@ from kernel_gen.dialect.symbol import (
     SymbolMulOp,
     SymbolNeOp,
     SymbolSubOp,
+    SymbolValueType,
 )
 
 from ...register import emit_c_impl, emit_c_value_impl
@@ -54,6 +57,23 @@ _COMPARE_SIGILS = {
     SymbolGeOp: ">=",
 }
 
+_GENERIC_BINARY_SIGILS = {
+    "symbol.add": "+",
+    "symbol.sub": "-",
+    "symbol.mul": "*",
+    "symbol.div": "/",
+    "symbol.floordiv": "/",
+}
+
+_GENERIC_COMPARE_SIGILS = {
+    "symbol.eq": "==",
+    "symbol.ne": "!=",
+    "symbol.lt": "<",
+    "symbol.le": "<=",
+    "symbol.gt": ">",
+    "symbol.ge": ">=",
+}
+
 
 @emit_c_impl(
     SymbolAddOp,
@@ -69,6 +89,7 @@ _COMPARE_SIGILS = {
     SymbolLeOp,
     SymbolGtOp,
     SymbolGeOp,
+    UnregisteredOp,
     target="npu_demo",
 )
 def _emit_npu_demo_symbol_binary_or_compare(op, ctx) -> str:
@@ -84,6 +105,16 @@ def _emit_npu_demo_symbol_binary_or_compare(op, ctx) -> str:
 
     from ... import emit_c_value
 
+    op_name_attr = op.attributes.get("op_name__")
+    op_name = op_name_attr.data if isinstance(op_name_attr, StringAttr) else op.name
+    if op_name == "symbol.const":
+        return ""
+    if op_name not in _GENERIC_BINARY_SIGILS and op_name not in _GENERIC_COMPARE_SIGILS and op_name not in {
+        "symbol.min",
+        "symbol.max",
+    }:
+        if isinstance(op, UnregisteredOp):
+            raise ctx.emit_error(op.name, "unsupported op")
     result = op.results[0]
     result_type = ctx.dispatch_type(result.type)
     expr = emit_c_value(result, ctx)
@@ -105,6 +136,7 @@ def _emit_npu_demo_symbol_binary_or_compare(op, ctx) -> str:
     SymbolLeOp,
     SymbolGtOp,
     SymbolGeOp,
+    UnregisteredOp,
     target="npu_demo",
 )
 def _emit_npu_demo_symbol_binary_or_compare_value(value, ctx) -> str:
@@ -121,13 +153,24 @@ def _emit_npu_demo_symbol_binary_or_compare_value(value, ctx) -> str:
     owner = value.owner
     from ... import emit_c_value
 
+    owner_name_attr = owner.attributes.get("op_name__")
+    owner_name = owner_name_attr.data if isinstance(owner_name_attr, StringAttr) else owner.name
+    if owner_name == "symbol.const":
+        if isinstance(value.type, SymbolValueType):
+            return value.type.expr.expr.data
+        raise ctx.emit_error(owner.name, "symbol.const result must be !symbol.int")
     lhs = emit_c_value(owner.operands[0], ctx)
     rhs = emit_c_value(owner.operands[1], ctx)
-    if isinstance(owner, SymbolMinOp):
+    if isinstance(owner, SymbolMinOp) or owner_name == "symbol.min":
         return f"(({lhs}) < ({rhs}) ? ({lhs}) : ({rhs}))"
-    if isinstance(owner, SymbolMaxOp):
+    if isinstance(owner, SymbolMaxOp) or owner_name == "symbol.max":
         return f"(({lhs}) > ({rhs}) ? ({lhs}) : ({rhs}))"
-    sigil = _BINARY_SIGILS.get(type(owner)) or _COMPARE_SIGILS.get(type(owner))
+    sigil = (
+        _BINARY_SIGILS.get(type(owner))
+        or _COMPARE_SIGILS.get(type(owner))
+        or _GENERIC_BINARY_SIGILS.get(owner_name)
+        or _GENERIC_COMPARE_SIGILS.get(owner_name)
+    )
     if sigil is None:
         raise ctx.emit_error(owner.name, "unsupported target")
     return f"({lhs} {sigil} {rhs})"

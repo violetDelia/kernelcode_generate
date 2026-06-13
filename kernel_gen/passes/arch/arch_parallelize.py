@@ -5,7 +5,7 @@
 - 提供 standalone IR-level `arch-parallelize` pass。
 - 遍历 `builtin.module` 中非声明 `func.func`，跳过 `entry_point` host dispatcher，对未带 block 并行语义的其余函数执行 block 级分发。
 - 当前只支持 `parallel_level="block"`：单顶层 `symbol.for` 改写为 block-strided loop；非入口函数无顶层 loop 时用 block0 guard 包裹原 body。
-- 唯一顶层 loop 前允许公开 symbol setup 以及 memory-pool / multi-buffer 产生的 `arch.get_dynamic_memory` / `dma.reinterpret` / `dma.make_ring` setup 前缀，并保留旧 alias 前缀兼容。
+- 唯一顶层 loop 前允许公开 symbol setup、xDSL generic 形式的公开 symbol setup，以及 memory-pool / multi-buffer 产生的 `arch.get_dynamic_memory` / `dma.reinterpret` / `dma.make_ring` setup 前缀，并保留旧 alias 前缀兼容。
 - 内部 `FuncOp` root pattern 承接单函数改写，`ArchParallelizePass` 只负责校验和 pattern walker 驱动。
 
 API 列表:
@@ -30,7 +30,7 @@ from dataclasses import dataclass
 
 from xdsl.context import Context
 from xdsl.dialects import arith, func, scf
-from xdsl.dialects.builtin import ArrayAttr, ModuleOp
+from xdsl.dialects.builtin import ArrayAttr, ModuleOp, StringAttr
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.pattern_rewriter import (
     GreedyRewritePatternApplier,
@@ -80,6 +80,18 @@ _SYMBOL_SETUP_OPS = (
     SymbolMaxOp,
     SymbolGetDimOp,
     SymbolGetStrideOp,
+)
+_GENERIC_SYMBOL_SETUP_OP_NAMES = frozenset(
+    {
+        "symbol.const",
+        "symbol.add",
+        "symbol.sub",
+        "symbol.mul",
+        "symbol.div",
+        "symbol.floordiv",
+        "symbol.min",
+        "symbol.max",
+    }
 )
 _MEMORY_POOL_SETUP_OPS = (
     ArchGetDynamicMemoryOp,
@@ -275,6 +287,7 @@ def _is_allowed_loop_prefix_setup_op(op: Operation) -> bool:
 
     功能说明:
     - 放行公开 symbol dialect 的无副作用边界构造 op。
+    - 放行 xDSL `builtin.unregistered` + `op_name__` 表示的同名公开 symbol setup op。
     - 放行 memory-pool / multi-buffer 生成的 `arch.get_dynamic_memory`、`dma.view`、`dma.reshape`、`dma.reinterpret` 与 `dma.make_ring`。
     - 放行 optional memory presence guard 需要的 `arith.constant`、`memory.get_data`、`symbol.cast` 与 `symbol.ne`。
 
@@ -282,7 +295,14 @@ def _is_allowed_loop_prefix_setup_op(op: Operation) -> bool:
     - if _is_allowed_loop_prefix_setup_op(op): ...
     """
 
-    return isinstance(op, _SYMBOL_SETUP_OPS + _MEMORY_POOL_SETUP_OPS + _PRESENCE_SETUP_OPS)
+    if isinstance(op, _SYMBOL_SETUP_OPS + _MEMORY_POOL_SETUP_OPS + _PRESENCE_SETUP_OPS):
+        return True
+    if op.name != "builtin.unregistered":
+        return False
+    op_name_attr = op.attributes.get("op_name__")
+    if not isinstance(op_name_attr, StringAttr):
+        return False
+    return op_name_attr.data in _GENERIC_SYMBOL_SETUP_OP_NAMES
 
 
 def _setup_operands_are_allowed(op: Operation, allowed_values: set[SSAValue]) -> bool:

@@ -66,7 +66,10 @@ KernelDecomposePass = importlib.import_module("kernel_gen.passes.kernel.kernel_d
 KernelPatternAttachPass = importlib.import_module("kernel_gen.passes.tuning.kernel_pattern_attach").KernelPatternAttachPass
 MemoryPlanPass = importlib.import_module("kernel_gen.passes.memory.memory_plan").MemoryPlanPass
 MemoryPoolPass = importlib.import_module("kernel_gen.passes.memory.memory_pool").MemoryPoolPass
-MultiBufferPass = importlib.import_module("kernel_gen.passes.memory.multi_buffer").MultiBufferPass
+multi_buffer_module = importlib.import_module("kernel_gen.passes.memory.multi_buffer")
+MultiBufferAnalysisPass = multi_buffer_module.MultiBufferAnalysisPass
+MultiBufferApplyPass = multi_buffer_module.MultiBufferApplyPass
+MultiBufferPass = multi_buffer_module.MultiBufferPass
 SymbolHoistPipelinePass = importlib.import_module("kernel_gen.passes.hoist").SymbolHoistPipelinePass
 NnLoweringPass = importlib.import_module("kernel_gen.passes.lowering").NnLoweringPass
 OutlineDeviceKernelPass = importlib.import_module("kernel_gen.passes.tuning.outline_device_kernel").OutlineDeviceKernelPass
@@ -367,22 +370,40 @@ def _record_producer_consumer_analysis(self, ctx: Context, target: ModuleOp) -> 
     _PIPELINE_PASS_ORDER.append("producer-consumer-analysis")
 
 
-def _record_multi_buffer(self, ctx: Context, target: ModuleOp) -> None:
-    """记录 multi-buffer pass 执行。
+def _record_multi_buffer_analysis(self, ctx: Context, target: ModuleOp) -> None:
+    """记录 multi-buffer analysis pass 执行。
 
     功能说明:
-    - 为 pipeline 顺序测试记录 `MultiBufferPass.apply(...)` 被调用。
+    - 为 pipeline 顺序测试记录 `MultiBufferAnalysisPass.apply(...)` 被调用。
     - 锁定 pipeline 传入的 `memory_stage=2` 与 `target=npu_demo`。
 
     使用示例:
-    - monkeypatch.setattr(MultiBufferPass, "apply", _record_multi_buffer)
+    - monkeypatch.setattr(MultiBufferAnalysisPass, "apply", _record_multi_buffer_analysis)
     """
 
     _ = ctx
     _ = target
-    _PIPELINE_PASS_ORDER.append(f"multi-buffer:{self.memory_stage}:{self.target}")
+    _PIPELINE_PASS_ORDER.append(f"multi-buffer-analysis:{self.memory_stage}:{self.target}")
     assert self.memory_stage == 2
     assert self.target == "npu_demo"
+
+
+def _record_multi_buffer_apply(self, ctx: Context, target: ModuleOp) -> None:
+    """记录 multi-buffer apply pass 执行。
+
+    功能说明:
+    - 为 pipeline 顺序测试记录 `MultiBufferApplyPass.apply(...)` 被调用。
+    - 锁定 pipeline 传入的 `target=npu_demo` 与 `alignment=1024`。
+
+    使用示例:
+    - monkeypatch.setattr(MultiBufferApplyPass, "apply", _record_multi_buffer_apply)
+    """
+
+    _ = ctx
+    _ = target
+    _PIPELINE_PASS_ORDER.append(f"multi-buffer-apply:{self.target}:{self.alignment}")
+    assert self.target == "npu_demo"
+    assert self.alignment == 1024
 
 
 def _record_outline(self, ctx: Context, target: ModuleOp) -> None:
@@ -609,7 +630,7 @@ def test_npu_demo_lowering_pipeline_builds_pass_manager() -> None:
 
 
 # TC-PIPELINE-101
-# 功能说明: 验证 npu-demo-lowering 的固定顺序包含三次 memory-plan、五次 CSE、五次 canonicalize、pre-pool multi-buffer / producer-consumer-analysis 和 late attach。
+# 功能说明: 验证 npu-demo-lowering 的固定顺序包含三次 memory-plan、五次 CSE、五次 canonicalize、pre-pool multi-buffer analysis/apply / producer-consumer-analysis 和 late attach。
 # 测试目的: 锁定 dsl_run 新正向管线的最小公开顺序。
 # 使用示例: pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k test_npu_demo_lowering_pipeline_pass_order
 # 对应功能实现文件路径: kernel_gen/pipeline/npu_demo_lowering.py
@@ -633,7 +654,8 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(KernelDecomposePass, "apply", _record_kernel_decompose)
     monkeypatch.setattr(SymbolBufferHoistPass, "apply", _record_symbol_buffer_hoist)
     monkeypatch.setattr(MemoryPoolPass, "apply", _record_memory_pool)
-    monkeypatch.setattr(MultiBufferPass, "apply", _record_multi_buffer)
+    monkeypatch.setattr(MultiBufferAnalysisPass, "apply", _record_multi_buffer_analysis)
+    monkeypatch.setattr(MultiBufferApplyPass, "apply", _record_multi_buffer_apply)
     monkeypatch.setattr(ProducerConsumerAnalysisPass, "apply", _record_producer_consumer_analysis)
     monkeypatch.setattr(AttachArchInformationPass, "apply", _record_attach)
     monkeypatch.setattr(OutlineDeviceKernelPass, "apply", _record_outline)
@@ -665,7 +687,8 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "symbol-hoist-pipeline",
         "cse",
         "canonicalize",
-        "multi-buffer:2:npu_demo",
+        "multi-buffer-analysis:2:npu_demo",
+        "multi-buffer-apply:npu_demo:1024",
         "producer-consumer-analysis",
         "memory-pool:True:1024",
         "cse",
@@ -959,22 +982,24 @@ def test_npu_demo_lowering_pipeline_dynamic_acc_kernel_decompose_dump_shows_life
     assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=3) == 21
     assert _dump_stage_index(tmp_path, "cse", occurrence=4) == 22
     assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) == 23
-    assert _dump_stage_index(tmp_path, "multi-buffer") == 24
-    assert _dump_stage_index(tmp_path, "producer-consumer-analysis") == 25
-    assert _dump_stage_index(tmp_path, "memory-pool") == 26
-    assert _dump_stage_index(tmp_path, "cse", occurrence=5) == 27
-    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=5) == 28
-    assert _dump_stage_index(tmp_path, "arch-parallelize") == 29
-    assert _dump_stage_index(tmp_path, "attach-arch-information") == 30
-    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 31
-    assert _dump_stage_index(tmp_path, "template-name-infer") == 32
+    assert _dump_stage_index(tmp_path, "multi-buffer-analysis") == 24
+    assert _dump_stage_index(tmp_path, "multi-buffer-apply") == 25
+    assert _dump_stage_index(tmp_path, "producer-consumer-analysis") == 26
+    assert _dump_stage_index(tmp_path, "memory-pool") == 27
+    assert _dump_stage_index(tmp_path, "cse", occurrence=5) == 28
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=5) == 29
+    assert _dump_stage_index(tmp_path, "arch-parallelize") == 30
+    assert _dump_stage_index(tmp_path, "attach-arch-information") == 31
+    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 32
+    assert _dump_stage_index(tmp_path, "template-name-infer") == 33
     assert markers.count("attach-arch-information") == 1
     assert markers.count("symbol-hoist-pipeline") == 3
     assert "dma-alias-to-reinterpret" not in markers
     assert "symbol-loop-hoist" not in markers
     assert "hoist-dma-alias-ops" not in markers
     assert "lower-dma-memory-hierarchy" not in markers
-    assert markers.count("multi-buffer") == 1
+    assert markers.count("multi-buffer-analysis") == 1
+    assert markers.count("multi-buffer-apply") == 1
     assert markers[6:11] == [
         "memory-plan",
         "symbol-hoist-pipeline",
@@ -990,14 +1015,15 @@ def test_npu_demo_lowering_pipeline_dynamic_acc_kernel_decompose_dump_shows_life
         "cse",
         "canonicalize",
     ]
-    assert markers[17:30] == [
+    assert markers[17:31] == [
         "kernel-aggregate",
         "kernel-decompose",
         "memory-plan",
         "symbol-hoist-pipeline",
         "cse",
         "canonicalize",
-        "multi-buffer",
+        "multi-buffer-analysis",
+        "multi-buffer-apply",
         "producer-consumer-analysis",
         "memory-pool",
         "cse",
@@ -1008,12 +1034,12 @@ def test_npu_demo_lowering_pipeline_dynamic_acc_kernel_decompose_dump_shows_life
 
 
 def test_npu_demo_lowering_pipeline_static_dump_runs_multi_buffer_before_pool(tmp_path: Path) -> None:
-    """验证静态 tile matmul dump 运行 multi-buffer 后再进入 memory-pool。
+    """验证静态 tile matmul dump 运行 multi-buffer analysis/apply 后再进入 memory-pool。
 
     功能说明:
     - 使用公开 `set_dump_dir(...)` 与公开 pipeline builder 观察 `transform-apply` 与 `memory-pool` stage。
     - 静态 tile 让 pattern 内 `TransformApplyPass` 执行 lower-dma-memory-hierarchy 并产生可计算 byte size 的 staging buffer。
-    - 断言当前 npu-demo-lowering 在第三段 cleanup 后接入 `multi-buffer`，并在 memory-pool 前生成 ring IR。
+    - 断言当前 npu-demo-lowering 在第三段 cleanup 后接入 `multi-buffer-analysis -> multi-buffer-apply`，并在 memory-pool 前生成 ring IR。
 
     使用示例:
     - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k static_dump_runs_multi_buffer_before_pool
@@ -1034,7 +1060,8 @@ def test_npu_demo_lowering_pipeline_static_dump_runs_multi_buffer_before_pool(tm
     transform_apply_text = _dump_stage_text_by_marker(tmp_path, "transform-apply")
     kernel_aggregate_text = _dump_stage_text_by_marker(tmp_path, "kernel-aggregate")
     decompose_text = _dump_stage_text_by_marker(tmp_path, "kernel-decompose")
-    multi_buffer_text = _dump_stage_text_by_marker(tmp_path, "multi-buffer")
+    multi_buffer_analysis_text = _dump_stage_text_by_marker(tmp_path, "multi-buffer-analysis")
+    multi_buffer_apply_text = _dump_stage_text_by_marker(tmp_path, "multi-buffer-apply")
     producer_consumer_text = _dump_stage_text_by_marker(tmp_path, "producer-consumer-analysis")
     memory_pool_text = _dump_stage_text_by_marker(tmp_path, "memory-pool")
     arch_parallelize_text = _dump_stage_text_by_marker(tmp_path, "arch-parallelize")
@@ -1050,11 +1077,19 @@ def test_npu_demo_lowering_pipeline_static_dump_runs_multi_buffer_before_pool(tm
     assert "acc = true" not in decompose_text
     assert "acc = false" not in decompose_text
     assert '"kernel.matmul"' in decompose_text
-    assert multi_buffer_text.splitlines()[0] == 'multi-buffer{memory_stage=2 fold=true target="npu_demo"}'
-    assert "dma.make_ring" in multi_buffer_text
-    assert "dma.current_ring" in multi_buffer_text
-    assert "dma.advance_ring" in multi_buffer_text
-    assert "dma.alloc" in multi_buffer_text
+    assert multi_buffer_analysis_text.splitlines()[0] == 'multi-buffer-analysis{memory_stage=2 fold=true target="npu_demo"}'
+    assert "multi_buffer.update_point" in multi_buffer_analysis_text
+    assert "multi_buffer.use_point" in multi_buffer_analysis_text
+    assert 'multi_buffer.num = "auto"' in multi_buffer_analysis_text
+    assert "dma.make_ring" not in multi_buffer_analysis_text
+    assert "dma.current_ring" not in multi_buffer_analysis_text
+    assert "dma.advance_ring" not in multi_buffer_analysis_text
+    assert multi_buffer_apply_text.splitlines()[0] == 'multi-buffer-apply{fold=true target="npu_demo" alignment=1024}'
+    assert "multi_buffer." not in multi_buffer_apply_text
+    assert "dma.make_ring" in multi_buffer_apply_text
+    assert "dma.current_ring" in multi_buffer_apply_text
+    assert "dma.advance_ring" in multi_buffer_apply_text
+    assert "dma.alloc" in multi_buffer_apply_text
     assert producer_consumer_text.splitlines()[0] == "producer-consumer-analysis{fold=true}"
     assert "dma.alloc" in producer_consumer_text
     assert "dma.make_ring" in producer_consumer_text
@@ -1069,7 +1104,8 @@ def test_npu_demo_lowering_pipeline_static_dump_runs_multi_buffer_before_pool(tm
     assert "dma.advance_ring" in memory_pool_text
     assert "dma.alloc" not in memory_pool_text
     assert "dma.free" not in memory_pool_text
-    assert markers.count("multi-buffer") == 1
+    assert markers.count("multi-buffer-analysis") == 1
+    assert markers.count("multi-buffer-apply") == 1
     assert "lower-dma-memory-hierarchy" not in markers
     assert _dump_stage_index(tmp_path, "transform-apply") + 1 == _dump_stage_index(
         tmp_path, "memory-plan", occurrence=2
@@ -1102,9 +1138,12 @@ def test_npu_demo_lowering_pipeline_static_dump_runs_multi_buffer_before_pool(tm
         tmp_path, "canonicalize", occurrence=4
     )
     assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) + 1 == _dump_stage_index(
-        tmp_path, "multi-buffer"
+        tmp_path, "multi-buffer-analysis"
     )
-    assert _dump_stage_index(tmp_path, "multi-buffer") + 1 == _dump_stage_index(
+    assert _dump_stage_index(tmp_path, "multi-buffer-analysis") + 1 == _dump_stage_index(
+        tmp_path, "multi-buffer-apply"
+    )
+    assert _dump_stage_index(tmp_path, "multi-buffer-apply") + 1 == _dump_stage_index(
         tmp_path, "producer-consumer-analysis"
     )
     assert _dump_stage_index(tmp_path, "producer-consumer-analysis") + 1 == _dump_stage_index(

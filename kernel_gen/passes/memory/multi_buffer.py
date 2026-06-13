@@ -2,19 +2,28 @@
 
 
 功能说明:
-- 提供 `multi-buffer` pass，把可证明的 matmul lhs/rhs staging buffer 改写为 DMA ring。
+- 提供 `multi-buffer-analysis`、`multi-buffer-apply` 和兼容 `multi-buffer` pass。
+- analysis 阶段只把可证明的 staging buffer 标记为三项 `multi_buffer.*` 临时属性。
+- apply 阶段消费三项属性并把对应 typed alloc/free 生命周期改写为 DMA ring。
 - 匹配同一 `symbol.for` 外或 loop-local 的 `dma.alloc/free` 与 loop body 内的
   direct alias / direct memory use 生命周期。
 - 对不满足公开边界的 IR 保持 no-op，不引入宽泛 alias 或跨 region 推断。
 
 API 列表:
-- `class MultiBufferPass(memory_stage: int = 2, fold: bool = True, target: str | None = None)`
+- `class MultiBufferAnalysisPass(memory_stage: int = 2, fold: bool = True, target: str | None = None)`
+- `MultiBufferAnalysisPass.from_options(options: dict[str, str]) -> MultiBufferAnalysisPass`
+- `MultiBufferAnalysisPass.apply(ctx: Context, module: ModuleOp) -> None`
+- `class MultiBufferApplyPass(fold: bool = True, target: str | None = None, alignment: int = 1024)`
+- `MultiBufferApplyPass.from_options(options: dict[str, str]) -> MultiBufferApplyPass`
+- `MultiBufferApplyPass.apply(ctx: Context, module: ModuleOp) -> None`
+- `class MultiBufferPass(memory_stage: int = 2, fold: bool = True, target: str | None = None, alignment: int = 1024)`
 - `MultiBufferPass.from_options(options: dict[str, str]) -> MultiBufferPass`
 - `MultiBufferPass.apply(ctx: Context, module: ModuleOp) -> None`
 
 使用示例:
-- from kernel_gen.passes.memory.multi_buffer import MultiBufferPass
-- MultiBufferPass(memory_stage=2).apply(Context(), module)
+- from kernel_gen.passes.memory.multi_buffer import MultiBufferAnalysisPass, MultiBufferApplyPass
+- MultiBufferAnalysisPass(memory_stage=2, target="npu_demo").apply(Context(), module)
+- MultiBufferApplyPass(target="npu_demo", alignment=1024).apply(Context(), module)
 
 关联文件:
 - spec: spec/pass/memory/multi_buffer.md
@@ -35,9 +44,12 @@ from xdsl.dialects.builtin import (
     Float64Type,
     IntegerType,
     ModuleOp,
+    StringAttr,
+    UnregisteredOp,
     i8,
 )
 from xdsl.ir import Attribute, Block, Operation, SSAValue
+from xdsl.traits import IsTerminator
 
 from kernel_gen.dialect.dma import (
     DmaAdvanceRingOp,
@@ -63,7 +75,7 @@ from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelImg2col1dOp, KernelImg2col2dOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolForOp
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolFloorDivOp, SymbolMulOp, SymbolSubOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.passes.common import ensure_builtin_module, raise_pass_contract_error
 from kernel_gen.passes.pass_manager import Pass
 from kernel_gen.target.registry import get_target_hardware
@@ -72,6 +84,16 @@ from kernel_gen.target.registry import get_target_hardware
 _SymbolExprValue = tuple[SSAValue, str, int | None]
 _StagingCandidate = tuple[DmaAllocOp, DmaCopyOp, DmaFreeOp, KernelMatmulOp, int, NnMemoryType, int | None]
 _RingRewriteOps = tuple[DmaCurrentRingOp, DmaAdvanceRingOp]
+_MultiBufferMode = str
+
+_MULTI_BUFFER_UPDATE_POINT_ATTR = "multi_buffer.update_point"
+_MULTI_BUFFER_USE_POINT_ATTR = "multi_buffer.use_point"
+_MULTI_BUFFER_NUM_ATTR = "multi_buffer.num"
+_MULTI_BUFFER_ANALYSIS_ATTRS = (
+    _MULTI_BUFFER_UPDATE_POINT_ATTR,
+    _MULTI_BUFFER_USE_POINT_ATTR,
+    _MULTI_BUFFER_NUM_ATTR,
+)
 
 
 @dataclass(frozen=True)
@@ -116,6 +138,24 @@ class _MultiBufferRewriteRules:
     使用示例:
     - size = _MultiBufferRewriteRules.element_byte_width(i32)
     """
+
+    @staticmethod
+    def symbol_binary_op(op_name: str, lhs: SSAValue, rhs: SSAValue, result_expr: str) -> Operation:
+        """构造 generic symbol binary op。
+
+        功能说明:
+        - 生成 xDSL generic 形式的 `"symbol.add"` / `"symbol.sub"` / `"symbol.mul"` / `"symbol.floordiv"`。
+        - 保留 result type 的 `SymbolExprAttr`，让后续 DMA ring operands 仍具备公开 `!symbol.int` 类型。
+
+        使用示例:
+        - op = _MultiBufferRewriteRules.symbol_binary_op("symbol.add", lhs, rhs, "A + B")
+        """
+
+        generic_op = UnregisteredOp.with_name(op_name)
+        result_type = SymbolValueType.from_expr(result_expr)
+        operands = [lhs, rhs]
+        result_types = [result_type]
+        return generic_op.create(operands=operands, result_types=result_types)
 
     @staticmethod
     def enclosing_op_in_block(op: Operation, block: Block) -> Operation | None:
@@ -193,9 +233,9 @@ class _MultiBufferRewriteRules:
             materialized_ops.append(const_op)
             return (const_op.result, str(value), value)
         result_expr = SymbolExprAttr.from_expr(f"({lhs_expr}) + ({rhs_expr})").expr.data
-        add_op = SymbolAddOp(lhs_value, rhs_value, SymbolValueType.from_expr(result_expr))
+        add_op = _MultiBufferRewriteRules.symbol_binary_op("symbol.add", lhs_value, rhs_value, result_expr)
         materialized_ops.append(add_op)
-        return (add_op.result, result_expr, None)
+        return (add_op.results[0], result_expr, None)
 
     @staticmethod
     def align_up_symbol_value(
@@ -223,14 +263,24 @@ class _MultiBufferRewriteRules:
             return (const_op.result, str(aligned), aligned)
         mask_op = SymbolConstOp(alignment - 1)
         numerator_expr = SymbolExprAttr.from_expr(f"({value_expr}) + ({alignment - 1})").expr.data
-        numerator_op = SymbolAddOp(value_result, mask_op.result, SymbolValueType.from_expr(numerator_expr))
+        numerator_op = _MultiBufferRewriteRules.symbol_binary_op("symbol.add", value_result, mask_op.result, numerator_expr)
         alignment_op = SymbolConstOp(alignment)
         div_expr = SymbolExprAttr.from_expr(f"({numerator_expr}) floordiv ({alignment})").expr.data
-        div_op = SymbolFloorDivOp(numerator_op.result, alignment_op.result, SymbolValueType.from_expr(div_expr))
+        div_op = _MultiBufferRewriteRules.symbol_binary_op(
+            "symbol.floordiv",
+            numerator_op.results[0],
+            alignment_op.result,
+            div_expr,
+        )
         aligned_expr = SymbolExprAttr.from_expr(f"({div_expr})*({alignment})").expr.data
-        aligned_op = SymbolMulOp(div_op.result, alignment_op.result, SymbolValueType.from_expr(aligned_expr))
+        aligned_op = _MultiBufferRewriteRules.symbol_binary_op(
+            "symbol.mul",
+            div_op.results[0],
+            alignment_op.result,
+            aligned_expr,
+        )
         materialized_ops.extend([mask_op, numerator_op, alignment_op, div_op, aligned_op])
-        return (aligned_op.result, aligned_expr, None)
+        return (aligned_op.results[0], aligned_expr, None)
 
     @staticmethod
     def alloc_slot_byte_value(
@@ -293,9 +343,9 @@ class _MultiBufferRewriteRules:
                 elements = (const_op.result, str(value), value)
             else:
                 result_expr = SymbolExprAttr.from_expr(f"({lhs_expr})*({rhs_expr})").expr.data
-                mul_op = SymbolMulOp(lhs_value, rhs_value, SymbolValueType.from_expr(result_expr))
+                mul_op = _MultiBufferRewriteRules.symbol_binary_op("symbol.mul", lhs_value, rhs_value, result_expr)
                 materialized_ops.append(mul_op)
-                elements = (mul_op.result, result_expr, None)
+                elements = (mul_op.results[0], result_expr, None)
         if element_size == 1:
             return elements
 
@@ -307,9 +357,9 @@ class _MultiBufferRewriteRules:
             return (const_op.result, str(value), value)
         bpe = SymbolConstOp(element_size)
         result_expr = SymbolExprAttr.from_expr(f"({element_size})*({elements_expr})").expr.data
-        mul_op = SymbolMulOp(elements_value, bpe.result, SymbolValueType.from_expr(result_expr))
+        mul_op = _MultiBufferRewriteRules.symbol_binary_op("symbol.mul", elements_value, bpe.result, result_expr)
         materialized_ops.extend([bpe, mul_op])
-        return (mul_op.result, result_expr, None)
+        return (mul_op.results[0], result_expr, None)
 
     @staticmethod
     def reserved_space_bytes_for_group(
@@ -461,6 +511,149 @@ class _MultiBufferRewriteRules:
             direct_uses=direct_uses,
         )
 
+    @staticmethod
+    def region_labels(module: ModuleOp) -> dict[SymbolForOp, str]:
+        """为 module 内 `symbol.for` 分配稳定 analysis region 标签。
+
+        功能说明:
+        - 按 module walk 顺序生成 `loop1`、`loop2` 等标签。
+        - analysis 与 apply 使用同一规则复核 `multi_buffer.update_point/use_point`。
+
+        使用示例:
+        - labels = _MultiBufferRewriteRules.region_labels(module)
+        """
+
+        labels: dict[SymbolForOp, str] = {}
+        loop_index = 1
+        for op in module.walk():
+            if not isinstance(op, SymbolForOp):
+                continue
+            labels[op] = f"loop{loop_index}"
+            loop_index += 1
+        return labels
+
+    @staticmethod
+    def write_multi_buffer_attrs(alloc_op: DmaAllocOp, update_point: str, use_point: str, num: str) -> None:
+        """写入 multi-buffer analysis 三项临时属性。
+
+        功能说明:
+        - 只在 `dma.alloc` 上写 `update_point`、`use_point`、`num` 三个 `StringAttr`。
+        - 不插入、删除或替换任何业务 IR。
+
+        使用示例:
+        - _MultiBufferRewriteRules.write_multi_buffer_attrs(alloc_op, "loop1", "loop1", "auto")
+        """
+
+        attrs = alloc_op.attributes
+        attrs[_MULTI_BUFFER_UPDATE_POINT_ATTR] = StringAttr(update_point)
+        attrs[_MULTI_BUFFER_USE_POINT_ATTR] = StringAttr(use_point)
+        attrs[_MULTI_BUFFER_NUM_ATTR] = StringAttr(num)
+        alloc_op.attributes = attrs
+
+    @staticmethod
+    def read_multi_buffer_attrs(alloc_op: DmaAllocOp) -> tuple[str, str, str] | None:
+        """读取 multi-buffer analysis 三项临时属性。
+
+        功能说明:
+        - 三项属性都存在且都是 `StringAttr` 时返回文本三元组。
+        - 缺失或类型不匹配时返回 `None`，由 apply 保持 no-op。
+
+        使用示例:
+        - attrs = _MultiBufferRewriteRules.read_multi_buffer_attrs(alloc_op)
+        """
+
+        values: list[str] = []
+        for attr_name in _MULTI_BUFFER_ANALYSIS_ATTRS:
+            attr = alloc_op.attributes.get(attr_name)
+            if not isinstance(attr, StringAttr):
+                return None
+            values.append(attr.data)
+        return (values[0], values[1], values[2])
+
+    @staticmethod
+    def analysis_num(memory_stage: int, target: str | None, force_num_one: bool) -> str:
+        """计算 analysis 写入的 `multi_buffer.num` 文本。
+
+        功能说明:
+        - loop-local 强制写 `"1"`。
+        - target 非空时 same-loop staging 写 `"auto"`，否则写固定 `memory_stage`。
+
+        使用示例:
+        - num = _MultiBufferRewriteRules.analysis_num(2, "npu_demo", False)
+        """
+
+        if force_num_one:
+            return "1"
+        if target is not None:
+            return "auto"
+        return str(memory_stage)
+
+    @staticmethod
+    def parse_multi_buffer_num_attr(value: str) -> int | None | str:
+        """解析 `multi_buffer.num` 临时属性。
+
+        功能说明:
+        - `"auto"` 原样返回，由 apply target 容量逻辑处理。
+        - 正整数字符串返回对应整数；其它文本返回 `None` 表示候选 no-op。
+
+        使用示例:
+        - parsed = _MultiBufferRewriteRules.parse_multi_buffer_num_attr("auto")
+        """
+
+        if value == "auto":
+            return "auto"
+        if not value.isdecimal():
+            return None
+        parsed = int(value)
+        if parsed <= 0:
+            return None
+        return parsed
+
+
+def _parse_alignment_option(value: str) -> int:
+    """解析 `alignment` pass option。
+
+    功能说明:
+    - 将 registry 传入的字符串解析成非负整数 alignment。
+    - 非整数或负数按公开 `MultiBufferOptionError` 稳定错误文本失败。
+
+    使用示例:
+    - alignment = _parse_alignment_option("1024")
+    """
+
+    try:
+        alignment = int(value.strip())
+    except ValueError as exc:
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "MultiBufferOptionError: alignment must be non-negative integer",
+        ) from exc
+    if alignment < 0:
+        raise_pass_contract_error("MultiBufferOptionError", "alignment must be non-negative integer")
+    return alignment
+
+
+def _validate_alignment_value(alignment: int) -> int:
+    """校验公开构造器传入的 alignment。
+
+    功能说明:
+    - 接受非负整数，拒绝 `bool`、非整数和负数。
+    - 返回规范化后的 int 值。
+
+    使用示例:
+    - alignment = _validate_alignment_value(1024)
+    """
+
+    if isinstance(alignment, bool):
+        raise_pass_contract_error("MultiBufferOptionError", "alignment must be non-negative integer")
+    if not isinstance(alignment, int):
+        raise_pass_contract_error("MultiBufferOptionError", "alignment must be non-negative integer")
+    if alignment < 0:
+        raise_pass_contract_error("MultiBufferOptionError", "alignment must be non-negative integer")
+    normalized_alignment = alignment
+    return normalized_alignment
+
 
 def _parse_memory_stage_option(value: str) -> int:
     """解析 `memory-stage` pass option。
@@ -495,14 +688,20 @@ def _rewrite_matmul_if_pair(
     matmul: KernelMatmulOp,
     memory_stage: int,
     target: str | None,
+    *,
+    mode: _MultiBufferMode = "rewrite",
+    alignment: int = 1024,
+    region_label: str = "loop1",
 ) -> bool:
     """尝试把单个 matmul 的 lhs/rhs staging 成对 ring 化。
 
     功能说明:
     - lhs/rhs 任一缺失或失败时整对 no-op，避免 partial ring。
+    - `analysis` 模式只写三项临时属性；`apply` 模式只消费已有三项属性。
+    - ring offset 和 backing bytes 使用 `alignment` 后的 slot bytes。
 
     使用示例:
-    - changed = _rewrite_matmul_if_pair(symbol_for, matmul, 2, None)
+    - changed = _rewrite_matmul_if_pair(symbol_for, matmul, 2, None, mode="analysis")
 
     关联文件:
     - spec: spec/pass/memory/multi_buffer.md
@@ -519,6 +718,8 @@ def _rewrite_matmul_if_pair(
 
     loop_indexes = {op: index for index, op in enumerate(loop_block.ops)}
     parent_indexes = {op: index for index, op in enumerate(parent_block.ops)}
+    if any(isinstance(op, DmaCurrentRingOp) for op in loop_block.ops):
+        return False
     candidates: list[_StagingCandidate] = []
     for operand_index in (1, 2):
         value = SSAValue.get(matmul.operands[operand_index])
@@ -609,302 +810,264 @@ def _rewrite_matmul_if_pair(
         return False
     candidate_pair = (candidates[0], candidates[1])
 
+    if mode == "analysis":
+        num = _MultiBufferRewriteRules.analysis_num(memory_stage, target, False)
+        for candidate in candidate_pair:
+            alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, _slot_type, _slot_bytes = candidate
+            _MultiBufferRewriteRules.write_multi_buffer_attrs(alloc_op, region_label, region_label, num)
+        return True
+
+    parsed_num_attrs: list[int | str] = []
+    if mode == "apply":
+        for candidate in candidate_pair:
+            alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, _slot_type, _slot_bytes = candidate
+            attrs = _MultiBufferRewriteRules.read_multi_buffer_attrs(alloc_op)
+            if attrs is None:
+                return False
+            update_point, use_point, raw_num = attrs
+            if update_point != region_label or use_point != region_label:
+                return False
+            parsed = _MultiBufferRewriteRules.parse_multi_buffer_num_attr(raw_num)
+            if parsed is None:
+                return False
+            parsed_num_attrs.append(parsed)
+    elif target is None:
+        parsed_num_attrs = [memory_stage, memory_stage]
+    else:
+        parsed_num_attrs = ["auto", "auto"]
+
     pre_loop_ops: list[Operation] = []
     rewrite_ops: list[_RingRewriteOps] = []
-    if all(candidate[6] is not None for candidate in candidate_pair):
-        if target is None:
-            nums = (memory_stage, memory_stage)
-        else:
-            totals: dict[str, int] = {}
-            capacities: dict[str, int] = {}
-            for candidate in candidate_pair:
-                _alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, slot_bytes = candidate
-                if slot_bytes is None:
-                    return False
-                space = slot_type.space.space.data
-                totals[space] = totals.get(space, 0) + ((slot_bytes + 1023) // 1024) * 1024
-                capacity = get_target_hardware(target, f"{space}_memory_size")
-                if capacity is None or capacity <= 0:
-                    return False
-                capacities[space] = capacity
-            computed_nums: list[int] = []
-            for candidate in candidate_pair:
-                _alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, _slot_bytes = candidate
-                space = slot_type.space.space.data
-                total = totals[space]
-                if total <= 0:
-                    return False
-                num = capacities[space] // total
-                if num <= 0:
-                    return False
-                computed_nums.append(num)
-            nums = (computed_nums[0], computed_nums[1])
+    slot_values: list[_SymbolExprValue] = []
+    aligned_slot_values: list[_SymbolExprValue] = []
+    for candidate in candidate_pair:
+        alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, _slot_type, _slot_bytes = candidate
+        slot_value = _MultiBufferRewriteRules.alloc_slot_byte_value(alloc_op, pre_loop_ops)
+        if slot_value is None:
+            return False
+        aligned_slot = _MultiBufferRewriteRules.align_up_symbol_value(slot_value, alignment, pre_loop_ops)
+        slot_values.append(slot_value)
+        aligned_slot_values.append(aligned_slot)
 
-        for candidate, num in zip(candidate_pair, nums, strict=True):
-            _alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, slot_bytes = candidate
-            if slot_bytes is None:
-                return False
-            backing_bytes = num * slot_bytes
-            backing_type = NnMemoryType(
-                ArrayAttr([SymbolExprAttr.from_expr(str(backing_bytes))]),
-                ArrayAttr([SymbolExprAttr.from_expr("1")]),
-                i8,
-                slot_type.space,
-            )
-            backing = DmaAllocOp([], backing_type)
-            num_op = SymbolConstOp(num)
-            offset = SymbolConstOp(slot_bytes)
-            make_ring = DmaMakeRingOp(
-                backing.result,
-                num_op.result,
-                offset.result,
-                DmaRingType(slot_type),
-            )
-            current = DmaCurrentRingOp(make_ring.result)
-            advance = DmaAdvanceRingOp(make_ring.result)
-            pre_loop_ops.extend([backing, num_op, offset, make_ring])
-            rewrite_ops.append((current, advance))
-    else:
-        element_values: list[_SymbolExprValue] = []
-        element_sizes: list[int] = []
-        for candidate in candidate_pair:
-            alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, slot_bytes = candidate
-            if slot_bytes is not None:
-                const_op = SymbolConstOp(slot_bytes)
-                pre_loop_ops.append(const_op)
-                element_values.append((const_op.result, str(slot_bytes), slot_bytes))
-                element_sizes.append(1)
-                continue
-
-            element_type = slot_type.element_type
-            element_size = None
-            if isinstance(element_type, IntegerType):
-                width = int(element_type.width.data)
-                if width in {1, 8}:
-                    element_size = 1
-                elif width == 16:
-                    element_size = 2
-                elif width == 32:
-                    element_size = 4
-                elif width == 64:
-                    element_size = 8
-            elif isinstance(element_type, (Float16Type, BFloat16Type)):
-                element_size = 2
-            elif isinstance(element_type, Float32Type):
-                element_size = 4
-            elif isinstance(element_type, Float64Type):
-                element_size = 8
-            if element_size is None or element_size <= 0:
-                return False
-
-            dims = list(slot_type.shape.data)
-            operands = list(alloc_op.dynamic_shape)
-            if not operands:
-                return False
-            dim_values: list[_SymbolExprValue] = []
-            if len(operands) == len(dims):
-                for dim, operand in zip(dims, operands, strict=True):
-                    if not isinstance(dim, SymbolExprAttr):
-                        return False
-                    dim.verify()
-                    dim_expr = dim.expr.data
-                    if dim_expr == "?" or not isinstance(operand.type, SymbolValueType):
-                        return False
-                    operand.type.verify()
-                    value_expr = operand.type.expr.expr.data
-                    if SymbolExprAttr.from_expr(value_expr).expr.data != SymbolExprAttr.from_expr(dim_expr).expr.data:
-                        return False
-                    static_value = int(dim_expr) if dim_expr.isdecimal() else None
-                    dim_values.append((operand, dim_expr, static_value))
-            else:
-                non_static_dims: list[Attribute] = []
-                for dim in dims:
-                    static_dim = int(dim.expr.data) if isinstance(dim, SymbolExprAttr) and dim.expr.data.isdecimal() else None
-                    if static_dim is None:
-                        non_static_dims.append(dim)
-                if len(operands) != len(non_static_dims):
-                    return False
-                operand_cursor = 0
-                for dim in dims:
-                    static_dim = int(dim.expr.data) if isinstance(dim, SymbolExprAttr) and dim.expr.data.isdecimal() else None
-                    if static_dim is not None and static_dim > 0:
-                        dim_const = SymbolConstOp(static_dim)
-                        pre_loop_ops.append(dim_const)
-                        dim_values.append((dim_const.result, str(static_dim), static_dim))
-                        continue
-                    if not isinstance(dim, SymbolExprAttr) or operand_cursor >= len(operands):
-                        return False
-                    dim.verify()
-                    dim_expr = dim.expr.data
-                    operand = operands[operand_cursor]
-                    operand_cursor += 1
-                    if dim_expr == "?" or not isinstance(operand.type, SymbolValueType):
-                        return False
-                    operand.type.verify()
-                    value_expr = operand.type.expr.expr.data
-                    if SymbolExprAttr.from_expr(value_expr).expr.data != SymbolExprAttr.from_expr(dim_expr).expr.data:
-                        return False
-                    dim_values.append((operand, dim_expr, None))
-
-            if not dim_values:
-                return False
-            elements = dim_values[0]
-            for dim_value in dim_values[1:]:
-                elements_value, elements_expr, elements_static = elements
-                dim_result, dim_expr, dim_static = dim_value
-                result_expr = SymbolExprAttr.from_expr(f"({elements_expr})*({dim_expr})").expr.data
-                if elements_static is not None and dim_static is not None:
-                    value = elements_static * dim_static
-                    const_op = SymbolConstOp(value)
-                    pre_loop_ops.append(const_op)
-                    elements = (const_op.result, str(value), value)
-                else:
-                    mul_op = SymbolMulOp(elements_value, dim_result, SymbolValueType.from_expr(result_expr))
-                    pre_loop_ops.append(mul_op)
-                    elements = (mul_op.result, result_expr, None)
-            element_values.append(elements)
-            element_sizes.append(element_size)
-
-        shared_bpe: SymbolConstOp | None = None
-        shared_element_size = element_sizes[0] if element_sizes[0] == element_sizes[1] else None
-        if shared_element_size is not None and shared_element_size > 1:
-            shared_bpe = SymbolConstOp(shared_element_size)
-            pre_loop_ops.append(shared_bpe)
-
-        shape_values: list[_SymbolExprValue] = []
-        for elements, element_size in zip(element_values, element_sizes, strict=True):
-            elements_value, elements_expr, elements_static = elements
-            if element_size == 1:
-                shape_values.append(elements)
-                continue
-            bpe = shared_bpe
-            if bpe is None:
-                bpe = SymbolConstOp(element_size)
-                pre_loop_ops.append(bpe)
-            bpe_value = (bpe.result, str(element_size), element_size)
-            result_expr = SymbolExprAttr.from_expr(f"({element_size})*({elements_expr})").expr.data
-            if elements_static is not None:
-                value = elements_static * element_size
-                const_op = SymbolConstOp(value)
-                pre_loop_ops.append(const_op)
-                shape_values.append((const_op.result, str(value), value))
-            else:
-                bpe_result, _bpe_expr, _bpe_static = bpe_value
-                mul_op = SymbolMulOp(elements_value, bpe_result, SymbolValueType.from_expr(result_expr))
-                pre_loop_ops.append(mul_op)
-                shape_values.append((mul_op.result, result_expr, None))
-
-        if target is None:
-            lhs_num = SymbolConstOp(memory_stage)
-            rhs_num = SymbolConstOp(memory_stage)
-            pre_loop_ops.extend([lhs_num, rhs_num])
-            num_values = (
-                (lhs_num.result, str(memory_stage), memory_stage),
-                (rhs_num.result, str(memory_stage), memory_stage),
-            )
-        else:
-            num_slots: list[_SymbolExprValue | None] = [None, None]
-            groups: list[list[int]] = []
-            spaces: list[str] = []
-            for index, candidate in enumerate(candidate_pair):
-                _alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, _slot_bytes = candidate
-                space = slot_type.space.space.data
-                if space in spaces:
-                    groups[spaces.index(space)].append(index)
-                    continue
-                spaces.append(space)
-                groups.append([index])
-            for group in groups:
-                group_slot_type = candidate_pair[group[0]][5]
-                capacity = get_target_hardware(target, f"{group_slot_type.space.space.data}_memory_size")
-                if capacity is None or capacity <= 0:
-                    return False
-                total = _MultiBufferRewriteRules.align_up_symbol_value(shape_values[group[0]], 1024, pre_loop_ops)
-                for index in group[1:]:
-                    addend = _MultiBufferRewriteRules.align_up_symbol_value(shape_values[index], 1024, pre_loop_ops)
-                    total_result, total_expr, total_static = total
-                    addend_result, addend_expr, addend_static = addend
-                    result_expr = SymbolExprAttr.from_expr(f"({total_expr}) + ({addend_expr})").expr.data
-                    if total_static is not None and addend_static is not None:
-                        value = total_static + addend_static
-                        const_op = SymbolConstOp(value)
-                        pre_loop_ops.append(const_op)
-                        total = (const_op.result, str(value), value)
-                    else:
-                        add_op = SymbolAddOp(total_result, addend_result, SymbolValueType.from_expr(result_expr))
-                        pre_loop_ops.append(add_op)
-                        total = (add_op.result, result_expr, None)
-                total_result, total_expr, total_static = total
-                if total_static is not None:
-                    if total_static <= 0:
-                        return False
-                    num_value = capacity // total_static
-                    if num_value <= 0:
-                        return False
-                    num_const = SymbolConstOp(num_value)
-                    pre_loop_ops.append(num_const)
-                    num = (num_const.result, str(num_value), num_value)
-                else:
-                    capacity_const = SymbolConstOp(capacity)
-                    num_expr = SymbolExprAttr.from_expr(f"({capacity}) floordiv ({total_expr})").expr.data
-                    num_op = SymbolFloorDivOp(capacity_const.result, total_result, SymbolValueType.from_expr(num_expr))
-                    pre_loop_ops.extend([capacity_const, num_op])
-                    num = (num_op.result, num_expr, None)
-                for index in group:
-                    num_slots[index] = num
-            if num_slots[0] is None or num_slots[1] is None:
-                return False
-            num_values = (num_slots[0], num_slots[1])
-
-        backing_values: list[_SymbolExprValue] = []
-        for num_value, shape_value in zip(num_values, shape_values, strict=True):
+    num_values: list[_SymbolExprValue | None] = [None, None]
+    fixed_reserved_by_space: dict[str, _SymbolExprValue] = {}
+    external_fixed_slots_by_space: dict[str, list[tuple[int, _SymbolExprValue]]] = {}
+    for index, (candidate, parsed_num, aligned_slot) in enumerate(
+        zip(candidate_pair, parsed_num_attrs, aligned_slot_values, strict=True)
+    ):
+        _alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, _slot_bytes = candidate
+        if isinstance(parsed_num, int):
+            num_const = SymbolConstOp(parsed_num)
+            pre_loop_ops.append(num_const)
+            num_value: _SymbolExprValue = (num_const.result, str(parsed_num), parsed_num)
+            num_values[index] = num_value
             num_result, num_expr, num_static = num_value
-            shape_result, shape_expr, shape_static = shape_value
-            result_expr = SymbolExprAttr.from_expr(f"({num_expr})*({shape_expr})").expr.data
-            if num_static is not None and shape_static is not None:
-                value = num_static * shape_static
-                const_op = SymbolConstOp(value)
-                pre_loop_ops.append(const_op)
-                backing_values.append((const_op.result, str(value), value))
+            aligned_result, aligned_expr, aligned_static = aligned_slot
+            if num_static is not None and aligned_static is not None:
+                reserved_value = num_static * aligned_static
+                reserved_const = SymbolConstOp(reserved_value)
+                pre_loop_ops.append(reserved_const)
+                reserved: _SymbolExprValue = (reserved_const.result, str(reserved_value), reserved_value)
             else:
-                mul_op = SymbolMulOp(num_result, shape_result, SymbolValueType.from_expr(result_expr))
-                pre_loop_ops.append(mul_op)
-                backing_values.append((mul_op.result, result_expr, None))
+                reserved_expr = SymbolExprAttr.from_expr(f"({num_expr})*({aligned_expr})").expr.data
+                reserved_op = _MultiBufferRewriteRules.symbol_binary_op(
+                    "symbol.mul",
+                    num_result,
+                    aligned_result,
+                    reserved_expr,
+                )
+                pre_loop_ops.append(reserved_op)
+                reserved = (reserved_op.results[0], reserved_expr, None)
+            space = slot_type.space.space.data
+            fixed_reserved_by_space[space] = (
+                reserved
+                if space not in fixed_reserved_by_space
+                else _MultiBufferRewriteRules.add_symbol_values(fixed_reserved_by_space[space], reserved, pre_loop_ops)
+            )
 
-        for candidate, num_value, shape_value, backing_value in zip(candidate_pair, num_values, shape_values, backing_values, strict=True):
-            _alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, _slot_bytes = candidate
-            num_result, _num_expr, _num_static = num_value
-            shape_result, _shape_expr, _shape_static = shape_value
-            backing_result, backing_expr, backing_static = backing_value
-            dynamic_shape = [] if backing_static is not None else [backing_result]
-            backing_type = NnMemoryType(
-                ArrayAttr([SymbolExprAttr.from_expr(backing_expr)]),
-                ArrayAttr([SymbolExprAttr.from_expr("1")]),
-                i8,
-                slot_type.space,
+    if any(parsed_num == "auto" for parsed_num in parsed_num_attrs):
+        if target is None:
+            return False
+        candidate_allocs = {candidate[0] for candidate in candidate_pair}
+        symbol_for_index = parent_indexes.get(symbol_for)
+        if symbol_for_index is None:
+            return False
+        for op in tuple(parent_block.ops):
+            op_index = parent_indexes.get(op)
+            if op_index is None or op_index >= symbol_for_index:
+                continue
+            if not isinstance(op, DmaAllocOp) or op in candidate_allocs:
+                continue
+            attrs = _MultiBufferRewriteRules.read_multi_buffer_attrs(op)
+            if attrs is None:
+                continue
+            _update_point, _use_point, raw_num = attrs
+            parsed = _MultiBufferRewriteRules.parse_multi_buffer_num_attr(raw_num)
+            if not isinstance(parsed, int):
+                continue
+            op_type = op.result.type
+            if not isinstance(op_type, NnMemoryType):
+                continue
+            slot_value = _MultiBufferRewriteRules.alloc_slot_byte_value(op, pre_loop_ops)
+            if slot_value is None:
+                return False
+            space = op_type.space.space.data
+            external_fixed_slots_by_space.setdefault(space, []).append((parsed, slot_value))
+
+    auto_groups: dict[str, list[int]] = {}
+    for index, (candidate, parsed_num) in enumerate(zip(candidate_pair, parsed_num_attrs, strict=True)):
+        if parsed_num != "auto":
+            continue
+        _alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, _slot_bytes = candidate
+        auto_groups.setdefault(slot_type.space.space.data, []).append(index)
+
+    for space, indexes in auto_groups.items():
+        capacity = get_target_hardware(target, f"{space}_memory_size") if target is not None else None
+        if capacity is None or capacity <= 0:
+            return False
+        capacity_const = SymbolConstOp(capacity)
+        pre_loop_ops.append(capacity_const)
+        reserved = fixed_reserved_by_space.get(space)
+        for parsed, slot_value in external_fixed_slots_by_space.get(space, []):
+            aligned_slot = _MultiBufferRewriteRules.align_up_symbol_value(slot_value, alignment, pre_loop_ops)
+            aligned_result, aligned_expr, aligned_static = aligned_slot
+            if aligned_static is not None:
+                reserved_value = parsed * aligned_static
+                reserved_const = SymbolConstOp(reserved_value)
+                pre_loop_ops.append(reserved_const)
+                external_reserved: _SymbolExprValue = (reserved_const.result, str(reserved_value), reserved_value)
+            else:
+                num_const = SymbolConstOp(parsed)
+                reserved_expr = SymbolExprAttr.from_expr(f"({parsed})*({aligned_expr})").expr.data
+                reserved_op = _MultiBufferRewriteRules.symbol_binary_op(
+                    "symbol.mul",
+                    num_const.result,
+                    aligned_result,
+                    reserved_expr,
+                )
+                pre_loop_ops.extend([num_const, reserved_op])
+                external_reserved = (reserved_op.results[0], reserved_expr, None)
+            reserved = (
+                external_reserved
+                if reserved is None
+                else _MultiBufferRewriteRules.add_symbol_values(reserved, external_reserved, pre_loop_ops)
             )
-            backing = DmaAllocOp(dynamic_shape, backing_type)
-            make_ring = DmaMakeRingOp(
-                backing.result,
+        if reserved is None:
+            capacity_value: _SymbolExprValue = (capacity_const.result, str(capacity), capacity)
+        else:
+            reserved_result, reserved_expr, reserved_static = reserved
+            if reserved_static is not None:
+                available_static = capacity - reserved_static
+                if available_static <= 0:
+                    return False
+                capacity_const = SymbolConstOp(available_static)
+                pre_loop_ops.append(capacity_const)
+                capacity_value = (capacity_const.result, str(available_static), available_static)
+            else:
+                available_expr = SymbolExprAttr.from_expr(f"({capacity}) - ({reserved_expr})").expr.data
+                available_op = _MultiBufferRewriteRules.symbol_binary_op(
+                    "symbol.sub",
+                    capacity_const.result,
+                    reserved_result,
+                    available_expr,
+                )
+                pre_loop_ops.append(available_op)
+                capacity_value = (available_op.results[0], available_expr, None)
+
+        for index in indexes:
+            aligned_slot_values[index] = _MultiBufferRewriteRules.align_up_symbol_value(
+                slot_values[index],
+                alignment,
+                pre_loop_ops,
+            )
+        group_unit = aligned_slot_values[indexes[0]]
+        for index in indexes[1:]:
+            group_unit = _MultiBufferRewriteRules.add_symbol_values(group_unit, aligned_slot_values[index], pre_loop_ops)
+        unit_result, unit_expr, unit_static = group_unit
+        capacity_result, capacity_expr, capacity_static = capacity_value
+        if unit_static is not None and capacity_static is not None:
+            if unit_static <= 0:
+                return False
+            auto_num = capacity_static // unit_static
+            if auto_num <= 0:
+                return False
+            num_const = SymbolConstOp(auto_num)
+            pre_loop_ops.append(num_const)
+            num_value = (num_const.result, str(auto_num), auto_num)
+        else:
+            num_expr = SymbolExprAttr.from_expr(f"({capacity_expr}) floordiv ({unit_expr})").expr.data
+            num_op = _MultiBufferRewriteRules.symbol_binary_op(
+                "symbol.floordiv",
+                capacity_result,
+                unit_result,
+                num_expr,
+            )
+            pre_loop_ops.append(num_op)
+            num_value = (num_op.results[0], num_expr, None)
+        for index in indexes:
+            num_values[index] = num_value
+
+    if any(num_value is None for num_value in num_values):
+        return False
+
+    for candidate, num_value, aligned_slot in zip(candidate_pair, num_values, aligned_slot_values, strict=True):
+        if num_value is None:
+            return False
+        _alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, slot_type, _slot_bytes = candidate
+        num_result, num_expr, num_static = num_value
+        aligned_result, aligned_expr, aligned_static = aligned_slot
+        if num_static is not None and aligned_static is not None:
+            backing_static = num_static * aligned_static
+            backing_const = SymbolConstOp(backing_static)
+            pre_loop_ops.append(backing_const)
+            backing_result = backing_const.result
+            backing_expr = str(backing_static)
+        else:
+            backing_expr = SymbolExprAttr.from_expr(f"({num_expr})*({aligned_expr})").expr.data
+            backing_op = _MultiBufferRewriteRules.symbol_binary_op(
+                "symbol.mul",
                 num_result,
-                shape_result,
-                DmaRingType(slot_type),
+                aligned_result,
+                backing_expr,
             )
-            current = DmaCurrentRingOp(make_ring.result)
-            advance = DmaAdvanceRingOp(make_ring.result)
-            pre_loop_ops.extend([backing, make_ring])
-            rewrite_ops.append((current, advance))
+            pre_loop_ops.append(backing_op)
+            backing_result = backing_op.results[0]
+            backing_static = None
+        backing_type = NnMemoryType(
+            ArrayAttr([SymbolExprAttr.from_expr(backing_expr)]),
+            ArrayAttr([SymbolExprAttr.from_expr("1")]),
+            i8,
+            slot_type.space,
+        )
+        dynamic_shape = [] if backing_static is not None else [backing_result]
+        backing = DmaAllocOp(dynamic_shape, backing_type)
+        offset_result = aligned_result
+        if aligned_static is not None:
+            offset_const = SymbolConstOp(aligned_static)
+            pre_loop_ops.append(offset_const)
+            offset_result = offset_const.result
+        make_ring = DmaMakeRingOp(backing.result, num_result, offset_result, DmaRingType(slot_type))
+        current = DmaCurrentRingOp(make_ring.result)
+        advance = DmaAdvanceRingOp(make_ring.result)
+        pre_loop_ops.extend([backing, make_ring])
+        rewrite_ops.append((current, advance))
 
     parent_block.insert_ops_before(pre_loop_ops, symbol_for)
+    current_insert_anchor = list(loop_block.ops)[0]
+    loop_block.insert_ops_before([ops[0] for ops in rewrite_ops], current_insert_anchor)
     for candidate, ops in zip(candidate_pair, rewrite_ops, strict=True):
-        alloc_op, copy_op, free_op, _matmul_op, _operand_index, _slot_type, _slot_bytes = candidate
+        alloc_op, _copy_op, free_op, _matmul_op, _operand_index, _slot_type, _slot_bytes = candidate
         current_op, _advance_op = ops
-        loop_block.insert_ops_before([current_op], copy_op)
         for use in tuple(alloc_op.result.uses):
             if use.operation is free_op:
                 continue
             use.operation.operands[use.index] = current_op.result
-    loop_block.insert_ops_after([rewrite_ops[0][1], rewrite_ops[1][1]], matmul)
+    advance_ops = [rewrite_ops[0][1], rewrite_ops[1][1]]
+    loop_tail = loop_block.last_op
+    if loop_tail is not None and loop_tail.has_trait(IsTerminator):
+        loop_block.insert_ops_before(advance_ops, loop_tail)
+    else:
+        loop_block.add_ops(advance_ops)
     for candidate in candidate_pair:
         alloc_op, _copy_op, free_op, _matmul_op, _operand_index, _slot_type, _slot_bytes = candidate
         free_block = free_op.parent_block()
@@ -916,16 +1079,28 @@ def _rewrite_matmul_if_pair(
     return True
 
 
-def _rewrite_loop_staging_candidates(module: ModuleOp, memory_stage: int, target: str | None) -> None:
+def _rewrite_loop_staging_candidates(
+    module: ModuleOp,
+    memory_stage: int,
+    target: str | None,
+    *,
+    mode: _MultiBufferMode = "rewrite",
+    alignment: int = 1024,
+    region_labels: dict[SymbolForOp, str] | None = None,
+    existing_current_block_ids: set[int] | None = None,
+) -> None:
     """按 alloc 生命周期改写 direct alias / direct use staging。
 
     功能说明:
     - 逐个分析 `dma.alloc` 的 direct alias 与 direct memory use。
     - 仅当所有访问都落在同一个 `symbol.for` 直接 body 时 ring 化，避免 nested region 误判。
     - 旧 matmul lhs/rhs direct alloc pair 仍由 `_rewrite_matmul_if_pair` 兼容路径处理。
+    - `analysis` 模式只写三项属性；`apply` 模式只消费三项属性并使用 aligned slot 物化 ring。
+    - apply 物化时把 setup/current 放到 use block 第一条既有 op 前；若 dynamic setup 无法在该点被支配则 no-op。
+    - `existing_current_block_ids` 只表示本次 apply 入口前已有 current，用于避免重复 ring。
 
     使用示例:
-    - _rewrite_loop_staging_candidates(module, 2, "npu_demo")
+    - _rewrite_loop_staging_candidates(module, 2, "npu_demo", mode="apply")
 
     关联文件:
     - spec: spec/pass/memory/multi_buffer.md
@@ -933,6 +1108,14 @@ def _rewrite_loop_staging_candidates(module: ModuleOp, memory_stage: int, target
     - 功能实现: kernel_gen/passes/memory/multi_buffer.py
     """
 
+    labels = region_labels if region_labels is not None else _MultiBufferRewriteRules.region_labels(module)
+    current_block_ids = existing_current_block_ids
+    if current_block_ids is None:
+        current_block_ids = set()
+        for current_op in [op for op in module.walk() if isinstance(op, DmaCurrentRingOp)]:
+            current_block = current_op.parent_block()
+            if current_block is not None:
+                current_block_ids.add(id(current_block))
     candidate_items: list[_LoopRingCandidate] = []
     allowed_memory_op_names = {
         "dma.broadcast",
@@ -1035,7 +1218,7 @@ def _rewrite_loop_staging_candidates(module: ModuleOp, memory_stage: int, target
         if any(loop is not target_loop for loop in nearest_loops):
             continue
         target_body = target_loop.body.blocks[0]
-        if any(isinstance(op, DmaCurrentRingOp) for op in target_body.ops):
+        if id(target_body) in current_block_ids:
             continue
         if any(access_op.parent_block() is not target_body for access_op in access_ops):
             continue
@@ -1101,7 +1284,42 @@ def _rewrite_loop_staging_candidates(module: ModuleOp, memory_stage: int, target
     if not candidate_items:
         return
 
-    grouped: dict[tuple[int, str, int, int, bool], list[_LoopRingCandidate]] = {}
+    if mode == "analysis":
+        for candidate in candidate_items:
+            region_label = labels.get(candidate.target_loop, "loop1")
+            num = _MultiBufferRewriteRules.analysis_num(memory_stage, target, candidate.force_num_one)
+            _MultiBufferRewriteRules.write_multi_buffer_attrs(candidate.alloc_op, region_label, region_label, num)
+        return
+
+    parsed_num_attrs: dict[DmaAllocOp, int | str] = {}
+    if mode == "apply":
+        filtered_candidates: list[_LoopRingCandidate] = []
+        for candidate in candidate_items:
+            attrs = _MultiBufferRewriteRules.read_multi_buffer_attrs(candidate.alloc_op)
+            if attrs is None:
+                continue
+            update_point, use_point, raw_num = attrs
+            region_label = labels.get(candidate.target_loop, "loop1")
+            if update_point != region_label or use_point != region_label:
+                continue
+            parsed = _MultiBufferRewriteRules.parse_multi_buffer_num_attr(raw_num)
+            if parsed is None:
+                continue
+            parsed_num_attrs[candidate.alloc_op] = parsed
+            filtered_candidates.append(candidate)
+        candidate_items = filtered_candidates
+    else:
+        for candidate in candidate_items:
+            parsed_num_attrs[candidate.alloc_op] = _MultiBufferRewriteRules.analysis_num(
+                memory_stage,
+                target,
+                candidate.force_num_one,
+            )
+
+    if not candidate_items:
+        return
+
+    grouped: dict[tuple[int, str, int, int], list[_LoopRingCandidate]] = {}
     for candidate in candidate_items:
         space = candidate.slot_type.space.space.data
         grouped.setdefault(
@@ -1110,7 +1328,6 @@ def _rewrite_loop_staging_candidates(module: ModuleOp, memory_stage: int, target
                 space,
                 id(candidate.insertion_block),
                 id(candidate.insertion_anchor),
-                candidate.force_num_one,
             ),
             [],
         ).append(candidate)
@@ -1120,6 +1337,26 @@ def _rewrite_loop_staging_candidates(module: ModuleOp, memory_stage: int, target
         insertion_anchor = group[0].insertion_anchor
         insertion_indexes = {op: index for index, op in enumerate(insertion_block.ops)}
         if insertion_anchor not in insertion_indexes:
+            continue
+        current_anchors: dict[DmaAllocOp, Operation] = {}
+        invalid_group = False
+        for candidate in group:
+            first_block = candidate.first_use.parent_block()
+            last_block = candidate.last_use.parent_block()
+            if first_block is None or last_block is None or first_block is not last_block:
+                invalid_group = True
+                break
+            first_block_ops = list(first_block.ops)
+            if not first_block_ops:
+                invalid_group = True
+                break
+            current_anchors[candidate.alloc_op] = first_block_ops[0]
+        if invalid_group:
+            continue
+        setup_anchor = insertion_anchor
+        if all(candidate.first_use.parent_block() is insertion_block for candidate in group):
+            setup_anchor = current_anchors[group[0].alloc_op]
+        if setup_anchor not in insertion_indexes:
             continue
         pre_loop_ops: list[Operation] = []
         slot_values: dict[DmaAllocOp, _SymbolExprValue] = {}
@@ -1175,7 +1412,7 @@ def _rewrite_loop_staging_candidates(module: ModuleOp, memory_stage: int, target
                             break
                         available = False
                         if owner_block is insertion_block:
-                            available = insertion_indexes.get(owner, 10**9) < insertion_indexes[insertion_anchor]
+                            available = insertion_indexes.get(owner, 10**9) < insertion_indexes[setup_anchor]
                         else:
                             scan_block = insertion_block
                             while scan_block is not None:
@@ -1223,9 +1460,9 @@ def _rewrite_loop_staging_candidates(module: ModuleOp, memory_stage: int, target
                     elements = (const_op.result, str(value), value)
                 else:
                     result_expr = SymbolExprAttr.from_expr(f"({lhs_expr})*({rhs_expr})").expr.data
-                    mul_op = SymbolMulOp(lhs_value, rhs_value, SymbolValueType.from_expr(result_expr))
+                    mul_op = _MultiBufferRewriteRules.symbol_binary_op("symbol.mul", lhs_value, rhs_value, result_expr)
                     pre_loop_ops.append(mul_op)
-                    elements = (mul_op.result, result_expr, None)
+                    elements = (mul_op.results[0], result_expr, None)
 
             elements_value, elements_expr, elements_static = elements
             if element_size == 1:
@@ -1238,87 +1475,155 @@ def _rewrite_loop_staging_candidates(module: ModuleOp, memory_stage: int, target
             else:
                 bpe = SymbolConstOp(element_size)
                 result_expr = SymbolExprAttr.from_expr(f"({element_size})*({elements_expr})").expr.data
-                mul_op = SymbolMulOp(elements_value, bpe.result, SymbolValueType.from_expr(result_expr))
+                mul_op = _MultiBufferRewriteRules.symbol_binary_op("symbol.mul", elements_value, bpe.result, result_expr)
                 pre_loop_ops.extend([bpe, mul_op])
-                slot_values[candidate.alloc_op] = (mul_op.result, result_expr, None)
+                slot_values[candidate.alloc_op] = (mul_op.results[0], result_expr, None)
         if unavailable or any(candidate.alloc_op not in slot_values for candidate in group):
             continue
 
-        if target is None:
-            num_const = SymbolConstOp(memory_stage)
+        aligned_slot_values: dict[DmaAllocOp, _SymbolExprValue] = {}
+        for candidate in group:
+            aligned_slot_values[candidate.alloc_op] = _MultiBufferRewriteRules.align_up_symbol_value(
+                slot_values[candidate.alloc_op],
+                alignment,
+                pre_loop_ops,
+            )
+
+        num_values: dict[DmaAllocOp, _SymbolExprValue] = {}
+        fixed_reserved: _SymbolExprValue | None = None
+        auto_candidates: list[_LoopRingCandidate] = []
+        failed_group = False
+        for candidate in group:
+            raw_num = parsed_num_attrs.get(candidate.alloc_op)
+            parsed = raw_num if isinstance(raw_num, int) else _MultiBufferRewriteRules.parse_multi_buffer_num_attr(raw_num or "")
+            if parsed is None:
+                failed_group = True
+                break
+            if parsed == "auto":
+                auto_candidates.append(candidate)
+                continue
+            num_const = SymbolConstOp(parsed)
             pre_loop_ops.append(num_const)
-            shared_num: _SymbolExprValue = (num_const.result, str(memory_stage), memory_stage)
-        elif any(candidate.force_num_one for candidate in group):
-            num_const = SymbolConstOp(1)
-            pre_loop_ops.append(num_const)
-            shared_num = (num_const.result, "1", 1)
-        elif _MultiBufferRewriteRules.target_body_has_unringed_same_space_allocs(group):
-            num_const = SymbolConstOp(1)
-            pre_loop_ops.append(num_const)
-            shared_num = (num_const.result, "1", 1)
-        else:
+            num_value: _SymbolExprValue = (num_const.result, str(parsed), parsed)
+            num_values[candidate.alloc_op] = num_value
+            aligned_slot = aligned_slot_values[candidate.alloc_op]
+            aligned_result, aligned_expr, aligned_static = aligned_slot
+            if aligned_static is not None:
+                reserved_value = parsed * aligned_static
+                reserved_const = SymbolConstOp(reserved_value)
+                pre_loop_ops.append(reserved_const)
+                reserved: _SymbolExprValue = (reserved_const.result, str(reserved_value), reserved_value)
+            else:
+                reserved_expr = SymbolExprAttr.from_expr(f"({parsed})*({aligned_expr})").expr.data
+                reserved_op = _MultiBufferRewriteRules.symbol_binary_op(
+                    "symbol.mul",
+                    num_const.result,
+                    aligned_result,
+                    reserved_expr,
+                )
+                pre_loop_ops.append(reserved_op)
+                reserved = (reserved_op.results[0], reserved_expr, None)
+            fixed_reserved = (
+                reserved
+                if fixed_reserved is None
+                else _MultiBufferRewriteRules.add_symbol_values(fixed_reserved, reserved, pre_loop_ops)
+            )
+        if failed_group:
+            continue
+
+        if auto_candidates:
+            if target is None:
+                continue
             capacity = get_target_hardware(target, f"{group[0].slot_type.space.space.data}_memory_size")
             if capacity is None or capacity <= 0:
                 continue
-            reserved_value, reserved_available = _MultiBufferRewriteRules.reserved_space_bytes_for_group(
+            reserved_from_live_allocs, reserved_ok = _MultiBufferRewriteRules.reserved_space_bytes_for_group(
                 group,
                 insertion_block,
-                insertion_anchor,
+                setup_anchor,
                 pre_loop_ops,
+                alignment,
             )
-            if not reserved_available:
+            if not reserved_ok:
                 continue
-            if reserved_value is None:
-                capacity_result: SSAValue | None = None
-                capacity_expr = str(capacity)
-                capacity_static: int | None = capacity
+            if reserved_from_live_allocs is not None:
+                reserved_from_live_allocs = _MultiBufferRewriteRules.align_up_symbol_value(
+                    reserved_from_live_allocs,
+                    alignment,
+                    pre_loop_ops,
+                )
+                fixed_reserved = (
+                    reserved_from_live_allocs
+                    if fixed_reserved is None
+                    else _MultiBufferRewriteRules.add_symbol_values(
+                        fixed_reserved,
+                        reserved_from_live_allocs,
+                        pre_loop_ops,
+                    )
+                )
+            if fixed_reserved is None:
+                capacity_const = SymbolConstOp(capacity)
+                pre_loop_ops.append(capacity_const)
+                capacity_value: _SymbolExprValue = (capacity_const.result, str(capacity), capacity)
             else:
-                aligned_reserved = _MultiBufferRewriteRules.align_up_symbol_value(reserved_value, 1024, pre_loop_ops)
-                reserved_result, reserved_expr, reserved_static = aligned_reserved
+                reserved_result, reserved_expr, reserved_static = fixed_reserved
                 if reserved_static is not None:
-                    remaining_capacity = capacity - reserved_static
-                    if remaining_capacity <= 0:
+                    available_static = capacity - reserved_static
+                    if available_static <= 0:
                         continue
-                    capacity_const = SymbolConstOp(remaining_capacity)
+                    capacity_const = SymbolConstOp(available_static)
                     pre_loop_ops.append(capacity_const)
-                    capacity_result = capacity_const.result
-                    capacity_expr = str(remaining_capacity)
-                    capacity_static = remaining_capacity
+                    capacity_value = (capacity_const.result, str(available_static), available_static)
                 else:
                     capacity_const = SymbolConstOp(capacity)
-                    capacity_expr = SymbolExprAttr.from_expr(f"({capacity}) - ({reserved_expr})").expr.data
-                    capacity_sub = SymbolSubOp(capacity_const.result, reserved_result, SymbolValueType.from_expr(capacity_expr))
-                    pre_loop_ops.extend([capacity_const, capacity_sub])
-                    capacity_result = capacity_sub.result
-                    capacity_static = None
-            total_value = _MultiBufferRewriteRules.aligned_group_slot_bytes_value(group, slot_values, pre_loop_ops)
-            if total_value is None:
-                continue
-            total_result, total_expr, total_static = total_value
-            if total_static is not None and capacity_static is not None:
-                if total_static <= 0:
+                    available_expr = SymbolExprAttr.from_expr(f"({capacity}) - ({reserved_expr})").expr.data
+                    available_op = _MultiBufferRewriteRules.symbol_binary_op(
+                        "symbol.sub",
+                        capacity_const.result,
+                        reserved_result,
+                        available_expr,
+                    )
+                    pre_loop_ops.extend([capacity_const, available_op])
+                    capacity_value = (available_op.results[0], available_expr, None)
+            group_unit = aligned_slot_values[auto_candidates[0].alloc_op]
+            for candidate in auto_candidates[1:]:
+                group_unit = _MultiBufferRewriteRules.add_symbol_values(
+                    group_unit,
+                    aligned_slot_values[candidate.alloc_op],
+                    pre_loop_ops,
+                )
+            unit_result, unit_expr, unit_static = group_unit
+            capacity_result, capacity_expr, capacity_static = capacity_value
+            if unit_static is not None and capacity_static is not None:
+                if unit_static <= 0:
                     continue
-                num_value = capacity_static // total_static
-                if num_value <= 0:
+                auto_num = capacity_static // unit_static
+                if auto_num <= 0:
                     continue
-                num_const = SymbolConstOp(num_value)
+                num_const = SymbolConstOp(auto_num)
                 pre_loop_ops.append(num_const)
-                shared_num = (num_const.result, str(num_value), num_value)
+                auto_num_value: _SymbolExprValue = (num_const.result, str(auto_num), auto_num)
             else:
-                if capacity_result is None:
-                    capacity_const = SymbolConstOp(capacity)
-                    pre_loop_ops.append(capacity_const)
-                    capacity_result = capacity_const.result
-                num_expr = SymbolExprAttr.from_expr(f"({capacity_expr}) floordiv ({total_expr})").expr.data
-                num_op = SymbolFloorDivOp(capacity_result, total_result, SymbolValueType.from_expr(num_expr))
+                num_expr = SymbolExprAttr.from_expr(f"({capacity_expr}) floordiv ({unit_expr})").expr.data
+                num_op = _MultiBufferRewriteRules.symbol_binary_op(
+                    "symbol.floordiv",
+                    capacity_result,
+                    unit_result,
+                    num_expr,
+                )
                 pre_loop_ops.append(num_op)
-                shared_num = (num_op.result, num_expr, None)
+                auto_num_value = (num_op.results[0], num_expr, None)
+            for candidate in auto_candidates:
+                num_values[candidate.alloc_op] = auto_num_value
+
+        if any(candidate.alloc_op not in num_values for candidate in group):
+            continue
 
         current_ops: dict[DmaAllocOp, DmaCurrentRingOp] = {}
         advance_ops: dict[DmaAllocOp, DmaAdvanceRingOp] = {}
         for candidate in group:
-            num_result, num_expr, num_static = shared_num
-            slot_result, slot_expr, slot_static = slot_values[candidate.alloc_op]
+            num_result, num_expr, num_static = num_values[candidate.alloc_op]
+            slot_result, slot_expr, slot_static = aligned_slot_values[candidate.alloc_op]
             if num_static is not None and slot_static is not None:
                 backing_value = num_static * slot_static
                 backing_const = SymbolConstOp(backing_value)
@@ -1328,9 +1633,14 @@ def _rewrite_loop_staging_candidates(module: ModuleOp, memory_stage: int, target
                 backing_static = backing_value
             else:
                 backing_expr = SymbolExprAttr.from_expr(f"({num_expr})*({slot_expr})").expr.data
-                backing_mul = SymbolMulOp(num_result, slot_result, SymbolValueType.from_expr(backing_expr))
+                backing_mul = _MultiBufferRewriteRules.symbol_binary_op(
+                    "symbol.mul",
+                    num_result,
+                    slot_result,
+                    backing_expr,
+                )
                 pre_loop_ops.append(backing_mul)
-                backing_result = backing_mul.result
+                backing_result = backing_mul.results[0]
                 backing_static = None
             backing_type = NnMemoryType(
                 ArrayAttr([SymbolExprAttr.from_expr(backing_expr)]),
@@ -1340,26 +1650,37 @@ def _rewrite_loop_staging_candidates(module: ModuleOp, memory_stage: int, target
             )
             backing_shape = [] if backing_static is not None else [backing_result]
             backing = DmaAllocOp(backing_shape, backing_type)
-            make_ring = DmaMakeRingOp(backing.result, num_result, slot_result, DmaRingType(candidate.slot_type))
+            offset_result = slot_result
+            if slot_static is not None:
+                offset_const = SymbolConstOp(slot_static)
+                pre_loop_ops.append(offset_const)
+                offset_result = offset_const.result
+            make_ring = DmaMakeRingOp(backing.result, num_result, offset_result, DmaRingType(candidate.slot_type))
             current = DmaCurrentRingOp(make_ring.result)
             advance = DmaAdvanceRingOp(make_ring.result)
             pre_loop_ops.extend([backing, make_ring])
             current_ops[candidate.alloc_op] = current
             advance_ops[candidate.alloc_op] = advance
 
-        insertion_block.insert_ops_before(pre_loop_ops, insertion_anchor)
+        insertion_block.insert_ops_before(pre_loop_ops, setup_anchor)
         for candidate in group:
             current = current_ops[candidate.alloc_op]
             first_block = candidate.first_use.parent_block()
             last_block = candidate.last_use.parent_block()
             if first_block is None or last_block is None or first_block is not last_block:
                 continue
-            first_block.insert_ops_before([current], candidate.first_use)
+            current_anchor = current_anchors[candidate.alloc_op]
+            first_block.insert_ops_before([current], current_anchor)
             for alias in candidate.aliases:
                 alias.operands[0] = current.result
             for user, index in candidate.direct_uses:
                 user.operands[index] = current.result
-            last_block.insert_ops_after([advance_ops[candidate.alloc_op]], candidate.last_use)
+            advance = advance_ops[candidate.alloc_op]
+            last_block_tail = last_block.last_op
+            if last_block_tail is not None and last_block_tail.has_trait(IsTerminator):
+                last_block.insert_ops_before([advance], last_block_tail)
+            else:
+                last_block.add_ops([advance])
             free_block = candidate.free_op.parent_block()
             alloc_block = candidate.alloc_op.parent_block()
             if free_block is not None:
@@ -1369,41 +1690,32 @@ def _rewrite_loop_staging_candidates(module: ModuleOp, memory_stage: int, target
 
 
 @dataclass(frozen=True)
-class MultiBufferPass(Pass):
-    """multi-buffer pass。
+class MultiBufferAnalysisPass(Pass):
+    """multi-buffer analysis pass。
 
     功能说明:
-    - 将可证明的 matmul lhs/rhs staging pair 或 loop staging / scratch 生命周期改写为 `dma.ring`。
-    - 默认 `memory_stage=2`，当 `target` 非空时优先按 target registry 容量计算 ring num。
-    - 只处理 direct alias / direct memory use 均落在同一 `symbol.for` 直接 body 的公开模式。
+    - 只分析可证明的 staging alloc/free 生命周期，并在 `dma.alloc` 上写三项 `multi_buffer.*` 属性。
+    - target 非空时 same-loop staging 写 `multi_buffer.num = "auto"`；否则写固定 `memory_stage`。
+    - 不物化 ring、不删除 alloc/free、不替换 operand。
 
     使用示例:
-    - MultiBufferPass(memory_stage=2, target="npu_demo").apply(Context(), module)
-
-    关联文件:
-    - spec: spec/pass/memory/multi_buffer.md
-    - test: test/passes/memory/test_multi_buffer.py
-    - 功能实现: kernel_gen/passes/memory/multi_buffer.py
+    - MultiBufferAnalysisPass(memory_stage=2, target="npu_demo").apply(Context(), module)
     """
 
-    name = "multi-buffer"
+    name = "multi-buffer-analysis"
     memory_stage: int = 2
     fold: bool = True
     target: str | None = None
 
     def __init__(self, memory_stage: int = 2, fold: bool = True, target: str | None = None) -> None:
-        """初始化 multi-buffer pass。
+        """初始化 multi-buffer analysis pass。
 
         功能说明:
-        - 保存 ring stage 数、通用 fold 开关和可选 target 名称。
+        - 保存 analysis 写入固定 num 所需的 `memory_stage` 和可选 target。
+        - 校验公开构造参数并保留稳定错误文本。
 
         使用示例:
-        - pass_obj = MultiBufferPass(memory_stage=2, fold=False, target="npu_demo")
-
-        关联文件:
-        - spec: spec/pass/memory/multi_buffer.md
-        - test: test/passes/memory/test_multi_buffer.py
-        - 功能实现: kernel_gen/passes/memory/multi_buffer.py
+        - pass_obj = MultiBufferAnalysisPass(memory_stage=3, fold=False)
         """
 
         if isinstance(memory_stage, bool) or not isinstance(memory_stage, int):
@@ -1417,20 +1729,15 @@ class MultiBufferPass(Pass):
         object.__setattr__(self, "target", target.strip() if isinstance(target, str) else None)
 
     @classmethod
-    def from_options(cls, options: dict[str, str]) -> "MultiBufferPass":
-        """从 pass registry options 构造 multi-buffer pass。
+    def from_options(cls, options: dict[str, str]) -> "MultiBufferAnalysisPass":
+        """从 pass registry options 构造 multi-buffer analysis pass。
 
         功能说明:
-        - 接受 pass 专属 `memory-stage` 与 `target`。
-        - `fold` 必须由 registry 通用选项处理，传到本方法时按未知 option 失败。
+        - 接受 `memory-stage` 与 `target` pass 专属选项。
+        - `fold` 由 registry 通用选项处理，直接传入时按未知 option 失败。
 
         使用示例:
-        - pass_obj = MultiBufferPass.from_options({"memory-stage": "2", "target": "npu_demo"})
-
-        关联文件:
-        - spec: spec/pass/memory/multi_buffer.md
-        - test: test/passes/memory/test_multi_buffer.py
-        - 功能实现: kernel_gen/passes/memory/multi_buffer.py
+        - pass_obj = MultiBufferAnalysisPass.from_options({"memory-stage": "2"})
         """
 
         allowed = {"memory-stage", "target"}
@@ -1448,30 +1755,238 @@ class MultiBufferPass(Pass):
         return cls(memory_stage=memory_stage, target=target)
 
     def apply(self, ctx: Context, module: ModuleOp) -> None:
-        """执行 multi-buffer rewrite。
+        """执行 multi-buffer analysis。
 
         功能说明:
-        - 先保留旧 direct matmul lhs/rhs 成对 staging 兼容路径。
-        - 再逐个分析 direct alias / direct use alloc 候选，改写可证明 loop-local 生命周期。
-        - 不满足条件的结构保持 no-op。
+        - 遍历 `symbol.for` 内 matmul lhs/rhs staging pair 并写三项属性。
+        - 遍历 direct alias / direct memory use staging 候选并写三项属性。
+        - 不满足可证明生命周期的 alloc 保持无属性 no-op。
 
         使用示例:
-        - MultiBufferPass().apply(Context(), module)
-
-        关联文件:
-        - spec: spec/pass/memory/multi_buffer.md
-        - test: test/passes/memory/test_multi_buffer.py
-        - 功能实现: kernel_gen/passes/memory/multi_buffer.py
+        - MultiBufferAnalysisPass().apply(Context(), module)
         """
 
         _ = ctx
         ensure_builtin_module(module)
+        labels = _MultiBufferRewriteRules.region_labels(module)
         for symbol_for in [op for op in module.walk() if isinstance(op, SymbolForOp)]:
             loop_block = symbol_for.body.blocks[0]
+            region_label = labels.get(symbol_for, "loop1")
             for op in list(loop_block.ops):
                 if isinstance(op, KernelMatmulOp):
-                    _rewrite_matmul_if_pair(symbol_for, op, self.memory_stage, self.target)
-        _rewrite_loop_staging_candidates(module, self.memory_stage, self.target)
+                    _rewrite_matmul_if_pair(
+                        symbol_for,
+                        op,
+                        self.memory_stage,
+                        self.target,
+                        mode="analysis",
+                        region_label=region_label,
+                    )
+        _rewrite_loop_staging_candidates(
+            module,
+            self.memory_stage,
+            self.target,
+            mode="analysis",
+            region_labels=labels,
+        )
 
 
-__all__ = ["MultiBufferPass"]
+@dataclass(frozen=True)
+class MultiBufferApplyPass(Pass):
+    """multi-buffer apply pass。
+
+    功能说明:
+    - 只消费 `multi_buffer.update_point/use_point/num` 三项 analysis 属性。
+    - fixed 和 auto 都按 `alignment` 计算 ring offset 与 backing bytes。
+    - apply 完成后删除旧 typed alloc/free 生命周期，不残留临时属性。
+
+    使用示例:
+    - MultiBufferApplyPass(target="npu_demo", alignment=1024).apply(Context(), module)
+    """
+
+    name = "multi-buffer-apply"
+    fold: bool = True
+    target: str | None = None
+    alignment: int = 1024
+
+    def __init__(self, fold: bool = True, target: str | None = None, alignment: int = 1024) -> None:
+        """初始化 multi-buffer apply pass。
+
+        功能说明:
+        - 保存 auto num 计算所需 target 和 fixed/auto 共用 alignment。
+        - `alignment=0` 表示关闭对齐，非法值保持稳定错误文本。
+
+        使用示例:
+        - pass_obj = MultiBufferApplyPass(target="npu_demo", alignment=1024)
+        """
+
+        if target is not None and (not isinstance(target, str) or not target.strip()):
+            raise_pass_contract_error("MultiBufferOptionError", "target must be non-empty")
+        object.__setattr__(self, "fold", bool(fold))
+        object.__setattr__(self, "target", target.strip() if isinstance(target, str) else None)
+        object.__setattr__(self, "alignment", _validate_alignment_value(alignment))
+
+    @classmethod
+    def from_options(cls, options: dict[str, str]) -> "MultiBufferApplyPass":
+        """从 pass registry options 构造 multi-buffer apply pass。
+
+        功能说明:
+        - 接受 `target` 与 `alignment` pass 专属选项。
+        - `fold` 由 registry 通用选项处理，直接传入时按未知 option 失败。
+
+        使用示例:
+        - pass_obj = MultiBufferApplyPass.from_options({"target": "npu_demo", "alignment": "1024"})
+        """
+
+        allowed = {"target", "alignment"}
+        unknown = sorted(set(options) - allowed)
+        if unknown:
+            raise_pass_contract_error("MultiBufferOptionError", f"unknown option: {unknown[0]}")
+        target = None
+        if "target" in options:
+            target = options["target"].strip()
+            if not target:
+                raise_pass_contract_error("MultiBufferOptionError", "target must be non-empty")
+        alignment = 1024
+        if "alignment" in options:
+            alignment = _parse_alignment_option(options["alignment"])
+        return cls(target=target, alignment=alignment)
+
+    def apply(self, ctx: Context, module: ModuleOp) -> None:
+        """执行 multi-buffer apply。
+
+        功能说明:
+        - 重新校验带三项属性的候选，消费 fixed/auto `multi_buffer.num` 并物化 ring。
+        - 对 `"auto"` 候选使用 `target` 容量和同 scope fixed reserved 计算 num。
+        - 删除旧 alloc/free；被删除 alloc 上的三项临时属性不会进入输出 IR。
+
+        使用示例:
+        - MultiBufferApplyPass(target="npu_demo").apply(Context(), module)
+        """
+
+        _ = ctx
+        ensure_builtin_module(module)
+        labels = _MultiBufferRewriteRules.region_labels(module)
+        existing_current_block_ids: set[int] = set()
+        for current_op in [op for op in module.walk() if isinstance(op, DmaCurrentRingOp)]:
+            current_block = current_op.parent_block()
+            if current_block is not None:
+                existing_current_block_ids.add(id(current_block))
+        for symbol_for in [op for op in module.walk() if isinstance(op, SymbolForOp)]:
+            loop_block = symbol_for.body.blocks[0]
+            region_label = labels.get(symbol_for, "loop1")
+            for op in list(loop_block.ops):
+                if isinstance(op, KernelMatmulOp):
+                    _rewrite_matmul_if_pair(
+                        symbol_for,
+                        op,
+                        2,
+                        self.target,
+                        mode="apply",
+                        alignment=self.alignment,
+                        region_label=region_label,
+                    )
+        _rewrite_loop_staging_candidates(
+            module,
+            2,
+            self.target,
+            mode="apply",
+            alignment=self.alignment,
+            region_labels=labels,
+            existing_current_block_ids=existing_current_block_ids,
+        )
+
+
+@dataclass(frozen=True)
+class MultiBufferPass(Pass):
+    """multi-buffer facade pass。
+
+    功能说明:
+    - 保留旧 `multi-buffer` 公开入口，外部行为等价于 analysis 后接 apply。
+    - 默认 `memory_stage=2`、`alignment=1024`；target 非空时 analysis 写 `"auto"`，apply 计算容量。
+    - 执行完成后不保留三项 `multi_buffer.*` 临时属性。
+
+    使用示例:
+    - MultiBufferPass(memory_stage=2, target="npu_demo", alignment=1024).apply(Context(), module)
+    """
+
+    name = "multi-buffer"
+    memory_stage: int = 2
+    fold: bool = True
+    target: str | None = None
+    alignment: int = 1024
+
+    def __init__(
+        self,
+        memory_stage: int = 2,
+        fold: bool = True,
+        target: str | None = None,
+        alignment: int = 1024,
+    ) -> None:
+        """初始化 multi-buffer facade pass。
+
+        功能说明:
+        - 保存 analysis 所需 `memory_stage`、apply 所需 `alignment` 和共享 target。
+        - 保留旧构造器参数并新增已确认的公开 `alignment` 参数。
+
+        使用示例:
+        - pass_obj = MultiBufferPass(memory_stage=2, fold=False, target="npu_demo", alignment=1024)
+        """
+
+        if isinstance(memory_stage, bool) or not isinstance(memory_stage, int):
+            raise_pass_contract_error("MultiBufferOptionError", "memory_stage must be integer")
+        if memory_stage <= 0:
+            raise_pass_contract_error("MultiBufferOptionError", "memory_stage must be positive")
+        if target is not None and (not isinstance(target, str) or not target.strip()):
+            raise_pass_contract_error("MultiBufferOptionError", "target must be non-empty")
+        object.__setattr__(self, "memory_stage", memory_stage)
+        object.__setattr__(self, "fold", bool(fold))
+        object.__setattr__(self, "target", target.strip() if isinstance(target, str) else None)
+        object.__setattr__(self, "alignment", _validate_alignment_value(alignment))
+
+    @classmethod
+    def from_options(cls, options: dict[str, str]) -> "MultiBufferPass":
+        """从 pass registry options 构造 multi-buffer facade pass。
+
+        功能说明:
+        - 接受 pass 专属 `memory-stage`、`target` 与 `alignment`。
+        - `fold` 必须由 registry 通用选项处理，传到本方法时按未知 option 失败。
+
+        使用示例:
+        - pass_obj = MultiBufferPass.from_options({"memory-stage": "2", "target": "npu_demo"})
+        """
+
+        allowed = {"memory-stage", "target", "alignment"}
+        unknown = sorted(set(options) - allowed)
+        if unknown:
+            raise_pass_contract_error("MultiBufferOptionError", f"unknown option: {unknown[0]}")
+        memory_stage = 2
+        if "memory-stage" in options:
+            memory_stage = _parse_memory_stage_option(options["memory-stage"])
+        target = None
+        if "target" in options:
+            target = options["target"].strip()
+            if not target:
+                raise_pass_contract_error("MultiBufferOptionError", "target must be non-empty")
+        alignment = 1024
+        if "alignment" in options:
+            alignment = _parse_alignment_option(options["alignment"])
+        return cls(memory_stage=memory_stage, target=target, alignment=alignment)
+
+    def apply(self, ctx: Context, module: ModuleOp) -> None:
+        """执行 multi-buffer facade rewrite。
+
+        功能说明:
+        - 先运行 `MultiBufferAnalysisPass` 写三项临时属性。
+        - 再运行 `MultiBufferApplyPass` 消费属性并生成 ring。
+        - 不满足条件的结构保持 no-op。
+
+        使用示例:
+        - MultiBufferPass().apply(Context(), module)
+        """
+
+        MultiBufferAnalysisPass(memory_stage=self.memory_stage, fold=self.fold, target=self.target).apply(ctx, module)
+        MultiBufferApplyPass(fold=self.fold, target=self.target, alignment=self.alignment).apply(ctx, module)
+
+
+__all__ = ["MultiBufferAnalysisPass", "MultiBufferApplyPass", "MultiBufferPass"]

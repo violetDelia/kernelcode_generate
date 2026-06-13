@@ -25,9 +25,10 @@ import pytest
 
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import FunctionType, ModuleOp, i32
+from xdsl.dialects.builtin import FunctionType, ModuleOp, UnregisteredOp, i32
 from xdsl.ir import Block, Region
 from kernel_gen.core.error import KernelCodeError
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolIterType, SymbolValueType
 from kernel_gen.passes.arch.arch_parallelize import ArchParallelizePass
 from kernel_gen.target import registry as target_registry
 from kernel_gen.tools.ircheck import run_ircheck_text
@@ -249,7 +250,7 @@ builtin.module {
 # 使用示例: pytest -q test/passes/arch/test_arch_parallelize.py -k test_arch_parallelize_rewrites_only_outer_dynamic_loop
 def test_arch_parallelize_rewrites_only_outer_dynamic_loop() -> None:
     case_text = """// COMPILE_ARGS: --pass "arch-parallelize={target=npu_demo,parallel_level=block}"
-// CHECK: func.func @dynamic_nested(%[[N:{reg}]] : !symbol.int<#symbol.expr<N>>, %[[M:{reg}]] : !symbol.int<#symbol.expr<M>>, %[[OUTER_STEP:{reg}]] : !symbol.int<#symbol.expr<TILE_M>>, %[[INNER_STEP:{reg}]] : !symbol.int<#symbol.expr<TILE_N>>)
+// CHECK: func.func @dynamic_nested(%[[N:{reg}]]: !symbol.int<#symbol.expr<N>>, %[[M:{reg}]]: !symbol.int<#symbol.expr<M>>, %[[OUTER_STEP:{reg}]]: !symbol.int<#symbol.expr<TILE_M>>, %[[INNER_STEP:{reg}]]: !symbol.int<#symbol.expr<TILE_N>>)
 // CHECK: %[[ZERO:{reg}]] = symbol.const 0 : !symbol.int<#symbol.expr<0>>
 // CHECK: %[[BID:{reg}]] = arch.get_block_id : !symbol.int<#symbol.expr<block_id>>
 // CHECK: %[[BNUM:{reg}]] = symbol.const 2 : !symbol.int<#symbol.expr<2>>
@@ -580,6 +581,30 @@ builtin.module {
     result = run_ircheck_text(case_text, source_path="test/passes/arch/test_arch_parallelize.py")
     assert result.ok is True, result.message
     assert result.actual_ir.index('"dma.make_ring"') < result.actual_ir.index("arch.get_block_id")
+
+
+# TC-PASS-ARCH-PARALLELIZE-021A
+# 功能说明: 验证 loop 前 xDSL generic symbol setup 前缀不阻塞 block 分发。
+# 使用示例: pytest -q test/passes/arch/test_arch_parallelize.py -k test_arch_parallelize_allows_generic_symbol_setup_before_single_loop
+def test_arch_parallelize_allows_generic_symbol_setup_before_single_loop() -> None:
+    entry_block = Block()
+    zero = SymbolConstOp(0)
+    four = SymbolConstOp(4)
+    sixteen = SymbolConstOp(16)
+    end = UnregisteredOp.with_name("symbol.add").create(
+        operands=[sixteen.result, four.result],
+        result_types=[SymbolValueType.from_expr("20")],
+    )
+    loop_body = Block(arg_types=[SymbolIterType.from_bounds("0", "20", "4")])
+    loop = SymbolForOp(zero.result, end.results[0], four.result, Region(loop_body))
+    entry_block.add_ops([zero, four, sixteen, end, loop, func.ReturnOp()])
+    module = ModuleOp([func.FuncOp("generic_symbol_prefix_loop", FunctionType.from_lists([], []), Region(entry_block))])
+
+    ArchParallelizePass().apply(Context(), module)
+
+    actual_ir = str(module)
+    assert '"symbol.add"' in actual_ir
+    assert actual_ir.index('"symbol.add"') < actual_ir.index("arch.get_block_id")
 
 
 # TC-PASS-ARCH-PARALLELIZE-022

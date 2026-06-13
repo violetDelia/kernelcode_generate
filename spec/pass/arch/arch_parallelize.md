@@ -48,7 +48,7 @@
 ## 额外补充
 
 - 顶层 loop 指函数 entry block 的直接子 op；嵌套 region 内的 `symbol.for` 不参与顶层计数。
-- 支持结构为 `func { setup-prefix*; symbol.for { body-op*; nested-symbol.for* }; func.return }`，其中同级 `setup-prefix` 只能位于唯一顶层 loop 之前，并且只能是公开 symbol dialect 的纯 setup op、memory-pool / multi-buffer 生成的 `arch.get_dynamic_memory` / `dma.reinterpret` / `dma.make_ring`，或 optional memory presence guard 需要的 `arith.constant` / `memory.get_data` / `symbol.cast` / `symbol.ne` 链。
+- 支持结构为 `func { setup-prefix*; symbol.for { body-op*; nested-symbol.for* }; func.return }`，其中同级 `setup-prefix` 只能位于唯一顶层 loop 之前，并且只能是公开 symbol dialect 的纯 setup op、xDSL `builtin.unregistered` + `op_name__` 表示的同名公开 symbol setup op、memory-pool / multi-buffer 生成的 `arch.get_dynamic_memory` / `dma.reinterpret` / `dma.make_ring`，或 optional memory presence guard 需要的 `arith.constant` / `memory.get_data` / `symbol.cast` / `symbol.ne` 链。
 - 所有 `setup-prefix` 的 operand 必须来自函数参数或更早已放行的 setup result；不得依赖 loop body、loop 后 op、未知副作用 op 或后续尚未放行的 SSA。
 - 旧手动 IR 中已存在的 `dma.view` / `dma.reshape` alias 前缀继续允许通过。
 - 非入口函数无顶层 loop 时必须生成 `arch.get_block_id` + `scf.if` block0 guard，只允许 block0 执行原 body。
@@ -118,6 +118,7 @@
   - 多个顶层 `symbol.for` 必须失败为 `ArchParallelizePassError: multiple top-level symbol.for loops are not supported`。
   - loop-carried `symbol.for` 必须失败为 `ArchParallelizePassError: loop-carried symbol.for is not supported`。
   - 顶层 loop 同级出现非允许 setup 前缀 op，或允许 setup 位于 loop 之后时，必须失败为 `ArchParallelizePassError: unsupported loop structure`。
+  - xDSL generic 形式的 symbol setup 只放行 `builtin.unregistered` 且 `op_name__` 属于 `symbol.const/add/sub/mul/div/floordiv/min/max` 的 op；其它 generic op 继续按 unsupported loop structure 失败。
   - `arith.constant`、`memory.get_data`、`symbol.cast`、`symbol.ne` 只在唯一顶层 loop 前作为无副作用 / 只读 setup 前缀放行；其 operand 必须来自函数参数或更早已放行 setup result。
   - `dma.make_ring` 可作为唯一顶层 loop 前 setup 前缀；其 operand 必须来自函数参数或更早已放行 setup result。
   - clone loop body 时，`DmaRingType` 内的 slot `NnMemoryType` 必须和普通 `NnMemoryType` 一样按新 iter 表达式重写，确保 `dma.current_ring` result type 与 ring slot type 保持一致。
@@ -206,5 +207,6 @@
 | TC-PASS-ARCH-PARALLELIZE-016 | 失败边界 | memory-pool setup 位于 loop 后 | 唯一顶层 `symbol.for` 后包含 `arch.get_dynamic_memory` 或 alias setup。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | 失败短语含 `unsupported loop structure`。 | `test_arch_parallelize_rejects_memory_pool_setup_after_loop` |
 | TC-PASS-ARCH-PARALLELIZE-017 | 跳过边界 | 入口 host dispatcher + pattern 函数 | module 同时包含带入口属性的 host dispatcher 和带 `kernel.pattern_id` 的 pattern 函数。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | host 保持原调度 body，不新增 block 级 arch 语义；pattern 函数仍含 `arch.get_block_id` 和 block-strided `symbol.for`。 | `test_arch_parallelize_skips_entry_point_host_dispatcher` |
 | TC-PASS-ARCH-PARALLELIZE-021 | pass 改写 | `dma.make_ring` setup 前缀 | 唯一顶层 `symbol.for` 前含 `dma.make_ring`，operand 来自函数参数或更早 setup result。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | IR 含 block-strided `symbol.for`，`dma.make_ring` 保持在 loop 前，不触发 `unsupported loop structure`。 | `test_arch_parallelize_allows_make_ring_setup_before_single_loop` |
+| TC-PASS-ARCH-PARALLELIZE-021A | pass 改写 | generic symbol setup 前缀 | 唯一顶层 `symbol.for` 前含 xDSL generic `"symbol.add"` 等 setup，operand 来自函数参数或更早 setup result。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | IR 含 block-strided `symbol.for`，generic symbol setup 保持在 loop 前，不触发 `unsupported loop structure`。 | `test_arch_parallelize_allows_generic_symbol_setup_before_single_loop` |
 | TC-PASS-ARCH-PARALLELIZE-022 | pass 改写 | loop body 内 ring type 含旧 iter 表达式 | loop body 内 `dma.make_ring/current_ring` 的 `DmaRingType` slot type 引用原 loop iter 表达式。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | clone 后 `DmaRingType` 与 `dma.current_ring` result type 同步重写，verify 不报 result/ring slot type mismatch。 | `test_arch_parallelize_rewrites_ring_type_inside_loop_body` |
 | TC-PASS-ARCH-PARALLELIZE-020 | pass 改写 | optional memory presence guard setup 前缀 | 唯一顶层 `symbol.for` 前含 `arith.constant` 与 `memory.get_data -> symbol.cast -> symbol.ne`，且 operand 均来自函数参数或更早 setup result。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | IR 含 block-strided `symbol.for`，presence guard setup 保持在 loop 前，且不触发 `unsupported loop structure`。 | `test_arch_parallelize_allows_presence_guard_setup_before_single_loop` |

@@ -1,8 +1,8 @@
 """multi-buffer pass tests.
 
 功能说明:
-- 覆盖 `MultiBufferPass` 的公开构造、registry option 与 matmul staging ring 化行为。
-- 验证 loop 外 lhs/rhs staging 生命周期会被改写为 DMA ring，target 优先路径按 target memory capacity 计算 num。
+- 覆盖 `MultiBufferAnalysisPass`、`MultiBufferApplyPass` 与兼容 `MultiBufferPass` 的公开构造、registry option 与 matmul staging ring 化行为。
+- 验证 analysis-only 三属性、apply-only 属性消费、facade 兼容、target auto 和 aligned-slot backing。
 
 使用示例:
 - pytest -q test/passes/memory/test_multi_buffer.py
@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, f32, i8, i32
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, StringAttr, f32, i8, i32
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.passes import ModulePass
 
@@ -43,8 +43,8 @@ from kernel_gen.dialect.dma import (
 )
 from kernel_gen.dialect.kernel import KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolForOp, SymbolIterType, SymbolValueType
-from kernel_gen.passes.memory.multi_buffer import MultiBufferPass
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolForOp, SymbolIterType, SymbolValueType, SymbolYieldOp
+from kernel_gen.passes.memory.multi_buffer import MultiBufferAnalysisPass, MultiBufferApplyPass, MultiBufferPass
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
 
 
@@ -284,12 +284,16 @@ def _build_dynamic_same_space_module() -> tuple[ModuleOp, Block, SymbolForOp, Bl
     return ModuleOp([func_op]), top_block, loop_op, loop_block, matmul
 
 
-def _build_loop_local_direct_slice_module() -> tuple[ModuleOp, Block, SymbolForOp, Block, DmaSliceOp, NnMemoryType]:
+def _build_loop_local_direct_slice_module(
+    *,
+    with_terminator: bool = False,
+) -> tuple[ModuleOp, Block, SymbolForOp, Block, DmaSliceOp, NnMemoryType]:
     """构造 loop-local direct-use staging alloc 测试 module。
 
     功能说明:
     - 在 `symbol.for` body 内创建 `dma.alloc -> dma.slice -> dma.free` 生命周期。
     - 该形态没有中间 view alias，用于覆盖 direct alloc use 的 loop-local `num=1` ring 化。
+    - `with_terminator=True` 时构造 loop-carried `symbol.for`，用于验证 advance 插在 terminator 前。
 
     使用示例:
     - module, top_block, loop_op, loop_block, slice_op, slot_type = _build_loop_local_direct_slice_module()
@@ -317,11 +321,18 @@ def _build_loop_local_direct_slice_module() -> tuple[ModuleOp, Block, SymbolForO
     c0 = SymbolConstOp(0)
     c4 = SymbolConstOp(4)
     c1 = SymbolConstOp(1)
-    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "4", "1")])
+    loop_arg_types: list[Attribute] = [SymbolIterType.from_bounds("0", "4", "1")]
+    if with_terminator:
+        loop_arg_types.append(SymbolValueType.from_expr("ACC"))
+    loop_block = Block(arg_types=loop_arg_types)
     alloc = DmaAllocOp([], slot_type)
     slice_op = DmaSliceOp(alloc.result, top_block.args[0], [c0.result], [c4.result], [c1.result])
     loop_block.add_ops([alloc, slice_op, DmaFreeOp(alloc.result)])
-    loop_op = SymbolForOp(c0.result, c4.result, c1.result, loop_block)
+    if with_terminator:
+        loop_block.add_op(SymbolYieldOp(loop_block.args[1]))
+        loop_op = SymbolForOp(c0.result, c4.result, c1.result, loop_block, init=c0.result, result_type=SymbolValueType.from_expr("ACC"))
+    else:
+        loop_op = SymbolForOp(c0.result, c4.result, c1.result, loop_block)
     top_block.add_ops([c0, c4, c1, loop_op, func.ReturnOp()])
     func_op = func.FuncOp("multi_buffer_loop_local_slice", func_type, Region(top_block))
     return ModuleOp([func_op]), top_block, loop_op, loop_block, slice_op, slot_type
@@ -454,14 +465,15 @@ def _backing_bytes(make_ring: DmaMakeRingOp) -> int:
     return int(dim.expr.data)
 
 
-def _assert_static_ring(make_ring: DmaMakeRingOp, slot_type: NnMemoryType, num: int) -> None:
+def _assert_static_ring(make_ring: DmaMakeRingOp, slot_type: NnMemoryType, num: int, *, alignment: int = 1024) -> None:
     """断言静态 ring operands 与 result type。
 
     功能说明:
-    - 锁定 `num/offset` operands、backing bytes 与新 `DmaRingType(slot_type)`。
+    - 锁定 `num/offset` operands、aligned backing bytes 与新 `DmaRingType(slot_type)`。
+    - `alignment=0` 时保持 raw slot bytes，用于覆盖关闭对齐的公开选项。
 
     使用示例:
-    - _assert_static_ring(make_ring, slot_type, 2)
+    - _assert_static_ring(make_ring, slot_type, 2, alignment=1024)
 
     关联文件:
     - spec: spec/pass/memory/multi_buffer.md
@@ -474,17 +486,18 @@ def _assert_static_ring(make_ring: DmaMakeRingOp, slot_type: NnMemoryType, num: 
         assert isinstance(dim, SymbolExprAttr)
         slot_numel *= int(dim.expr.data)
     slot_bytes = slot_numel * 4
+    aligned_slot_bytes = slot_bytes if alignment == 0 else ((slot_bytes + alignment - 1) // alignment) * alignment
     num_owner = SSAValue.get(make_ring.num).owner
     offset_owner = SSAValue.get(make_ring.offset).owner
     assert isinstance(num_owner, SymbolConstOp)
     assert isinstance(offset_owner, SymbolConstOp)
     assert int(num_owner.value.data) == num
-    assert int(offset_owner.value.data) == slot_bytes
+    assert int(offset_owner.value.data) == aligned_slot_bytes
     backing_type = make_ring.memory.type
     assert isinstance(backing_type, NnMemoryType)
     backing_dim = backing_type.shape.data[0]
     assert isinstance(backing_dim, SymbolExprAttr)
-    assert int(backing_dim.expr.data) == num * slot_bytes
+    assert int(backing_dim.expr.data) == num * aligned_slot_bytes
     assert isinstance(make_ring.result.type, DmaRingType)
     assert make_ring.result.type.memory_type == slot_type
 
@@ -507,11 +520,19 @@ def _assert_no_new_ring_rewrite(module: ModuleOp, initial_ring_count: int = 0) -
     assert len(_walk_ops(module, DmaMakeRingOp)) == initial_ring_count
 
 
-def _insert_existing_ring_operand(top_block: Block, loop_op: SymbolForOp, loop_block: Block, matmul: KernelMatmulOp) -> None:
+def _insert_existing_ring_operand(
+    top_block: Block,
+    loop_op: SymbolForOp,
+    loop_block: Block,
+    matmul: KernelMatmulOp,
+    *,
+    replace_matmul_lhs: bool = True,
+) -> None:
     """把 matmul lhs 替换为已有 ring current slot。
 
     功能说明:
     - 构造合法 `dma.make_ring/current_ring` 作为输入，使 pass 必须识别已有 ring 并保持整对 no-op。
+    - 默认把 matmul lhs 替换成 current；`replace_matmul_lhs=False` 只注入无关 existing current。
 
     使用示例:
     - _insert_existing_ring_operand(top_block, loop_op, loop_block, matmul)
@@ -538,7 +559,8 @@ def _insert_existing_ring_operand(top_block: Block, loop_op: SymbolForOp, loop_b
 
     top_block.insert_ops_before([backing, num, offset, make_ring], loop_op)
     loop_block.insert_ops_before([current], matmul)
-    matmul.operands[1] = current.result
+    if replace_matmul_lhs:
+        matmul.operands[1] = current.result
 
 
 def _insert_nested_symbol_for_use(top_block: Block, loop_block: Block, matmul: KernelMatmulOp) -> SymbolForOp:
@@ -575,27 +597,63 @@ def _insert_nested_symbol_for_use(top_block: Block, loop_block: Block, matmul: K
 # 对应 spec 文件路径: spec/pass/memory/multi_buffer.md
 # 对应测试文件路径: test/passes/memory/test_multi_buffer.py
 def test_multi_buffer_public_options() -> None:
-    pass_obj = MultiBufferPass(memory_stage=4, fold=False, target="npu_demo")
+    analysis = MultiBufferAnalysisPass(memory_stage=4, fold=False, target="npu_demo")
+    apply = MultiBufferApplyPass(fold=False, target="npu_demo", alignment=0)
+    pass_obj = MultiBufferPass(memory_stage=4, fold=False, target="npu_demo", alignment=2048)
 
+    assert analysis.name == "multi-buffer-analysis"
+    assert analysis.memory_stage == 4
+    assert analysis.target == "npu_demo"
+    assert analysis.fold is False
+    assert apply.name == "multi-buffer-apply"
+    assert apply.target == "npu_demo"
+    assert apply.alignment == 0
+    assert apply.fold is False
     assert pass_obj.name == "multi-buffer"
     assert pass_obj.memory_stage == 4
     assert pass_obj.target == "npu_demo"
+    assert pass_obj.alignment == 2048
     assert pass_obj.fold is False
+    assert MultiBufferAnalysisPass(memory_stage=1).memory_stage == 1
+    assert MultiBufferAnalysisPass.from_options({}).memory_stage == 2
+    assert MultiBufferAnalysisPass.from_options({"memory-stage": "5", "target": "npu_demo"}).target == "npu_demo"
+    assert MultiBufferApplyPass().alignment == 1024
+    assert MultiBufferApplyPass.from_options({"alignment": "0"}).alignment == 0
+    assert MultiBufferApplyPass.from_options({"target": "npu_demo"}).target == "npu_demo"
     assert MultiBufferPass(memory_stage=1).memory_stage == 1
     assert MultiBufferPass().memory_stage == 2
     assert MultiBufferPass.from_options({}).memory_stage == 2
     assert MultiBufferPass.from_options({"memory-stage": "1"}).memory_stage == 1
     assert MultiBufferPass.from_options({"memory-stage": "5", "target": "npu_demo"}).target == "npu_demo"
+    assert MultiBufferPass.from_options({"alignment": "0"}).alignment == 0
+    with pytest.raises(KernelCodeError, match="memory_stage must be positive"):
+        MultiBufferAnalysisPass(memory_stage=0)
+    with pytest.raises(KernelCodeError, match="target must be non-empty"):
+        MultiBufferAnalysisPass(target="")
+    with pytest.raises(KernelCodeError, match="unknown option: fold"):
+        MultiBufferAnalysisPass.from_options({"fold": "false"})
+    with pytest.raises(KernelCodeError, match="target must be non-empty"):
+        MultiBufferApplyPass(target="")
+    with pytest.raises(KernelCodeError, match="alignment must be non-negative integer"):
+        MultiBufferApplyPass(alignment=-1)
+    with pytest.raises(KernelCodeError, match="alignment must be non-negative integer"):
+        MultiBufferApplyPass.from_options({"alignment": "bad"})
+    with pytest.raises(KernelCodeError, match="unknown option: memory-stage"):
+        MultiBufferApplyPass.from_options({"memory-stage": "2"})
     with pytest.raises(KernelCodeError, match="memory_stage must be positive"):
         MultiBufferPass(memory_stage=0)
     with pytest.raises(KernelCodeError, match="target must be non-empty"):
         MultiBufferPass(target="")
+    with pytest.raises(KernelCodeError, match="alignment must be non-negative integer"):
+        MultiBufferPass(alignment=-1)
     with pytest.raises(KernelCodeError, match="memory-stage must be positive"):
         MultiBufferPass.from_options({"memory-stage": "0"})
     with pytest.raises(KernelCodeError, match="memory-stage must be positive"):
         MultiBufferPass.from_options({"memory-stage": "-1"})
     with pytest.raises(KernelCodeError, match="target must be non-empty"):
         MultiBufferPass.from_options({"target": " "})
+    with pytest.raises(KernelCodeError, match="alignment must be non-negative integer"):
+        MultiBufferPass.from_options({"alignment": "-1"})
     with pytest.raises(KernelCodeError, match="unknown option: fold"):
         MultiBufferPass.from_options({"fold": "false"})
 
@@ -609,13 +667,81 @@ def test_multi_buffer_public_options() -> None:
 def test_multi_buffer_registry_options() -> None:
     load_builtin_passes()
 
-    pass_obj = build_registered_pass("multi-buffer", {"memory-stage": "4", "target": "npu_demo", "fold": "false"})
+    analysis = build_registered_pass(
+        "multi-buffer-analysis",
+        {"memory-stage": "4", "target": "npu_demo", "fold": "false"},
+    )
+    apply = build_registered_pass("multi-buffer-apply", {"target": "npu_demo", "alignment": "0", "fold": "false"})
+    pass_obj = build_registered_pass(
+        "multi-buffer",
+        {"memory-stage": "4", "target": "npu_demo", "alignment": "2048", "fold": "false"},
+    )
 
+    assert isinstance(analysis, MultiBufferAnalysisPass)
+    assert isinstance(analysis, ModulePass)
+    assert analysis.memory_stage == 4
+    assert analysis.target == "npu_demo"
+    assert analysis.fold is False
+    assert isinstance(apply, MultiBufferApplyPass)
+    assert isinstance(apply, ModulePass)
+    assert apply.target == "npu_demo"
+    assert apply.alignment == 0
+    assert apply.fold is False
     assert isinstance(pass_obj, MultiBufferPass)
     assert isinstance(pass_obj, ModulePass)
     assert pass_obj.memory_stage == 4
     assert pass_obj.target == "npu_demo"
+    assert pass_obj.alignment == 2048
     assert pass_obj.fold is False
+
+
+# TC-MULTI-BUFFER-002A
+# 功能说明: 验证 analysis pass 只写三项临时属性，不生成 ring。
+# 使用示例: pytest -q test/passes/memory/test_multi_buffer.py -k test_multi_buffer_analysis_writes_attrs_without_rewrite
+# 对应功能实现文件路径: kernel_gen/passes/memory/multi_buffer.py
+# 对应 spec 文件路径: spec/pass/memory/multi_buffer.md
+# 对应测试文件路径: test/passes/memory/test_multi_buffer.py
+def test_multi_buffer_analysis_writes_attrs_without_rewrite() -> None:
+    module, top_block, _loop_op, _loop_block, _matmul, _lhs_slot_type, _rhs_slot_type = _build_loop_matmul_module()
+
+    MultiBufferAnalysisPass(memory_stage=3).apply(Context(), module)
+
+    allocs = [op for op in top_block.ops if isinstance(op, DmaAllocOp)]
+    assert len(allocs) == 2
+    for alloc in allocs:
+        assert alloc.attributes["multi_buffer.update_point"] == StringAttr("loop1")
+        assert alloc.attributes["multi_buffer.use_point"] == StringAttr("loop1")
+        assert alloc.attributes["multi_buffer.num"] == StringAttr("3")
+    assert not _walk_ops(module, DmaMakeRingOp)
+    assert not _walk_ops(module, DmaCurrentRingOp)
+    assert len(_walk_ops(module, DmaFreeOp)) == 2
+    module.verify()
+
+
+# TC-MULTI-BUFFER-002B
+# 功能说明: 验证 apply pass 只消费三项属性，且 alignment=0 使用 raw slot bytes。
+# 使用示例: pytest -q test/passes/memory/test_multi_buffer.py -k test_multi_buffer_apply_consumes_attrs_with_alignment_zero
+# 对应功能实现文件路径: kernel_gen/passes/memory/multi_buffer.py
+# 对应 spec 文件路径: spec/pass/memory/multi_buffer.md
+# 对应测试文件路径: test/passes/memory/test_multi_buffer.py
+def test_multi_buffer_apply_consumes_attrs_with_alignment_zero() -> None:
+    module, top_block, _loop_op, _loop_block, _matmul, lhs_slot_type, rhs_slot_type = _build_loop_matmul_module()
+    allocs = [op for op in top_block.ops if isinstance(op, DmaAllocOp)]
+    assert len(allocs) == 2
+    for alloc in allocs:
+        alloc.attributes["multi_buffer.update_point"] = StringAttr("loop1")
+        alloc.attributes["multi_buffer.use_point"] = StringAttr("loop1")
+        alloc.attributes["multi_buffer.num"] = StringAttr("2")
+
+    MultiBufferApplyPass(alignment=0).apply(Context(), module)
+
+    make_rings = _walk_ops(module, DmaMakeRingOp)
+    assert len(make_rings) == 2
+    _assert_static_ring(make_rings[0], lhs_slot_type, 2, alignment=0)
+    _assert_static_ring(make_rings[1], rhs_slot_type, 2, alignment=0)
+    assert "multi_buffer." not in str(module)
+    assert not _walk_ops(module, DmaFreeOp)
+    module.verify()
 
 
 # TC-MULTI-BUFFER-003
@@ -647,10 +773,42 @@ def test_multi_buffer_rewrites_matmul_lhs_rhs_pair() -> None:
     assert _same_value(matmul.operands[1], currents[0].result)
     assert _same_value(matmul.operands[2], currents[1].result)
     body_ops = list(loop_block.ops)
+    assert body_ops[0] is currents[0]
+    assert body_ops[1] is currents[1]
     assert body_ops.index(currents[0]) < body_ops.index(copies[0]) < body_ops.index(matmul)
     assert body_ops.index(currents[1]) < body_ops.index(copies[1]) < body_ops.index(matmul)
-    assert body_ops.index(matmul) < body_ops.index(advances[0])
-    assert body_ops.index(matmul) < body_ops.index(advances[1])
+    assert body_ops[-2] is advances[0]
+    assert body_ops[-1] is advances[1]
+    module.verify()
+
+
+# TC-MULTI-BUFFER-003A
+# 功能说明: 验证 current/advance 插入到 use block 边界，而不是首个/最后一个实际 use 附近。
+# 使用示例: pytest -q test/passes/memory/test_multi_buffer.py -k test_multi_buffer_places_ring_ops_at_use_block_boundaries
+# 对应功能实现文件路径: kernel_gen/passes/memory/multi_buffer.py
+# 对应 spec 文件路径: spec/pass/memory/multi_buffer.md
+# 对应测试文件路径: test/passes/memory/test_multi_buffer.py
+def test_multi_buffer_places_ring_ops_at_use_block_boundaries() -> None:
+    module, _top_block, _loop_op, loop_block, matmul, _lhs_slot_type, _rhs_slot_type = _build_loop_matmul_module()
+    prefix_const = SymbolConstOp(99)
+    suffix_const = SymbolConstOp(100)
+    loop_block.insert_ops_before([prefix_const], list(loop_block.ops)[0])
+    loop_block.insert_ops_after([suffix_const], matmul)
+
+    MultiBufferPass().apply(Context(), module)
+
+    currents = _walk_ops(module, DmaCurrentRingOp)
+    advances = _walk_ops(module, DmaAdvanceRingOp)
+    body_ops = list(loop_block.ops)
+    assert len(currents) == 2
+    assert len(advances) == 2
+    assert body_ops[0] is currents[0]
+    assert body_ops[1] is currents[1]
+    assert body_ops.index(prefix_const) == 2
+    assert body_ops.index(matmul) < body_ops.index(suffix_const)
+    assert body_ops[-2] is advances[0]
+    assert body_ops[-1] is advances[1]
+    assert body_ops.index(suffix_const) < body_ops.index(advances[0])
     module.verify()
 
 
@@ -765,6 +923,35 @@ def test_multi_buffer_keeps_existing_ring_noop() -> None:
     module.verify()
 
 
+# TC-MULTI-BUFFER-009A
+# 功能说明: 验证 apply-only matmul pair 带三项属性但 use block 已有 current 时保持 no-op。
+# 使用示例: pytest -q test/passes/memory/test_multi_buffer.py -k test_multi_buffer_apply_keeps_existing_current_pair_noop
+# 对应功能实现文件路径: kernel_gen/passes/memory/multi_buffer.py
+# 对应 spec 文件路径: spec/pass/memory/multi_buffer.md
+# 对应测试文件路径: test/passes/memory/test_multi_buffer.py
+def test_multi_buffer_apply_keeps_existing_current_pair_noop() -> None:
+    module, top_block, loop_op, loop_block, matmul, _lhs_slot_type, _rhs_slot_type = _build_loop_matmul_module()
+    allocs = [op for op in top_block.ops if isinstance(op, DmaAllocOp)]
+    assert len(allocs) == 2
+    for alloc in allocs:
+        alloc.attributes["multi_buffer.update_point"] = StringAttr("loop1")
+        alloc.attributes["multi_buffer.use_point"] = StringAttr("loop1")
+        alloc.attributes["multi_buffer.num"] = StringAttr("2")
+    _insert_existing_ring_operand(top_block, loop_op, loop_block, matmul, replace_matmul_lhs=False)
+    initial_ring_count = len(_walk_ops(module, DmaMakeRingOp))
+    initial_current_count = len(_walk_ops(module, DmaCurrentRingOp))
+    operands_before_pass = list(matmul.operands)
+
+    MultiBufferApplyPass().apply(Context(), module)
+
+    _assert_no_new_ring_rewrite(module, initial_ring_count=initial_ring_count)
+    assert len(_walk_ops(module, DmaCurrentRingOp)) == initial_current_count
+    assert list(matmul.operands) == operands_before_pass
+    assert all("multi_buffer.num" in alloc.attributes for alloc in allocs)
+    assert len(_walk_ops(module, DmaFreeOp)) == 2
+    module.verify()
+
+
 # TC-MULTI-BUFFER-010
 # 功能说明: 验证 lhs-only / rhs-only partial pair 保持 no-op。
 # 使用示例: pytest -q test/passes/memory/test_multi_buffer.py -k test_multi_buffer_keeps_partial_pair_noop
@@ -873,8 +1060,16 @@ def test_multi_buffer_target_dynamic_same_space_num() -> None:
 
     make_rings = _walk_ops(module, DmaMakeRingOp)
     assert len(make_rings) == 2
-    assert _symbol_expr(make_rings[0].offset) == "4*S1*S2"
-    assert _symbol_expr(make_rings[1].offset) == "4*S2*S3"
+    lhs_offset_expr = _symbol_expr(make_rings[0].offset)
+    rhs_offset_expr = _symbol_expr(make_rings[1].offset)
+    assert "4*S1*S2" in lhs_offset_expr
+    assert "1023" in lhs_offset_expr
+    assert "1024" in lhs_offset_expr
+    assert "floordiv" in lhs_offset_expr
+    assert "4*S2*S3" in rhs_offset_expr
+    assert "1023" in rhs_offset_expr
+    assert "1024" in rhs_offset_expr
+    assert "floordiv" in rhs_offset_expr
     assert _same_value(make_rings[0].num, make_rings[1].num)
     num_expr = _symbol_expr(make_rings[0].num)
     assert "524288 floordiv" in num_expr
@@ -896,6 +1091,10 @@ def test_multi_buffer_target_dynamic_same_space_num() -> None:
 # 对应测试文件路径: test/passes/memory/test_multi_buffer.py
 def test_multi_buffer_rewrites_loop_local_direct_slice_use() -> None:
     module, _top_block, _loop_op, loop_block, slice_op, slot_type = _build_loop_local_direct_slice_module()
+    prefix_const = SymbolConstOp(11)
+    suffix_const = SymbolConstOp(12)
+    loop_block.insert_ops_before([prefix_const], list(loop_block.ops)[0])
+    loop_block.insert_ops_after([suffix_const], slice_op)
 
     MultiBufferPass(memory_stage=2, target="npu_demo").apply(Context(), module)
 
@@ -908,7 +1107,65 @@ def test_multi_buffer_rewrites_loop_local_direct_slice_use() -> None:
     _assert_static_ring(make_rings[0], slot_type, 1)
     assert _same_value(slice_op.target, currents[0].result)
     body_ops = list(loop_block.ops)
-    assert body_ops.index(make_rings[0]) < body_ops.index(currents[0]) < body_ops.index(slice_op)
-    assert body_ops.index(slice_op) < body_ops.index(advances[0])
+    assert body_ops.index(make_rings[0]) < body_ops.index(currents[0]) < body_ops.index(prefix_const)
+    assert body_ops.index(prefix_const) < body_ops.index(slice_op)
+    assert body_ops.index(slice_op) < body_ops.index(suffix_const) < body_ops.index(advances[0])
+    assert body_ops[-1] is advances[0]
     assert not any(isinstance(op, DmaFreeOp) for op in loop_block.ops)
+    module.verify()
+
+
+# TC-MULTI-BUFFER-015B
+# 功能说明: 验证 loop-local direct-use advance 插在 use block terminator 前。
+# 使用示例: pytest -q test/passes/memory/test_multi_buffer.py -k test_multi_buffer_rewrites_loop_local_direct_slice_before_terminator
+# 对应功能实现文件路径: kernel_gen/passes/memory/multi_buffer.py
+# 对应 spec 文件路径: spec/pass/memory/multi_buffer.md
+# 对应测试文件路径: test/passes/memory/test_multi_buffer.py
+def test_multi_buffer_rewrites_loop_local_direct_slice_before_terminator() -> None:
+    module, _top_block, _loop_op, loop_block, slice_op, _slot_type = _build_loop_local_direct_slice_module(with_terminator=True)
+    suffix_const = SymbolConstOp(13)
+    loop_block.insert_ops_after([suffix_const], slice_op)
+
+    MultiBufferPass(memory_stage=2, target="npu_demo").apply(Context(), module)
+
+    advances = _walk_ops(module, DmaAdvanceRingOp)
+    terminators = _walk_ops(module, SymbolYieldOp)
+    assert len(advances) == 1
+    assert len(terminators) == 1
+    body_ops = list(loop_block.ops)
+    assert body_ops.index(slice_op) < body_ops.index(suffix_const) < body_ops.index(advances[0])
+    assert body_ops[-2] is advances[0]
+    assert body_ops[-1] is terminators[0]
+    module.verify()
+
+
+# TC-MULTI-BUFFER-015A
+# 功能说明: 验证 apply-only direct-use staging 带三项属性但 use block 已有 current 时保持 no-op。
+# 使用示例: pytest -q test/passes/memory/test_multi_buffer.py -k test_multi_buffer_apply_keeps_existing_current_direct_use_noop
+# 对应功能实现文件路径: kernel_gen/passes/memory/multi_buffer.py
+# 对应 spec 文件路径: spec/pass/memory/multi_buffer.md
+# 对应测试文件路径: test/passes/memory/test_multi_buffer.py
+def test_multi_buffer_apply_keeps_existing_current_direct_use_noop() -> None:
+    module, top_block, loop_op, loop_block, slice_op, slot_type = _build_loop_local_direct_slice_module()
+    alloc = next(op for op in loop_block.ops if isinstance(op, DmaAllocOp))
+    alloc.attributes["multi_buffer.update_point"] = StringAttr("loop1")
+    alloc.attributes["multi_buffer.use_point"] = StringAttr("loop1")
+    alloc.attributes["multi_buffer.num"] = StringAttr("1")
+    backing = DmaAllocOp([], _make_byte_pool_type(bytes_count=16, space="tlm1"))
+    num = SymbolConstOp(1)
+    offset = SymbolConstOp(16)
+    make_ring = DmaMakeRingOp(backing.result, num.result, offset.result, DmaRingType(slot_type))
+    current = DmaCurrentRingOp(make_ring.result)
+    top_block.insert_ops_before([backing, num, offset, make_ring], loop_op)
+    loop_block.insert_ops_before([current], slice_op)
+    initial_ring_count = len(_walk_ops(module, DmaMakeRingOp))
+    initial_current_count = len(_walk_ops(module, DmaCurrentRingOp))
+
+    MultiBufferApplyPass().apply(Context(), module)
+
+    _assert_no_new_ring_rewrite(module, initial_ring_count=initial_ring_count)
+    assert len(_walk_ops(module, DmaCurrentRingOp)) == initial_current_count
+    assert _same_value(slice_op.target, alloc.result)
+    assert "multi_buffer.num" in alloc.attributes
+    assert len(_walk_ops(module, DmaFreeOp)) == 1
     module.verify()

@@ -655,8 +655,28 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
         ),
         (
             "kernel_gen.passes.memory.multi_buffer",
+            "MultiBufferAnalysisPass",
+            importlib.import_module("kernel_gen.passes.memory.multi_buffer").MultiBufferAnalysisPass,
+        ),
+        (
+            "kernel_gen.passes.memory.multi_buffer",
+            "MultiBufferApplyPass",
+            importlib.import_module("kernel_gen.passes.memory.multi_buffer").MultiBufferApplyPass,
+        ),
+        (
+            "kernel_gen.passes.memory.multi_buffer",
             "MultiBufferPass",
             importlib.import_module("kernel_gen.passes.memory.multi_buffer").MultiBufferPass,
+        ),
+        (
+            "kernel_gen.passes",
+            "MultiBufferAnalysisPass",
+            importlib.import_module("kernel_gen.passes.memory.multi_buffer").MultiBufferAnalysisPass,
+        ),
+        (
+            "kernel_gen.passes",
+            "MultiBufferApplyPass",
+            importlib.import_module("kernel_gen.passes.memory.multi_buffer").MultiBufferApplyPass,
         ),
         (
             "kernel_gen.passes",
@@ -714,6 +734,8 @@ def test_pass_family_compat_shims_match_canonical_modules() -> None:
         ("kernel_gen.passes.kernel.kernel_decompose", "kernel_gen.passes.kernel_decompose", "KernelDecomposePass"),
         ("kernel_gen.passes.memory.memory_plan", "kernel_gen.passes.memory_plan", "MemoryPlanPass"),
         ("kernel_gen.passes.memory.memory_pool", "kernel_gen.passes.memory_pool", "MemoryPoolPass"),
+        ("kernel_gen.passes.memory.multi_buffer", "kernel_gen.passes.multi_buffer", "MultiBufferAnalysisPass"),
+        ("kernel_gen.passes.memory.multi_buffer", "kernel_gen.passes.multi_buffer", "MultiBufferApplyPass"),
         ("kernel_gen.passes.memory.multi_buffer", "kernel_gen.passes.multi_buffer", "MultiBufferPass"),
         ("kernel_gen.passes.tuning.outline_device_kernel", "kernel_gen.passes.outline_device_kernel", "OutlineDeviceKernelPass"),
     )
@@ -1177,22 +1199,58 @@ def test_build_registered_multi_buffer_options() -> None:
     load_builtin_passes()
     multi_buffer_module = importlib.import_module("kernel_gen.passes.memory.multi_buffer")
 
+    analysis_default = build_registered_pass("multi-buffer-analysis")
+    analysis_pass = build_registered_pass(
+        "multi-buffer-analysis",
+        {"memory-stage": "4", "target": "npu_demo", "fold": "false"},
+    )
+    apply_default = build_registered_pass("multi-buffer-apply")
+    apply_pass = build_registered_pass("multi-buffer-apply", {"target": "npu_demo", "alignment": "0", "fold": "false"})
     default_pass = build_registered_pass("multi-buffer")
-    pass_obj = build_registered_pass("multi-buffer", {"memory-stage": "4", "target": "npu_demo", "fold": "false"})
+    pass_obj = build_registered_pass(
+        "multi-buffer",
+        {"memory-stage": "4", "target": "npu_demo", "alignment": "0", "fold": "false"},
+    )
     single_stage_pass = build_registered_pass("multi-buffer", {"memory-stage": "1"})
 
+    assert isinstance(analysis_default, multi_buffer_module.MultiBufferAnalysisPass)
+    assert analysis_default.memory_stage == 2
+    assert analysis_default.target is None
+    assert str(analysis_default.pipeline_pass_spec(include_default=True)) == "multi-buffer-analysis{memory_stage=2 fold=true target}"
+    assert isinstance(analysis_pass, multi_buffer_module.MultiBufferAnalysisPass)
+    assert analysis_pass.memory_stage == 4
+    assert analysis_pass.target == "npu_demo"
+    assert analysis_pass.fold is False
+    assert (
+        str(analysis_pass.pipeline_pass_spec(include_default=True))
+        == 'multi-buffer-analysis{memory_stage=4 fold=false target="npu_demo"}'
+    )
+    assert isinstance(apply_default, multi_buffer_module.MultiBufferApplyPass)
+    assert apply_default.target is None
+    assert apply_default.alignment == 1024
+    assert str(apply_default.pipeline_pass_spec(include_default=True)) == "multi-buffer-apply{fold=true target alignment=1024}"
+    assert isinstance(apply_pass, multi_buffer_module.MultiBufferApplyPass)
+    assert apply_pass.target == "npu_demo"
+    assert apply_pass.alignment == 0
+    assert apply_pass.fold is False
+    assert (
+        str(apply_pass.pipeline_pass_spec(include_default=True))
+        == 'multi-buffer-apply{fold=false target="npu_demo" alignment=0}'
+    )
     assert isinstance(default_pass, multi_buffer_module.MultiBufferPass)
     assert default_pass.memory_stage == 2
     assert default_pass.target is None
-    assert str(default_pass.pipeline_pass_spec(include_default=True)) == "multi-buffer{memory_stage=2 fold=true target}"
+    assert default_pass.alignment == 1024
+    assert str(default_pass.pipeline_pass_spec(include_default=True)) == "multi-buffer{memory_stage=2 fold=true target alignment=1024}"
     assert isinstance(pass_obj, multi_buffer_module.MultiBufferPass)
     assert pass_obj.name == "multi-buffer"
     assert pass_obj.memory_stage == 4
     assert pass_obj.target == "npu_demo"
+    assert pass_obj.alignment == 0
     assert pass_obj.fold is False
     assert (
         str(pass_obj.pipeline_pass_spec(include_default=True))
-        == 'multi-buffer{memory_stage=4 fold=false target="npu_demo"}'
+        == 'multi-buffer{memory_stage=4 fold=false target="npu_demo" alignment=0}'
     )
     assert isinstance(single_stage_pass, multi_buffer_module.MultiBufferPass)
     assert single_stage_pass.memory_stage == 1
@@ -1209,6 +1267,18 @@ def test_build_registered_multi_buffer_rejects_invalid_options() -> None:
     load_builtin_passes()
     multi_buffer_module = importlib.import_module("kernel_gen.passes.memory.multi_buffer")
 
+    with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: unknown option: fold$"):
+        multi_buffer_module.MultiBufferAnalysisPass.from_options({"fold": "false"})
+    with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: memory-stage must be integer$"):
+        multi_buffer_module.MultiBufferAnalysisPass.from_options({"memory-stage": "x"})
+    with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: target must be non-empty$"):
+        multi_buffer_module.MultiBufferAnalysisPass.from_options({"target": ""})
+    with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: unknown option: memory-stage$"):
+        multi_buffer_module.MultiBufferApplyPass.from_options({"memory-stage": "2"})
+    with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: alignment must be non-negative integer$"):
+        multi_buffer_module.MultiBufferApplyPass.from_options({"alignment": "-1"})
+    with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: alignment must be non-negative integer$"):
+        multi_buffer_module.MultiBufferApplyPass.from_options({"alignment": "x"})
     with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: unknown option: unknown$"):
         multi_buffer_module.MultiBufferPass.from_options({"unknown": "1"})
     with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: memory-stage must be integer$"):
@@ -1217,6 +1287,24 @@ def test_build_registered_multi_buffer_rejects_invalid_options() -> None:
         multi_buffer_module.MultiBufferPass.from_options({"memory-stage": "0"})
     with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: target must be non-empty$"):
         multi_buffer_module.MultiBufferPass.from_options({"target": ""})
+    with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: alignment must be non-negative integer$"):
+        multi_buffer_module.MultiBufferPass.from_options({"alignment": "-1"})
+    with pytest.raises(
+        KernelCodeError,
+        match=(
+            r"^PassRegistryError: pass 'multi-buffer-analysis' option error: "
+            r"MultiBufferOptionError: memory-stage must be positive$"
+        ),
+    ):
+        build_registered_pass("multi-buffer-analysis", {"memory-stage": "-1"})
+    with pytest.raises(
+        KernelCodeError,
+        match=(
+            r"^PassRegistryError: pass 'multi-buffer-apply' option error: "
+            r"MultiBufferOptionError: alignment must be non-negative integer$"
+        ),
+    ):
+        build_registered_pass("multi-buffer-apply", {"alignment": "-1"})
     with pytest.raises(
         KernelCodeError,
         match=r"^PassRegistryError: pass 'multi-buffer' option error: MultiBufferOptionError: unknown option: unknown$",
@@ -1469,6 +1557,8 @@ def test_load_builtin_passes_is_idempotent() -> None:
     assert "inline" in list_registered_passes()
     assert "attach-arch-information" in list_registered_passes()
     assert "memory-plan" in list_registered_passes()
+    assert "multi-buffer-analysis" in list_registered_passes()
+    assert "multi-buffer-apply" in list_registered_passes()
     assert "multi-buffer" in list_registered_passes()
     assert "arch-parallelize" in list_registered_passes()
     assert "producer-consumer-analysis" in list_registered_passes()
