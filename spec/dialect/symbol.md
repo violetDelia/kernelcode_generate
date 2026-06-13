@@ -844,6 +844,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
   ```
 - 功能说明：构造或表示 `symbol.for` 半开区间循环。
 - 注意事项：只承接公开 `symbol.for` 语法；loop-carried value 当前仅支持单个 `!symbol.int` 累计值，body 必须以 `symbol.yield` 结束。
+- 自定义文本语法中的 attr dict 必须至少包含 `iter = #symbol.iter<...>`；`iter` 之外的额外属性必须在 parse/print round-trip 中保留，例如 pass 写入的 `analysis.loop_id = "loopN-D"`。
 
 ### `class Symbol(Dialect)`
 
@@ -935,6 +936,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 | TC-SYM-031 | 边界/异常 | `symbol.get_dim/get_stride` | 准备非 memory source、`?` shape/stride 与非法参数组合。 | 运行 `test_symbol_get_dim_rejects_non_memory_type`、`test_symbol_get_stride_rejects_unknown_entry`。 | 非 memory source 按公开错误语义失败；`?` shape/stride 返回 `!symbol.int<#symbol.expr<?>>` 且不折叠。 | `test_symbol_get_dim_rejects_non_memory_type`、`test_symbol_get_stride_rejects_unknown_entry` |
 | TC-SYM-032 | 符号语义 | `symbol.for` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_for_accepts_symbol_int_bounds_and_iter_arg`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.for`”场景。 | `test_symbol_for_accepts_symbol_int_bounds_and_iter_arg` |
 | TC-SYM-033 | 解析/打印 | `symbol.for` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_for_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_for_round_trip` |
+| TC-SYM-033A | 解析/打印 | `symbol.for` extra attrs | 准备带 `analysis.loop_id` 的公开 `symbol.for` 文本。 | 运行 `test_symbol_for_round_trip_preserves_extra_attrs`。 | `iter` 之外的额外 attrs 在自定义语法 parse/print 中保留。 | `test_symbol_for_round_trip_preserves_extra_attrs` |
 | TC-SYM-034 | 边界/异常 | `symbol.for` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_for_rejects_non_symbol_int_operands`。 | “`symbol.for`”场景按公开错误语义失败或被拒绝。 | `test_symbol_for_rejects_non_symbol_int_operands` |
 | TC-SYM-035 | 边界/异常 | `symbol.for` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_for_rejects_zero_step`。 | “`symbol.for`”场景按公开错误语义失败或被拒绝。 | `test_symbol_for_rejects_zero_step` |
 | TC-SYM-036 | 边界/异常 | `symbol.for` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_for_rejects_invalid_region_shape`。 | “`symbol.for`”场景按公开错误语义失败或被拒绝。 | `test_symbol_for_rejects_invalid_region_shape` |

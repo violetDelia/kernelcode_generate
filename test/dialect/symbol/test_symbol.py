@@ -1894,6 +1894,36 @@ builtin.module {
     )
 
 
+# TC-SYM-033A
+# 测试目的: 验证 symbol.for 自定义语法会保留 iter 之外的额外 attrs。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol/
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_for_round_trip_preserves_extra_attrs() -> None:
+    ctx = _build_context()
+    module = Parser(
+        ctx,
+        """
+builtin.module {
+  %start = "test.op"() : () -> !symbol.int<#symbol.expr<M>>
+  %end = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %step = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = #symbol.expr<M>, end = #symbol.expr<N>, step = #symbol.expr<1>>, analysis.loop_id = "loop5-2"} {
+  }
+}
+""",
+    ).parse_module()
+
+    op = module.body.block.ops.last
+    assert isinstance(op, SymbolForOp)
+    assert op.attributes["analysis.loop_id"] == StringAttr("loop5-2")
+    printed = _print_op(op)
+    assert 'analysis.loop_id = "loop5-2"' in printed
+    reparsed = Parser(ctx, _print_op(module)).parse_module()
+    reparsed_op = reparsed.body.block.ops.last
+    assert isinstance(reparsed_op, SymbolForOp)
+    assert reparsed_op.attributes["analysis.loop_id"] == StringAttr("loop5-2")
+
+
 # TC-SYM-034
 # 测试目的: 验证 symbol.for 会拒绝非 symbol.int 的 start/end/step 或块参数类型，尤其 it 不能是 f32/f64/index/i32 等非 SymbolValueType。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol/

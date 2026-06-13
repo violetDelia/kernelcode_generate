@@ -1113,8 +1113,9 @@ def test_npu_demo_lowering_pipeline_static_dump_runs_multi_buffer_before_pool(tm
     assert "acc = false" not in decompose_text
     assert '"kernel.matmul"' in decompose_text
     assert multi_buffer_analysis_text.splitlines()[0] == 'multi-buffer-analysis{memory_stage=2 fold=true target="npu_demo"}'
-    assert "multi_buffer.update_point" in multi_buffer_analysis_text
-    assert "multi_buffer.use_point" in multi_buffer_analysis_text
+    assert "analysis.loop_id" in multi_buffer_analysis_text
+    assert "multi_buffer.update_points" in multi_buffer_analysis_text
+    assert "multi_buffer.use_points" in multi_buffer_analysis_text
     assert 'multi_buffer.num = "auto"' in multi_buffer_analysis_text
     assert "dma.make_ring" not in multi_buffer_analysis_text
     assert "dma.current_ring" not in multi_buffer_analysis_text

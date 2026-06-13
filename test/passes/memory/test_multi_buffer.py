@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects import func
+from xdsl.dialects import arith, func, scf
 from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, StringAttr, f32, i8, i32
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.passes import ModulePass
@@ -64,6 +64,52 @@ def _symbol_array(values: tuple[int | str, ...]) -> ArrayAttr[Attribute]:
     """
 
     return ArrayAttr([SymbolExprAttr.from_expr(str(value)) for value in values])
+
+
+def _string_attr_array(values: tuple[str, ...]) -> ArrayAttr[Attribute]:
+    """构造字符串数组属性。
+
+    功能说明:
+    - 为 `multi_buffer.update_points/use_points` 测试输入和断言复用同一结构。
+
+    使用示例:
+    - attr = _string_attr_array(("loop1-1",))
+
+    关联文件:
+    - spec: spec/pass/memory/multi_buffer.md
+    - test: test/passes/memory/test_multi_buffer.py
+    - 功能实现: kernel_gen/passes/memory/multi_buffer.py
+    """
+
+    attrs: list[Attribute] = []
+    for value in values:
+        attr = StringAttr(value)
+        attrs.append(attr)
+    result = ArrayAttr(attrs)
+    return result
+
+
+def _string_array_values(attr: Attribute) -> tuple[str, ...]:
+    """读取测试用字符串数组属性。
+
+    功能说明:
+    - 验证 attr 是 `ArrayAttr[StringAttr]` 并返回内部字符串。
+
+    使用示例:
+    - values = _string_array_values(alloc.attributes["multi_buffer.update_points"])
+
+    关联文件:
+    - spec: spec/pass/memory/multi_buffer.md
+    - test: test/passes/memory/test_multi_buffer.py
+    - 功能实现: kernel_gen/passes/memory/multi_buffer.py
+    """
+
+    assert isinstance(attr, ArrayAttr)
+    values: list[str] = []
+    for item in attr.data:
+        assert isinstance(item, StringAttr)
+        values.append(item.data)
+    return tuple(values)
 
 
 def _make_memory_type(
@@ -336,6 +382,55 @@ def _build_loop_local_direct_slice_module(
     top_block.add_ops([c0, c4, c1, loop_op, func.ReturnOp()])
     func_op = func.FuncOp("multi_buffer_loop_local_slice", func_type, Region(top_block))
     return ModuleOp([func_op]), top_block, loop_op, loop_block, slice_op, slot_type
+
+
+def _build_if_path_direct_slice_module() -> tuple[ModuleOp, Block, SymbolForOp, scf.IfOp, SymbolForOp, DmaSliceOp, NnMemoryType]:
+    """构造 loop 外 alloc、if branch 内 direct use 的生命周期候选。
+
+    功能说明:
+    - alloc/free 位于外层 loop 外，direct `dma.slice` 位于 loop body 内的 `scf.if` branch。
+    - loop body 另含一个更深的空 `symbol.for`，用于覆盖非最大 depth candidate 写 fixed=2。
+
+    使用示例:
+    - module, top_block, loop_op, if_op, inner_loop, slice_op, slot_type = _build_if_path_direct_slice_module()
+
+    关联文件:
+    - spec: spec/pass/memory/multi_buffer.md
+    - test: test/passes/memory/test_multi_buffer.py
+    - 功能实现: kernel_gen/passes/memory/multi_buffer.py
+    """
+
+    slot_type = NnMemoryType(
+        ArrayAttr([SymbolExprAttr.from_expr("4")]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
+        i32,
+        NnMemorySpaceAttr.from_name("tlm1"),
+    )
+    source_type = NnMemoryType(
+        ArrayAttr([SymbolExprAttr.from_expr("4")]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
+        i32,
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    func_type = FunctionType.from_lists([source_type], [])
+    top_block = Block(arg_types=[source_type])
+    c0 = SymbolConstOp(0)
+    c4 = SymbolConstOp(4)
+    c1 = SymbolConstOp(1)
+    condition = arith.ConstantOp.from_int_and_width(1, 1)
+    alloc = DmaAllocOp([], slot_type)
+    then_block = Block()
+    slice_op = DmaSliceOp(alloc.result, top_block.args[0], [c0.result], [c4.result], [c1.result])
+    then_block.add_ops([slice_op, scf.YieldOp()])
+    if_op = scf.IfOp(condition.result, [], Region(then_block), None)
+    inner_block = Block(arg_types=[SymbolIterType.from_bounds("0", "4", "1")])
+    inner_loop = SymbolForOp(c0.result, c4.result, c1.result, inner_block)
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "4", "1")])
+    loop_block.add_ops([if_op, inner_loop])
+    loop_op = SymbolForOp(c0.result, c4.result, c1.result, loop_block)
+    top_block.add_ops([c0, c4, c1, condition, alloc, loop_op, DmaFreeOp(alloc.result), func.ReturnOp()])
+    func_op = func.FuncOp("multi_buffer_if_path_slice", func_type, Region(top_block))
+    return ModuleOp([func_op]), top_block, loop_op, if_op, inner_loop, slice_op, slot_type
 
 
 def _walk_ops(module: ModuleOp, op_type: type[Operation]) -> list[Operation]:
@@ -702,15 +797,16 @@ def test_multi_buffer_registry_options() -> None:
 # 对应 spec 文件路径: spec/pass/memory/multi_buffer.md
 # 对应测试文件路径: test/passes/memory/test_multi_buffer.py
 def test_multi_buffer_analysis_writes_attrs_without_rewrite() -> None:
-    module, top_block, _loop_op, _loop_block, _matmul, _lhs_slot_type, _rhs_slot_type = _build_loop_matmul_module()
+    module, top_block, loop_op, _loop_block, _matmul, _lhs_slot_type, _rhs_slot_type = _build_loop_matmul_module()
 
     MultiBufferAnalysisPass(memory_stage=3).apply(Context(), module)
 
     allocs = [op for op in top_block.ops if isinstance(op, DmaAllocOp)]
     assert len(allocs) == 2
+    assert loop_op.attributes["analysis.loop_id"] == StringAttr("loop1-1")
     for alloc in allocs:
-        assert alloc.attributes["multi_buffer.update_point"] == StringAttr("loop1")
-        assert alloc.attributes["multi_buffer.use_point"] == StringAttr("loop1")
+        assert alloc.attributes["multi_buffer.update_points"] == _string_attr_array(("loop1-1",))
+        assert alloc.attributes["multi_buffer.use_points"] == _string_attr_array(("loop1-1",))
         assert alloc.attributes["multi_buffer.num"] == StringAttr("3")
     assert not _walk_ops(module, DmaMakeRingOp)
     assert not _walk_ops(module, DmaCurrentRingOp)
@@ -725,12 +821,13 @@ def test_multi_buffer_analysis_writes_attrs_without_rewrite() -> None:
 # 对应 spec 文件路径: spec/pass/memory/multi_buffer.md
 # 对应测试文件路径: test/passes/memory/test_multi_buffer.py
 def test_multi_buffer_apply_consumes_attrs_with_alignment_zero() -> None:
-    module, top_block, _loop_op, _loop_block, _matmul, lhs_slot_type, rhs_slot_type = _build_loop_matmul_module()
+    module, top_block, loop_op, _loop_block, _matmul, lhs_slot_type, rhs_slot_type = _build_loop_matmul_module()
+    loop_op.attributes["analysis.loop_id"] = StringAttr("loop1-1")
     allocs = [op for op in top_block.ops if isinstance(op, DmaAllocOp)]
     assert len(allocs) == 2
     for alloc in allocs:
-        alloc.attributes["multi_buffer.update_point"] = StringAttr("loop1")
-        alloc.attributes["multi_buffer.use_point"] = StringAttr("loop1")
+        alloc.attributes["multi_buffer.update_points"] = _string_attr_array(("loop1-1",))
+        alloc.attributes["multi_buffer.use_points"] = _string_attr_array(("loop1-1",))
         alloc.attributes["multi_buffer.num"] = StringAttr("2")
 
     MultiBufferApplyPass(alignment=0).apply(Context(), module)
@@ -741,6 +838,26 @@ def test_multi_buffer_apply_consumes_attrs_with_alignment_zero() -> None:
     _assert_static_ring(make_rings[1], rhs_slot_type, 2, alignment=0)
     assert "multi_buffer." not in str(module)
     assert not _walk_ops(module, DmaFreeOp)
+    module.verify()
+
+
+# TC-MULTI-BUFFER-002C
+# 功能说明: 验证 apply-only 在无三项 multi_buffer 属性时不写 analysis control-flow id。
+# 使用示例: pytest -q test/passes/memory/test_multi_buffer.py -k test_multi_buffer_apply_without_attrs_does_not_write_analysis_ids
+# 对应功能实现文件路径: kernel_gen/passes/memory/multi_buffer.py
+# 对应 spec 文件路径: spec/pass/memory/multi_buffer.md
+# 对应测试文件路径: test/passes/memory/test_multi_buffer.py
+def test_multi_buffer_apply_without_attrs_does_not_write_analysis_ids() -> None:
+    module, _top_block, loop_op, if_op, inner_loop, _slice_op, _slot_type = _build_if_path_direct_slice_module()
+
+    MultiBufferApplyPass().apply(Context(), module)
+
+    assert "analysis.loop_id" not in loop_op.attributes
+    assert "analysis.if_id" not in if_op.attributes
+    assert "analysis.loop_id" not in inner_loop.attributes
+    assert not _walk_ops(module, DmaMakeRingOp)
+    assert not _walk_ops(module, DmaCurrentRingOp)
+    assert "multi_buffer." not in str(module)
     module.verify()
 
 
@@ -931,11 +1048,12 @@ def test_multi_buffer_keeps_existing_ring_noop() -> None:
 # 对应测试文件路径: test/passes/memory/test_multi_buffer.py
 def test_multi_buffer_apply_keeps_existing_current_pair_noop() -> None:
     module, top_block, loop_op, loop_block, matmul, _lhs_slot_type, _rhs_slot_type = _build_loop_matmul_module()
+    loop_op.attributes["analysis.loop_id"] = StringAttr("loop1-1")
     allocs = [op for op in top_block.ops if isinstance(op, DmaAllocOp)]
     assert len(allocs) == 2
     for alloc in allocs:
-        alloc.attributes["multi_buffer.update_point"] = StringAttr("loop1")
-        alloc.attributes["multi_buffer.use_point"] = StringAttr("loop1")
+        alloc.attributes["multi_buffer.update_points"] = _string_attr_array(("loop1-1",))
+        alloc.attributes["multi_buffer.use_points"] = _string_attr_array(("loop1-1",))
         alloc.attributes["multi_buffer.num"] = StringAttr("2")
     _insert_existing_ring_operand(top_block, loop_op, loop_block, matmul, replace_matmul_lhs=False)
     initial_ring_count = len(_walk_ops(module, DmaMakeRingOp))
@@ -1139,6 +1257,55 @@ def test_multi_buffer_rewrites_loop_local_direct_slice_before_terminator() -> No
     module.verify()
 
 
+# TC-MULTI-BUFFER-015C
+# 功能说明: 验证 analysis 为 if path direct-use 候选写 control-flow id、列表属性与 fixed=2。
+# 使用示例: pytest -q test/passes/memory/test_multi_buffer.py -k test_multi_buffer_analysis_marks_if_path_lifecycle_points
+# 对应功能实现文件路径: kernel_gen/passes/memory/multi_buffer.py
+# 对应 spec 文件路径: spec/pass/memory/multi_buffer.md
+# 对应测试文件路径: test/passes/memory/test_multi_buffer.py
+def test_multi_buffer_analysis_marks_if_path_lifecycle_points() -> None:
+    module, top_block, loop_op, if_op, inner_loop, _slice_op, _slot_type = _build_if_path_direct_slice_module()
+
+    MultiBufferAnalysisPass(memory_stage=4, target="npu_demo").apply(Context(), module)
+
+    alloc = next(op for op in top_block.ops if isinstance(op, DmaAllocOp))
+    assert loop_op.attributes["analysis.loop_id"] == StringAttr("loop1-1")
+    assert if_op.attributes["analysis.if_id"] == StringAttr("if1-1")
+    assert inner_loop.attributes["analysis.loop_id"] == StringAttr("loop2-2")
+    assert _string_array_values(alloc.attributes["multi_buffer.update_points"]) == ("loop1-1",)
+    assert _string_array_values(alloc.attributes["multi_buffer.use_points"]) == ("if1-1",)
+    assert alloc.attributes["multi_buffer.num"] == StringAttr("2")
+    assert not _walk_ops(module, DmaMakeRingOp)
+    module.verify()
+
+
+# TC-MULTI-BUFFER-015D
+# 功能说明: 验证 apply 能把 if branch 内 direct-use 候选改写为 outer loop current/advance ring。
+# 使用示例: pytest -q test/passes/memory/test_multi_buffer.py -k test_multi_buffer_rewrites_if_path_direct_slice_use
+# 对应功能实现文件路径: kernel_gen/passes/memory/multi_buffer.py
+# 对应 spec 文件路径: spec/pass/memory/multi_buffer.md
+# 对应测试文件路径: test/passes/memory/test_multi_buffer.py
+def test_multi_buffer_rewrites_if_path_direct_slice_use() -> None:
+    module, top_block, loop_op, if_op, inner_loop, slice_op, slot_type = _build_if_path_direct_slice_module()
+
+    MultiBufferPass(memory_stage=4, target="npu_demo").apply(Context(), module)
+
+    make_rings = _walk_ops(module, DmaMakeRingOp)
+    currents = _walk_ops(module, DmaCurrentRingOp)
+    advances = _walk_ops(module, DmaAdvanceRingOp)
+    assert len(make_rings) == 1
+    assert len(currents) == 1
+    assert len(advances) == 1
+    _assert_static_ring(make_rings[0], slot_type, 2)
+    assert _same_value(slice_op.target, currents[0].result)
+    loop_body_ops = list(loop_op.body.blocks[0].ops)
+    assert loop_body_ops.index(currents[0]) < loop_body_ops.index(if_op)
+    assert loop_body_ops.index(if_op) < loop_body_ops.index(inner_loop) < loop_body_ops.index(advances[0])
+    assert not any(isinstance(op, DmaFreeOp) for op in top_block.ops)
+    assert "multi_buffer." not in str(module)
+    module.verify()
+
+
 # TC-MULTI-BUFFER-015A
 # 功能说明: 验证 apply-only direct-use staging 带三项属性但 use block 已有 current 时保持 no-op。
 # 使用示例: pytest -q test/passes/memory/test_multi_buffer.py -k test_multi_buffer_apply_keeps_existing_current_direct_use_noop
@@ -1147,9 +1314,10 @@ def test_multi_buffer_rewrites_loop_local_direct_slice_before_terminator() -> No
 # 对应测试文件路径: test/passes/memory/test_multi_buffer.py
 def test_multi_buffer_apply_keeps_existing_current_direct_use_noop() -> None:
     module, top_block, loop_op, loop_block, slice_op, slot_type = _build_loop_local_direct_slice_module()
+    loop_op.attributes["analysis.loop_id"] = StringAttr("loop1-1")
     alloc = next(op for op in loop_block.ops if isinstance(op, DmaAllocOp))
-    alloc.attributes["multi_buffer.update_point"] = StringAttr("loop1")
-    alloc.attributes["multi_buffer.use_point"] = StringAttr("loop1")
+    alloc.attributes["multi_buffer.update_points"] = _string_attr_array(("main",))
+    alloc.attributes["multi_buffer.use_points"] = _string_attr_array(("loop1-1",))
     alloc.attributes["multi_buffer.num"] = StringAttr("1")
     backing = DmaAllocOp([], _make_byte_pool_type(bytes_count=16, space="tlm1"))
     num = SymbolConstOp(1)

@@ -1237,9 +1237,8 @@ class SymbolForOp(IRDLOperation):
             printer.print_string(" = ")
             printer.print_ssa_value(self.init)
             printer.print_string(")")
-        printer.print_string(" {iter = ")
-        printer.print_attribute(self.iter_attr)
-        printer.print_string("}")
+        printer.print_string(" ")
+        printer.print_attr_dict(self.attributes)
         if has_carried:
             printer.print_string(" -> ")
             printer.print_attribute(self.result.type)
@@ -1288,13 +1287,10 @@ class SymbolForOp(IRDLOperation):
             parser.parse_characters("=", " in symbol.for")
             init_value = parser.parse_operand()
             parser.parse_punctuation(")", " in symbol.for")
-        parser.parse_characters("{", " in symbol.for")
-        parser.parse_keyword("iter", " in symbol.for")
-        parser.parse_characters("=", " in symbol.for")
-        iter_attr = parser.parse_attribute()
+        attrs = dict(parser.parse_optional_attr_dict() or {})
+        iter_attr = attrs.get("iter")
         if not isinstance(iter_attr, SymbolIterAttr):
             raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT, _format_error("symbol.for iter attribute must be #symbol.iter<...>"))
-        parser.parse_characters("}", " in symbol.for")
         iter_arg = unresolved_iter.resolve(SymbolIterType.from_attr(iter_attr))
         result_type = None
         if parser.parse_optional_characters("->") is not None:
@@ -1308,6 +1304,7 @@ class SymbolForOp(IRDLOperation):
         block_args = (iter_arg,) if acc_arg is None else (iter_arg, acc_arg)
         body = parser.parse_region(block_args)
         op = cls(start_value, end_value, step_value, body, iter_attr, init=init_value, result_type=result_type)
+        op.attributes = attrs
         return op
 
 __all__ = ["SymbolYieldOp", "SymbolForOp"]

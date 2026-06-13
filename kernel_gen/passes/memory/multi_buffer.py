@@ -3,11 +3,11 @@
 
 功能说明:
 - 提供 `multi-buffer-analysis`、`multi-buffer-apply` 和兼容 `multi-buffer` pass。
-- analysis 阶段只把可证明的 staging buffer 标记为三项 `multi_buffer.*` 临时属性。
+- analysis 阶段只把可证明的 staging buffer 标记为三项 `multi_buffer.*` 临时属性，并为 control flow 写入 `analysis.*_id`。
 - apply 阶段消费三项属性并把对应 typed alloc/free 生命周期改写为 DMA ring。
-- 匹配同一 `symbol.for` 外或 loop-local 的 `dma.alloc/free` 与 loop body 内的
+- 匹配同一 `symbol.for` 外或 loop-local 的 `dma.alloc/free` 与 loop / if path 内的
   direct alias / direct memory use 生命周期。
-- 对不满足公开边界的 IR 保持 no-op，不引入宽泛 alias 或跨 region 推断。
+- 对不满足公开边界的 IR 保持 no-op，不引入宽泛 alias 或不可证明控制流推断。
 
 API 列表:
 - `class MultiBufferAnalysisPass(memory_stage: int = 2, fold: bool = True, target: str | None = None)`
@@ -36,6 +36,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from xdsl.context import Context
+from xdsl.dialects import scf
 from xdsl.dialects.builtin import (
     ArrayAttr,
     BFloat16Type,
@@ -72,7 +73,7 @@ from kernel_gen.dialect.dma import (
     DmaViewOp,
 )
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
-from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelImg2col1dOp, KernelImg2col2dOp, KernelMatmulOp
+from kernel_gen.dialect.kernel import KernelImg2col1dOp, KernelImg2col2dOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolForOp
 from kernel_gen.dialect.symbol import SymbolValueType
@@ -86,14 +87,11 @@ _StagingCandidate = tuple[DmaAllocOp, DmaCopyOp, DmaFreeOp, KernelMatmulOp, int,
 _RingRewriteOps = tuple[DmaCurrentRingOp, DmaAdvanceRingOp]
 _MultiBufferMode = str
 
-_MULTI_BUFFER_UPDATE_POINT_ATTR = "multi_buffer.update_point"
-_MULTI_BUFFER_USE_POINT_ATTR = "multi_buffer.use_point"
+_ANALYSIS_LOOP_ID_ATTR = "analysis.loop_id"
+_ANALYSIS_IF_ID_ATTR = "analysis.if_id"
+_MULTI_BUFFER_UPDATE_POINTS_ATTR = "multi_buffer.update_points"
+_MULTI_BUFFER_USE_POINTS_ATTR = "multi_buffer.use_points"
 _MULTI_BUFFER_NUM_ATTR = "multi_buffer.num"
-_MULTI_BUFFER_ANALYSIS_ATTRS = (
-    _MULTI_BUFFER_UPDATE_POINT_ATTR,
-    _MULTI_BUFFER_USE_POINT_ATTR,
-    _MULTI_BUFFER_NUM_ATTR,
-)
 
 
 @dataclass(frozen=True)
@@ -123,7 +121,9 @@ class _LoopRingCandidate:
     slot_type: NnMemoryType
     first_use: Operation
     last_use: Operation
-    force_num_one: bool
+    update_points: tuple[str, ...]
+    use_points: tuple[str, ...]
+    area_max_depth: int
     aliases: tuple[DmaReinterpretOp | DmaViewOp | DmaReshapeOp | DmaSubviewOp, ...]
     direct_uses: tuple[tuple[Operation, int], ...]
 
@@ -483,7 +483,9 @@ class _MultiBufferRewriteRules:
         slot_type: NnMemoryType,
         first_use: Operation,
         last_use: Operation,
-        force_num_one: bool,
+        update_points: tuple[str, ...],
+        use_points: tuple[str, ...],
+        area_max_depth: int,
         aliases: tuple[DmaReinterpretOp | DmaViewOp | DmaReshapeOp | DmaSubviewOp, ...],
         direct_uses: tuple[tuple[Operation, int], ...],
     ) -> _LoopRingCandidate:
@@ -506,84 +508,437 @@ class _MultiBufferRewriteRules:
             slot_type=slot_type,
             first_use=first_use,
             last_use=last_use,
-            force_num_one=force_num_one,
+            update_points=update_points,
+            use_points=use_points,
+            area_max_depth=area_max_depth,
             aliases=aliases,
             direct_uses=direct_uses,
         )
+
+    @staticmethod
+    def ordered_unique_texts(values: tuple[str, ...]) -> tuple[str, ...]:
+        """按首次出现顺序去重字符串。
+
+        功能说明:
+        - 为 `multi_buffer.update_points/use_points` 生成稳定列表属性。
+        - 空字符串会被忽略，避免写出不可用 control-flow id。
+
+        使用示例:
+        - values = _MultiBufferRewriteRules.ordered_unique_texts(("loop1-1", "loop1-1"))
+        """
+
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            result.append(value)
+        return tuple(result)
+
+    @staticmethod
+    def control_id_depth(label: str) -> int | None:
+        """解析 `loopN-D` / `ifN-D` 的 depth 后缀。
+
+        功能说明:
+        - 返回末尾 `-D` 中的正整数 depth。
+        - 不符合控制流 id 文本约定时返回 `None`，调用方保持 no-op 或按非最大深度处理。
+
+        使用示例:
+        - depth = _MultiBufferRewriteRules.control_id_depth("loop2-3")
+        """
+
+        _prefix, separator, suffix = label.rpartition("-")
+        if separator != "-" or not suffix.isdecimal():
+            return None
+        depth = int(suffix)
+        if depth <= 0:
+            return None
+        return depth
+
+    @staticmethod
+    def symbol_for_depth(loop_op: SymbolForOp) -> int:
+        """计算 `symbol.for` 的嵌套 depth。
+
+        功能说明:
+        - 最外层 `symbol.for` 为 1，每多包一层 `symbol.for` 加 1。
+        - 只看结构父链，不读取临时 analysis 属性。
+
+        使用示例:
+        - depth = _MultiBufferRewriteRules.symbol_for_depth(loop_op)
+        """
+
+        depth = 1
+        block = loop_op.parent_block()
+        while block is not None:
+            parent = block.parent_op()
+            if isinstance(parent, SymbolForOp):
+                depth += 1
+            block = parent.parent_block() if parent is not None else None
+        return depth
+
+    @staticmethod
+    def scf_if_depth(if_op: scf.IfOp) -> int:
+        """计算 `scf.if` 的 lifecycle depth。
+
+        功能说明:
+        - loop 内 `scf.if` 继承所在 loop depth，顶层 `scf.if` 记为 depth 1。
+        - 该 depth 只用于 multi-buffer 生命周期优先级，不改变 scf 语义。
+
+        使用示例:
+        - depth = _MultiBufferRewriteRules.scf_if_depth(if_op)
+        """
+
+        depth = 0
+        block = if_op.parent_block()
+        while block is not None:
+            parent = block.parent_op()
+            if isinstance(parent, SymbolForOp):
+                depth += 1
+            block = parent.parent_block() if parent is not None else None
+        return max(depth, 1)
+
+    @staticmethod
+    def next_control_id(prefix: str, depth: int, index: int, used: set[str]) -> tuple[str, int]:
+        """分配不与已有 id 冲突的 control-flow id。
+
+        功能说明:
+        - 生成 `<prefix><index>-<depth>`，若已存在则递增 index。
+        - 返回实际 id 和下一次可继续尝试的 index。
+
+        使用示例:
+        - value, next_index = _MultiBufferRewriteRules.next_control_id("loop", 2, 1, used)
+        """
+
+        candidate_index = index
+        value = f"{prefix}{candidate_index}-{depth}"
+        while value in used:
+            candidate_index += 1
+            value = f"{prefix}{candidate_index}-{depth}"
+        return value, candidate_index + 1
+
+    @staticmethod
+    def ensure_control_flow_ids(module: ModuleOp) -> dict[SymbolForOp, str]:
+        """为 module 内控制流写入稳定 analysis id。
+
+        功能说明:
+        - `symbol.for` 写 `analysis.loop_id = "loopN-D"`。
+        - `scf.if` 写 `analysis.if_id = "ifN-D"`。
+        - 既有合法字符串属性保持不变，新增 id 避免与现有值冲突。
+
+        使用示例:
+        - labels = _MultiBufferRewriteRules.ensure_control_flow_ids(module)
+        """
+
+        used_loop_ids: set[str] = set()
+        used_if_ids: set[str] = set()
+        for op in module.walk():
+            if isinstance(op, SymbolForOp):
+                attr = op.attributes.get(_ANALYSIS_LOOP_ID_ATTR)
+                if isinstance(attr, StringAttr):
+                    used_loop_ids.add(attr.data)
+            if isinstance(op, scf.IfOp):
+                attr = op.attributes.get(_ANALYSIS_IF_ID_ATTR)
+                if isinstance(attr, StringAttr):
+                    used_if_ids.add(attr.data)
+
+        labels: dict[SymbolForOp, str] = {}
+        loop_index = 1
+        if_index = 1
+        for op in module.walk():
+            if isinstance(op, SymbolForOp):
+                attr = op.attributes.get(_ANALYSIS_LOOP_ID_ATTR)
+                if isinstance(attr, StringAttr) and attr.data:
+                    labels[op] = attr.data
+                    continue
+                value, loop_index = _MultiBufferRewriteRules.next_control_id(
+                    "loop",
+                    _MultiBufferRewriteRules.symbol_for_depth(op),
+                    loop_index,
+                    used_loop_ids,
+                )
+                attrs = dict(op.attributes)
+                attrs[_ANALYSIS_LOOP_ID_ATTR] = StringAttr(value)
+                op.attributes = attrs
+                used_loop_ids.add(value)
+                labels[op] = value
+                continue
+            if isinstance(op, scf.IfOp):
+                attr = op.attributes.get(_ANALYSIS_IF_ID_ATTR)
+                if isinstance(attr, StringAttr) and attr.data:
+                    continue
+                value, if_index = _MultiBufferRewriteRules.next_control_id(
+                    "if",
+                    _MultiBufferRewriteRules.scf_if_depth(op),
+                    if_index,
+                    used_if_ids,
+                )
+                attrs = dict(op.attributes)
+                attrs[_ANALYSIS_IF_ID_ATTR] = StringAttr(value)
+                op.attributes = attrs
+                used_if_ids.add(value)
+        return labels
 
     @staticmethod
     def region_labels(module: ModuleOp) -> dict[SymbolForOp, str]:
         """为 module 内 `symbol.for` 分配稳定 analysis region 标签。
 
         功能说明:
-        - 按 module walk 顺序生成 `loop1`、`loop2` 等标签。
-        - analysis 与 apply 使用同一规则复核 `multi_buffer.update_point/use_point`。
+        - 委托 `ensure_control_flow_ids` 生成或读取 `analysis.loop_id`。
+        - analysis / facade 的 analysis 阶段使用该入口写入稳定 id。
 
         使用示例:
         - labels = _MultiBufferRewriteRules.region_labels(module)
         """
 
+        return _MultiBufferRewriteRules.ensure_control_flow_ids(module)
+
+    @staticmethod
+    def existing_region_labels(module: ModuleOp) -> dict[SymbolForOp, str]:
+        """只读取 module 内已有 `symbol.for` analysis region 标签。
+
+        功能说明:
+        - 不写入 `analysis.loop_id` 或 `analysis.if_id`，供 apply-only 阶段复核属性。
+        - 缺失或类型不匹配的 loop 不进入结果，使 apply 保持 no-op。
+
+        使用示例:
+        - labels = _MultiBufferRewriteRules.existing_region_labels(module)
+        """
+
         labels: dict[SymbolForOp, str] = {}
-        loop_index = 1
         for op in module.walk():
             if not isinstance(op, SymbolForOp):
                 continue
-            labels[op] = f"loop{loop_index}"
-            loop_index += 1
+            attr = op.attributes.get(_ANALYSIS_LOOP_ID_ATTR)
+            if not isinstance(attr, StringAttr) or not attr.data:
+                continue
+            labels[op] = attr.data
         return labels
 
     @staticmethod
-    def write_multi_buffer_attrs(alloc_op: DmaAllocOp, update_point: str, use_point: str, num: str) -> None:
+    def control_label(op: Operation) -> str | None:
+        """读取 control-flow op 的 analysis id。
+
+        功能说明:
+        - 支持 `SymbolForOp` 的 `analysis.loop_id` 与 `scf.IfOp` 的 `analysis.if_id`。
+        - 属性缺失或类型不匹配时返回 `None`。
+
+        使用示例:
+        - label = _MultiBufferRewriteRules.control_label(loop_op)
+        """
+
+        attr_name = _ANALYSIS_LOOP_ID_ATTR if isinstance(op, SymbolForOp) else _ANALYSIS_IF_ID_ATTR
+        attr = op.attributes.get(attr_name)
+        if not isinstance(attr, StringAttr) or not attr.data:
+            return None
+        return attr.data
+
+    @staticmethod
+    def ancestor_symbol_loops(op: Operation) -> tuple[SymbolForOp, ...]:
+        """返回 `op` 所在的 `symbol.for` 祖先链。
+
+        功能说明:
+        - 结果按 outer-to-inner 顺序排列。
+        - 不包含 `op` 自身，仅沿 parent block / parent op 结构向外读取。
+
+        使用示例:
+        - loops = _MultiBufferRewriteRules.ancestor_symbol_loops(access_op)
+        """
+
+        loops: list[SymbolForOp] = []
+        block = op.parent_block()
+        while block is not None:
+            parent = block.parent_op()
+            if isinstance(parent, SymbolForOp):
+                loops.append(parent)
+            block = parent.parent_block() if parent is not None else None
+        return tuple(reversed(loops))
+
+    @staticmethod
+    def deepest_common_symbol_loop(access_ops: tuple[Operation, ...]) -> SymbolForOp | None:
+        """返回所有 access op 共同所在的最深 `symbol.for`。
+
+        功能说明:
+        - 用于把 if/nested path 生命周期收口到共同外层 loop。
+        - 任一 access 不在 `symbol.for` 内时返回 `None`。
+
+        使用示例:
+        - target = _MultiBufferRewriteRules.deepest_common_symbol_loop(tuple(access_ops))
+        """
+
+        if not access_ops:
+            return None
+        chains = [_MultiBufferRewriteRules.ancestor_symbol_loops(op) for op in access_ops]
+        if any(not chain for chain in chains):
+            return None
+        first_chain = chains[0]
+        max_common = min(len(chain) for chain in chains)
+        target: SymbolForOp | None = None
+        for index in range(max_common):
+            candidate = first_chain[index]
+            if any(chain[index] is not candidate for chain in chains[1:]):
+                break
+            target = candidate
+        return target
+
+    @staticmethod
+    def control_domain_for_op(op: Operation, target_loop: SymbolForOp) -> str | None:
+        """返回 access op 相对目标 loop 的生命周期域。
+
+        功能说明:
+        - 直接位于目标 loop body 的 access 使用目标 `analysis.loop_id`。
+        - 嵌套 `symbol.for` 或 `scf.if` 内的 access 使用遇到的最近控制流 id。
+
+        使用示例:
+        - domain = _MultiBufferRewriteRules.control_domain_for_op(access_op, loop_op)
+        """
+
+        block = op.parent_block()
+        while block is not None:
+            parent = block.parent_op()
+            if isinstance(parent, scf.IfOp):
+                return _MultiBufferRewriteRules.control_label(parent)
+            if isinstance(parent, SymbolForOp):
+                return _MultiBufferRewriteRules.control_label(parent)
+            block = parent.parent_block() if parent is not None else None
+        return _MultiBufferRewriteRules.control_label(target_loop)
+
+    @staticmethod
+    def target_area_max_depth(target_loop: SymbolForOp) -> int:
+        """计算目标 loop lifecycle 区域内最大控制流 depth。
+
+        功能说明:
+        - 读取目标 loop 自身及其 body 内嵌 `symbol.for` / `scf.if` 的 analysis id depth。
+        - 缺失或格式异常时忽略该节点，至少返回目标 loop depth。
+
+        使用示例:
+        - max_depth = _MultiBufferRewriteRules.target_area_max_depth(loop_op)
+        """
+
+        label = _MultiBufferRewriteRules.control_label(target_loop)
+        max_depth = _MultiBufferRewriteRules.control_id_depth(label or "") or 1
+        target_body = target_loop.body.blocks[0]
+        for root_op in target_body.ops:
+            for op in root_op.walk():
+                if not isinstance(op, (SymbolForOp, scf.IfOp)):
+                    continue
+                nested_label = _MultiBufferRewriteRules.control_label(op)
+                nested_depth = _MultiBufferRewriteRules.control_id_depth(nested_label or "")
+                if nested_depth is not None:
+                    max_depth = max(max_depth, nested_depth)
+        return max_depth
+
+    @staticmethod
+    def string_array(values: tuple[str, ...]) -> ArrayAttr[StringAttr]:
+        """构造字符串数组属性。
+
+        功能说明:
+        - 把 lifecycle point 文本序列写成 `ArrayAttr[StringAttr]`。
+        - 调用方负责保证文本已按合同去重排序。
+
+        使用示例:
+        - attr = _MultiBufferRewriteRules.string_array(("loop1-1",))
+        """
+
+        return ArrayAttr([StringAttr(value) for value in values])
+
+    @staticmethod
+    def read_string_array(attr: Attribute | None) -> tuple[str, ...] | None:
+        """读取字符串数组属性。
+
+        功能说明:
+        - 只接受 `ArrayAttr[StringAttr]` 且所有字符串非空。
+        - 类型不匹配时返回 `None`，apply 保持 no-op。
+
+        使用示例:
+        - values = _MultiBufferRewriteRules.read_string_array(attr)
+        """
+
+        if not isinstance(attr, ArrayAttr):
+            return None
+        values: list[str] = []
+        for item in attr.data:
+            if not isinstance(item, StringAttr) or not item.data:
+                return None
+            values.append(item.data)
+        if not values:
+            return None
+        return tuple(values)
+
+    @staticmethod
+    def write_multi_buffer_attrs(
+        alloc_op: DmaAllocOp,
+        update_points: tuple[str, ...],
+        use_points: tuple[str, ...],
+        num: str,
+    ) -> None:
         """写入 multi-buffer analysis 三项临时属性。
 
         功能说明:
-        - 只在 `dma.alloc` 上写 `update_point`、`use_point`、`num` 三个 `StringAttr`。
+        - 只在 `dma.alloc` 上写 `update_points`、`use_points`、`num` 三个临时属性。
         - 不插入、删除或替换任何业务 IR。
 
         使用示例:
-        - _MultiBufferRewriteRules.write_multi_buffer_attrs(alloc_op, "loop1", "loop1", "auto")
+        - _MultiBufferRewriteRules.write_multi_buffer_attrs(alloc_op, ("loop1-1",), ("loop1-1",), "auto")
         """
 
-        attrs = alloc_op.attributes
-        attrs[_MULTI_BUFFER_UPDATE_POINT_ATTR] = StringAttr(update_point)
-        attrs[_MULTI_BUFFER_USE_POINT_ATTR] = StringAttr(use_point)
+        attrs = dict(alloc_op.attributes)
+        attrs[_MULTI_BUFFER_UPDATE_POINTS_ATTR] = _MultiBufferRewriteRules.string_array(update_points)
+        attrs[_MULTI_BUFFER_USE_POINTS_ATTR] = _MultiBufferRewriteRules.string_array(use_points)
         attrs[_MULTI_BUFFER_NUM_ATTR] = StringAttr(num)
         alloc_op.attributes = attrs
 
     @staticmethod
-    def read_multi_buffer_attrs(alloc_op: DmaAllocOp) -> tuple[str, str, str] | None:
+    def read_multi_buffer_attrs(alloc_op: DmaAllocOp) -> tuple[tuple[str, ...], tuple[str, ...], str] | None:
         """读取 multi-buffer analysis 三项临时属性。
 
         功能说明:
-        - 三项属性都存在且都是 `StringAttr` 时返回文本三元组。
+        - `update_points/use_points` 都是非空 `ArrayAttr[StringAttr]` 且 `num` 是 `StringAttr` 时返回三元组。
         - 缺失或类型不匹配时返回 `None`，由 apply 保持 no-op。
 
         使用示例:
         - attrs = _MultiBufferRewriteRules.read_multi_buffer_attrs(alloc_op)
         """
 
-        values: list[str] = []
-        for attr_name in _MULTI_BUFFER_ANALYSIS_ATTRS:
-            attr = alloc_op.attributes.get(attr_name)
-            if not isinstance(attr, StringAttr):
-                return None
-            values.append(attr.data)
-        return (values[0], values[1], values[2])
+        update_points = _MultiBufferRewriteRules.read_string_array(alloc_op.attributes.get(_MULTI_BUFFER_UPDATE_POINTS_ATTR))
+        use_points = _MultiBufferRewriteRules.read_string_array(alloc_op.attributes.get(_MULTI_BUFFER_USE_POINTS_ATTR))
+        raw_num = alloc_op.attributes.get(_MULTI_BUFFER_NUM_ATTR)
+        if update_points is None or use_points is None or not isinstance(raw_num, StringAttr):
+            return None
+        return (update_points, use_points, raw_num.data)
 
     @staticmethod
-    def analysis_num(memory_stage: int, target: str | None, force_num_one: bool) -> str:
+    def analysis_num(
+        memory_stage: int,
+        target: str | None,
+        update_points: tuple[str, ...],
+        use_points: tuple[str, ...],
+        area_max_depth: int,
+    ) -> str:
         """计算 analysis 写入的 `multi_buffer.num` 文本。
 
         功能说明:
-        - loop-local 强制写 `"1"`。
-        - target 非空时 same-loop staging 写 `"auto"`，否则写固定 `memory_stage`。
+        - main update candidate 写 `"1"`。
+        - 全部控制流点均处于当前区域最大 depth 时，target 非空写 `"auto"`，否则写固定 `memory_stage`。
+        - 非最大 depth candidate 写固定 `"2"`。
 
         使用示例:
-        - num = _MultiBufferRewriteRules.analysis_num(2, "npu_demo", False)
+        - num = _MultiBufferRewriteRules.analysis_num(2, "npu_demo", ("loop3-3",), ("loop3-3",), 3)
         """
 
-        if force_num_one:
+        if update_points == ("main",):
             return "1"
+        depths = [
+            depth
+            for depth in (
+                _MultiBufferRewriteRules.control_id_depth(point)
+                for point in tuple(update_points) + tuple(use_points)
+                if point != "main"
+            )
+            if depth is not None
+        ]
+        if not depths or any(depth != area_max_depth for depth in depths):
+            return "2"
         if target is not None:
             return "auto"
         return str(memory_stage)
@@ -809,12 +1164,15 @@ def _rewrite_matmul_if_pair(
     if len(candidates) != 2 or candidates[0][0] is candidates[1][0]:
         return False
     candidate_pair = (candidates[0], candidates[1])
+    update_points = (region_label,)
+    use_points = (region_label,)
+    area_max_depth = _MultiBufferRewriteRules.target_area_max_depth(symbol_for)
 
     if mode == "analysis":
-        num = _MultiBufferRewriteRules.analysis_num(memory_stage, target, False)
+        num = _MultiBufferRewriteRules.analysis_num(memory_stage, target, update_points, use_points, area_max_depth)
         for candidate in candidate_pair:
             alloc_op, _copy_op, _free_op, _matmul_op, _operand_index, _slot_type, _slot_bytes = candidate
-            _MultiBufferRewriteRules.write_multi_buffer_attrs(alloc_op, region_label, region_label, num)
+            _MultiBufferRewriteRules.write_multi_buffer_attrs(alloc_op, update_points, use_points, num)
         return True
 
     parsed_num_attrs: list[int | str] = []
@@ -824,8 +1182,8 @@ def _rewrite_matmul_if_pair(
             attrs = _MultiBufferRewriteRules.read_multi_buffer_attrs(alloc_op)
             if attrs is None:
                 return False
-            update_point, use_point, raw_num = attrs
-            if update_point != region_label or use_point != region_label:
+            attr_update_points, attr_use_points, raw_num = attrs
+            if attr_update_points != update_points or attr_use_points != use_points:
                 return False
             parsed = _MultiBufferRewriteRules.parse_multi_buffer_num_attr(raw_num)
             if parsed is None:
@@ -901,7 +1259,7 @@ def _rewrite_matmul_if_pair(
             attrs = _MultiBufferRewriteRules.read_multi_buffer_attrs(op)
             if attrs is None:
                 continue
-            _update_point, _use_point, raw_num = attrs
+            _update_points, _use_points, raw_num = attrs
             parsed = _MultiBufferRewriteRules.parse_multi_buffer_num_attr(raw_num)
             if not isinstance(parsed, int):
                 continue
@@ -1093,7 +1451,7 @@ def _rewrite_loop_staging_candidates(
 
     功能说明:
     - 逐个分析 `dma.alloc` 的 direct alias 与 direct memory use。
-    - 仅当所有访问都落在同一个 `symbol.for` 直接 body 时 ring 化，避免 nested region 误判。
+    - 仅当所有访问都能收口到同一个最深共同 `symbol.for` 时 ring 化，支持 loop body、nested loop 与 if path。
     - 旧 matmul lhs/rhs direct alloc pair 仍由 `_rewrite_matmul_if_pair` 兼容路径处理。
     - `analysis` 模式只写三项属性；`apply` 模式只消费三项属性并使用 aligned slot 物化 ring。
     - apply 物化时把 setup/current 放到 use block 第一条既有 op 前；若 dynamic setup 无法在该点被支配则 no-op。
@@ -1132,10 +1490,12 @@ def _rewrite_loop_staging_candidates(
         "kernel.matmul",
     }
     required_progress_op_names = {
+        "dma.broadcast",
         "dma.copy",
         "dma.deslice",
         "dma.slice",
         "dma.transpose",
+        "kernel.binary_elewise",
         "kernel.img2col1d",
         "kernel.img2col2d",
         "kernel.matmul",
@@ -1198,29 +1558,11 @@ def _rewrite_loop_staging_candidates(
         if not aliases and direct_uses and all(user.name == "dma.copy" for user, _index in direct_uses):
             continue
 
-        nearest_loops: list[SymbolForOp] = []
-        for access_op in access_ops:
-            block = access_op.parent_block()
-            nearest_loop: SymbolForOp | None = None
-            while block is not None:
-                parent = block.parent_op()
-                if isinstance(parent, SymbolForOp):
-                    nearest_loop = parent
-                    break
-                block = parent.parent_block() if parent is not None else None
-            if nearest_loop is None:
-                unsupported = True
-                break
-            nearest_loops.append(nearest_loop)
-        if unsupported or not nearest_loops:
-            continue
-        target_loop = nearest_loops[0]
-        if any(loop is not target_loop for loop in nearest_loops):
+        target_loop = _MultiBufferRewriteRules.deepest_common_symbol_loop(tuple(access_ops))
+        if target_loop is None:
             continue
         target_body = target_loop.body.blocks[0]
         if id(target_body) in current_block_ids:
-            continue
-        if any(access_op.parent_block() is not target_body for access_op in access_ops):
             continue
 
         alloc_block = alloc_op.parent_block()
@@ -1230,18 +1572,43 @@ def _rewrite_loop_staging_candidates(
         if alloc_block is None or free_block is None or loop_parent is None:
             continue
         target_indexes = {op: index for index, op in enumerate(target_body.ops)}
-        if any(access_op not in target_indexes for access_op in access_ops):
+        target_anchors: list[Operation] = []
+        for access_op in access_ops:
+            anchor = _MultiBufferRewriteRules.enclosing_op_in_block(access_op, target_body)
+            if anchor is None or anchor not in target_indexes:
+                unsupported = True
+                break
+            target_anchors.append(anchor)
+        if unsupported or not target_anchors:
             continue
-        first_use = min(access_ops, key=lambda op: target_indexes[op])
-        last_use = max(access_ops, key=lambda op: target_indexes[op])
-        has_binary_elewise_access = any(
-            isinstance(access_op, KernelBinaryElewiseOp) or access_op.name == "kernel.binary_elewise"
-            for access_op in access_ops
+        first_use = min(target_anchors, key=lambda op: target_indexes[op])
+        last_use = max(target_anchors, key=lambda op: target_indexes[op])
+        target_label = labels.get(target_loop) or _MultiBufferRewriteRules.control_label(target_loop)
+        if target_label is None:
+            continue
+        sorted_access_ops = tuple(
+            access_op
+            for access_op, _anchor in sorted(
+                zip(access_ops, target_anchors, strict=True),
+                key=lambda item: target_indexes[item[1]],
+            )
         )
+        use_points = _MultiBufferRewriteRules.ordered_unique_texts(
+            tuple(
+                domain
+                for domain in (
+                    _MultiBufferRewriteRules.control_domain_for_op(access_op, target_loop) for access_op in sorted_access_ops
+                )
+                if domain is not None
+            )
+        )
+        if not use_points:
+            continue
+        area_max_depth = _MultiBufferRewriteRules.target_area_max_depth(target_loop)
 
         insertion_block: Block
         insertion_anchor: Operation
-        force_num_one = False
+        update_points = (target_label,)
         if alloc_block is target_body and free_block is target_body:
             if alloc_op not in target_indexes or free_op not in target_indexes:
                 continue
@@ -1249,10 +1616,8 @@ def _rewrite_loop_staging_candidates(
                 continue
             insertion_block = target_body
             insertion_anchor = alloc_op
-            force_num_one = True
+            update_points = ("main",)
         elif alloc_block is free_block:
-            if has_binary_elewise_access:
-                continue
             anchor = _MultiBufferRewriteRules.enclosing_op_in_block(target_loop, alloc_block)
             if anchor is None:
                 continue
@@ -1275,7 +1640,9 @@ def _rewrite_loop_staging_candidates(
                 slot_type=slot_type,
                 first_use=first_use,
                 last_use=last_use,
-                force_num_one=force_num_one,
+                update_points=update_points,
+                use_points=use_points,
+                area_max_depth=area_max_depth,
                 aliases=tuple(aliases),
                 direct_uses=tuple(direct_uses),
             )
@@ -1286,9 +1653,19 @@ def _rewrite_loop_staging_candidates(
 
     if mode == "analysis":
         for candidate in candidate_items:
-            region_label = labels.get(candidate.target_loop, "loop1")
-            num = _MultiBufferRewriteRules.analysis_num(memory_stage, target, candidate.force_num_one)
-            _MultiBufferRewriteRules.write_multi_buffer_attrs(candidate.alloc_op, region_label, region_label, num)
+            num = _MultiBufferRewriteRules.analysis_num(
+                memory_stage,
+                target,
+                candidate.update_points,
+                candidate.use_points,
+                candidate.area_max_depth,
+            )
+            _MultiBufferRewriteRules.write_multi_buffer_attrs(
+                candidate.alloc_op,
+                candidate.update_points,
+                candidate.use_points,
+                num,
+            )
         return
 
     parsed_num_attrs: dict[DmaAllocOp, int | str] = {}
@@ -1298,9 +1675,8 @@ def _rewrite_loop_staging_candidates(
             attrs = _MultiBufferRewriteRules.read_multi_buffer_attrs(candidate.alloc_op)
             if attrs is None:
                 continue
-            update_point, use_point, raw_num = attrs
-            region_label = labels.get(candidate.target_loop, "loop1")
-            if update_point != region_label or use_point != region_label:
+            update_points, use_points, raw_num = attrs
+            if update_points != candidate.update_points or use_points != candidate.use_points:
                 continue
             parsed = _MultiBufferRewriteRules.parse_multi_buffer_num_attr(raw_num)
             if parsed is None:
@@ -1313,7 +1689,9 @@ def _rewrite_loop_staging_candidates(
             parsed_num_attrs[candidate.alloc_op] = _MultiBufferRewriteRules.analysis_num(
                 memory_stage,
                 target,
-                candidate.force_num_one,
+                candidate.update_points,
+                candidate.use_points,
+                candidate.area_max_depth,
             )
 
     if not candidate_items:
@@ -1695,7 +2073,7 @@ class MultiBufferAnalysisPass(Pass):
 
     功能说明:
     - 只分析可证明的 staging alloc/free 生命周期，并在 `dma.alloc` 上写三项 `multi_buffer.*` 属性。
-    - target 非空时 same-loop staging 写 `multi_buffer.num = "auto"`；否则写固定 `memory_stage`。
+    - target 非空且候选处于当前区域最大控制流 depth 时写 `multi_buffer.num = "auto"`；否则按 lifecycle depth 写固定值。
     - 不物化 ring、不删除 alloc/free、不替换 operand。
 
     使用示例:
@@ -1796,7 +2174,7 @@ class MultiBufferApplyPass(Pass):
     """multi-buffer apply pass。
 
     功能说明:
-    - 只消费 `multi_buffer.update_point/use_point/num` 三项 analysis 属性。
+    - 只消费 `multi_buffer.update_points/use_points/num` 三项 analysis 属性。
     - fixed 和 auto 都按 `alignment` 计算 ring offset 与 backing bytes。
     - apply 完成后删除旧 typed alloc/free 生命周期，不残留临时属性。
 
@@ -1866,7 +2244,7 @@ class MultiBufferApplyPass(Pass):
 
         _ = ctx
         ensure_builtin_module(module)
-        labels = _MultiBufferRewriteRules.region_labels(module)
+        labels = _MultiBufferRewriteRules.existing_region_labels(module)
         existing_current_block_ids: set[int] = set()
         for current_op in [op for op in module.walk() if isinstance(op, DmaCurrentRingOp)]:
             current_block = current_op.parent_block()
@@ -1874,7 +2252,9 @@ class MultiBufferApplyPass(Pass):
                 existing_current_block_ids.add(id(current_block))
         for symbol_for in [op for op in module.walk() if isinstance(op, SymbolForOp)]:
             loop_block = symbol_for.body.blocks[0]
-            region_label = labels.get(symbol_for, "loop1")
+            region_label = labels.get(symbol_for)
+            if region_label is None:
+                continue
             for op in list(loop_block.ops):
                 if isinstance(op, KernelMatmulOp):
                     _rewrite_matmul_if_pair(
