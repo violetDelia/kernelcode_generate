@@ -466,6 +466,27 @@ def test_build_registered_producer_consumer_analysis_pass() -> None:
     assert pass_obj.fold is False
 
 
+# TC-REGISTRY-007A-1B2
+# 功能说明: 验证内置 pass 加载后可通过稳定名称构造 loop-soft-pipeline ModulePass。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_loop_soft_pipeline_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_loop_soft_pipeline_pass() -> None:
+    load_builtin_passes()
+    loop_module = importlib.import_module("kernel_gen.passes.schedule.loop_soft_pipeline")
+
+    pass_obj = build_registered_pass("loop-soft-pipeline", {"fold": "false"})
+
+    assert pass_obj.name == "loop-soft-pipeline"
+    assert isinstance(pass_obj, loop_module.LoopSoftPipelinePass)
+    assert isinstance(pass_obj, ModulePass)
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.schedule.loop_soft_pipeline"
+    assert pass_obj.fold is False
+    with pytest.raises(KernelCodeError, match=r"pass 'loop-soft-pipeline' option error"):
+        build_registered_pass("loop-soft-pipeline", {"mode": "strict"})
+
+
 # TC-REGISTRY-007A-1C
 # 功能说明: 验证内置加载后 hoist-dma-alias-ops 通过 registry 返回 canonical ModulePass。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_hoist_dma_alias_ops_pass
@@ -669,6 +690,11 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
             importlib.import_module("kernel_gen.passes.memory.multi_buffer").MultiBufferPass,
         ),
         (
+            "kernel_gen.passes.schedule.loop_soft_pipeline",
+            "LoopSoftPipelinePass",
+            importlib.import_module("kernel_gen.passes.schedule.loop_soft_pipeline").LoopSoftPipelinePass,
+        ),
+        (
             "kernel_gen.passes",
             "MultiBufferAnalysisPass",
             importlib.import_module("kernel_gen.passes.memory.multi_buffer").MultiBufferAnalysisPass,
@@ -717,6 +743,10 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     assert not hasattr(lowering_module, "BufferResultsToOutParamsPass")
     assert not hasattr(lowering_module, "LowerDmaMemoryHierarchyPass")
+    passes_module = importlib.import_module("kernel_gen.passes")
+    schedule_module = importlib.import_module("kernel_gen.passes.schedule")
+    assert not hasattr(passes_module, "LoopSoftPipelinePass")
+    assert not hasattr(schedule_module, "LoopSoftPipelinePass")
 
 
 # TC-REGISTRY-007A-2C
@@ -1562,6 +1592,7 @@ def test_load_builtin_passes_is_idempotent() -> None:
     assert "multi-buffer" in list_registered_passes()
     assert "arch-parallelize" in list_registered_passes()
     assert "producer-consumer-analysis" in list_registered_passes()
+    assert "loop-soft-pipeline" in list_registered_passes()
     assert "hoist-dma-alias-ops" in list_registered_passes()
     assert "dma-alias-to-reinterpret" in list_registered_passes()
     assert "symbol-hoist-pipeline" in list_registered_passes()

@@ -3,7 +3,7 @@
 ## 功能简介
 
 - `ProducerConsumerAnalysisPass` 是独立公开 `ModulePass`，registry 名称固定为 `producer-consumer-analysis`。
-- pass 基于 xDSL 公开 `MemoryEffect` 读取 memory `ALLOC/WRITE/READ/FREE` 语义，并用当前 pass 内置 alias 规则标注普通或控制流分类 event 简单整数列表属性。
+- pass 基于 xDSL 公开 `MemoryEffect` 读取 memory `ALLOC/WRITE/READ/FREE` 语义，并用当前 pass 内置 alias / ring cursor 规则标注普通、控制流分类或 ring-aware event 简单整数列表属性。
 - pass 只做 IR 分析标注，不生成 `arch.wait`、`arch.sign`、runtime event、double buffer overlap、ring buffer 或 core 分配逻辑。
 
 ## API 列表
@@ -26,6 +26,7 @@
 - `spec/dialect/dma.md`：定义 `dma.alloc/free/copy/load/store/slice/deslice/view/reshape/subview/reinterpret` 等 op 的公开 effect 与 alias 语义。
 - `spec/dialect/kernel.md`：定义 kernel op 对 out/input memory 的公开 read/write effect。
 - `spec/pass/registry.md`：承载 registry 名称和 `fold` 通用 option。
+- `spec/pass/loop_soft_pipeline.md`：定义 ring-backed soft-pipeline 改写输出结构。
 - `spec/pass/pipeline/npu_demo_lowering.md`：承载默认 pipeline 接入位置。
 
 ## 目标
@@ -33,6 +34,7 @@
 - 为后续同步 / pipeline 编排提供稳定的生产消费 event 标注资产。
 - 将 `productor` / `consumer` 标注从专题脚本迁移为当前仓库通用 pass。
 - 让同一个 producer value 到 downstream meaningful consumers 的关系可以通过 IR attr 直接检查。
+- 让 `loop-soft-pipeline` 生成的多 tile ring-backed current/advance steady 结构可以用 `loop_first` / `loop_carried` / `after_loop` attr 直接表达跨迭代生产消费关系。
 
 ## 额外补充
 
@@ -41,7 +43,7 @@
 - 当前文件只公开 `ProducerConsumerAnalysisPass` 与 registry pass name，不公开 alias table、event allocator、event list attr 或内部 helper。
 - 当前实现允许在 `kernel_gen/passes/producer_consumer_analysis.py` 当前文件内定义私有 event list attr，用于打印裸 `[0]` / `[0, 1]` 文本；该 attr 不得作为公开 dialect attribute 注册。
 - 不做包根 `kernel_gen.passes.ProducerConsumerAnalysisPass` re-export；如需包根公开入口，必须另行用户确认。
-- pass rerun 前必须校验并清理旧 `productor` / `consumer` 与控制流分类 attr；合法旧形态包括本 pass 私有 attr 和 parser 读回的整数 `ArrayAttr`，非法或负数 event id 必须失败。
+- pass rerun 前必须校验并清理旧 `productor` / `consumer`、控制流分类 attr 与 ring-aware 分类 attr；合法旧形态包括本 pass 私有 attr 和 parser 读回的整数 `ArrayAttr`，非法或负数 event id 必须失败。
 - `FREE` 第一阶段不参与标注。
 - 没有 downstream meaningful consumer 的 producer 不写 `productor`。
 - 找不到 producer 的 consumer 不写 `consumer`，也不创建虚拟 producer。
@@ -56,7 +58,10 @@
   - `after_if_productor` / `after_if_consumer`
   - `loop_body_productor` / `loop_body_consumer`
   - `after_loop_productor` / `after_loop_consumer`
-- 同一 producer -> consumer edge 只能写一种 event 对：普通 edge 写 `productor` / `consumer`，控制流 edge 写对应分类 attr，且不得同时叠写主 `productor` / `consumer`。
+- ring-aware 分类 attr：
+  - `loop_first_productor` / `loop_first_consumer`：loop 前 preload 写入 ring current slot，并被 steady loop 第一次 matmul 读取。
+  - `loop_carried_productor` / `loop_carried_consumer`：loop body 中 `dma.advance_ring` 后的 preload 写入下一 ring current slot，并被后续迭代读取。
+- 同一 producer -> consumer edge 只能写一种 event 对：普通 edge 写 `productor` / `consumer`，控制流或 ring-aware edge 写对应分类 attr，且不得同时叠写主 `productor` / `consumer`。
 - event id 在每个 `func.func` 内从 `0` 开始，按 pass 遍历顺序递增。
 - 文本必须为简单整数列表，例如 `productor = [0]`、`consumer = [0, 1]`。
 - 不得输出 `#builtin.int<...>`、`[0 : i64]` 或 `array<i64: ...>` 作为本 pass 公开 event attr 文本。
@@ -74,6 +79,20 @@
 | `dma.subview(source) -> result` | `result` alias `source`；不生产、不消费。 |
 | `dma.reinterpret(source) -> result` | `result` alias `source`；不生产、不消费。 |
 | `dma.deslice(target, source, ...)` | 通过 effect 消费 `source`、生产 `target`；op 本身不产生 result。 |
+| `dma.current_ring(ring) -> result` | `result` 是 ring cursor slot root；op 本身不写 producer/consumer attr。 |
+| `dma.advance_ring(ring)` | cursor advance boundary；op 本身不写 producer/consumer attr。 |
+
+### Ring-aware current/advance 合同
+
+- ring-aware 分析只补充 `symbol.for` 直接 body 周围可证明的 ring cursor 关系。
+- `dma.current_ring` result 及其 `dma.reinterpret` alias 链归属同一个 ring root。
+- 对同一 ring：
+  - loop 前最后一个 `WRITE` 与 loop body 首个 `dma.advance_ring` 前的首个 `READ` 形成 `loop_first_productor` / `loop_first_consumer`。
+  - loop body 首个 `dma.advance_ring` 后的首个 `WRITE` 与该 advance 前的首个 `READ` 形成 `loop_carried_productor` / `loop_carried_consumer`。
+  - loop body 首个 `dma.advance_ring` 后的首个 `WRITE` 与 loop 后首个 `READ` 形成 `after_loop_productor` / `after_loop_consumer`。
+- `loop-soft-pipeline` 的 static single-tile 退化结果没有 steady `symbol.for`，仅有 prologue preload 与 epilogue matmul；该形态使用普通 `productor` / `consumer`，不得生成 `loop_first` / `loop_carried` / `after_loop` attr。
+- `dma.advance_ring` 只提供 cursor boundary，不参与 `MemoryEffect` 生产消费标注，输出不得在该 op 上携带 `productor` / `consumer` 或分类 attr。
+- ring-aware event id 继续使用同一 `func.func` 内的全局递增 event id 序列，不单独重置。
 
 ## API详细说明
 
@@ -134,10 +153,11 @@ ProducerConsumerAnalysisPass().apply(ctx, module)
   - `scf.if` 中 if 前 producer 被 then / else 互斥分支消费时共享同一个 event。
   - `scf.if` 同一分支内部的 producer 到多个 downstream consumer 仍按同一路径 fanout 处理，每个 consumer 分配独立 event。
   - `scf.if` 前 producer 进入同一分支内多个 downstream consumer 时也按同一路径 fanout 处理；只允许 then / else 互斥分支的同序 consumer 共享 event。
-  - 写入 `if_branch_*`、`after_if_*`、`loop_body_*` 或 `after_loop_*` 的 edge 不得同时写主 `productor` / `consumer`。
+  - 写入 `if_branch_*`、`after_if_*`、`loop_body_*`、`loop_first_*`、`loop_carried_*` 或 `after_loop_*` 的 edge 不得同时写主 `productor` / `consumer`。
   - 同一 `scf.if` branch 或同一 `symbol.for` body block 内的普通顺序 edge 仍写主 `productor` / `consumer`，不得误写 `if_branch_*` 或 `loop_body_*`。
   - then / else 都生产同一个 memory value 且 if 后 consumer 使用该 value 时，两个 branch producer 分别获得 event，if 后 consumer 记录两个 event。
-  - `symbol.for` 第一阶段只支持 loop 前 producer 到 body consumer、body 内 producer 到 body consumer、body producer 到 loop 后 static consumer 的静态分类；不承诺 loop-carried、zero-trip 或跨迭代 runtime 精确语义。
+  - 普通 `symbol.for` 第一阶段支持 loop 前 producer 到 body consumer、body 内 producer 到 body consumer、body producer 到 loop 后 static consumer 的静态分类；ring-backed current/advance 结构额外支持本文件 `Ring-aware current/advance 合同` 定义的 loop-first、loop-carried 与 after-loop 分类。
+  - zero-trip runtime 精确语义不由本 pass 承诺；上游 `loop-soft-pipeline` 对静态 zero-trip 保持 no-op。
 
 ## 测试
 
@@ -150,6 +170,8 @@ ProducerConsumerAnalysisPass().apply(ctx, module)
 - 验证 alias 规则与 `dma.deslice` 读写/alias 组合。
 - 验证 fanout、alloc result、重复 read 去重。
 - 验证 `scf.if` 与 `symbol.for` 控制流分类 attr。
+- 验证 ring-backed soft-pipeline 的 `loop_first` / `loop_carried` / `after_loop` 分类 attr。
+- 验证 single-tile prologue/epilogue 退化形态只写普通 `productor` / `consumer`。
 - 验证 registry 名称、`fold` 通用 option 和未知 option 失败。
 - 验证 attr 文本为简单整数列表。
 
@@ -166,6 +188,8 @@ ProducerConsumerAnalysisPass().apply(ctx, module)
 | TC-PRODUCER-CONSUMER-007 | control-flow | `symbol.for` loop body / after-loop edge | 准备 loop 前、loop body、loop 后 consumer IR。 | 运行 pass。 | 跨入/跨出 loop 的 edge 只写 `loop_body_*` / `after_loop_*`，同一 loop body block 内普通顺序 edge 只写主 attr。 | `test_producer_consumer_analysis_symbol_for_body_and_after_loop_edges` |
 | TC-PRODUCER-CONSUMER-008 | 异常 | 非法旧 event attr / 未知 option | 准备负数 attr 或未知 option。 | 运行 pass / from_options。 | `KernelCodeError` 失败。 | `test_producer_consumer_analysis_rejects_invalid_event_attr_and_unknown_option` |
 | TC-PRODUCER-CONSUMER-009 | registry | 公开 pass name | 调用 `load_builtin_passes()`。 | `build_registered_pass("producer-consumer-analysis", {"fold": "false"})`。 | 返回 `ProducerConsumerAnalysisPass(fold=False)`。 | `test_producer_consumer_analysis_registry_entry_and_fold_option` |
+| TC-PRODUCER-CONSUMER-010 | ring-aware | soft-pipeline current/advance | 准备 loop 前 preload、loop body matmul/advance/preload next、loop 后 epilogue matmul IR。 | 运行 pass。 | prologue copy 标 `loop_first_productor`，loop matmul 标 `loop_first_consumer` 与 `loop_carried_consumer`，body copy 标 `loop_carried_productor` 与 `after_loop_productor`，advance op 不带 event attr。 | `test_producer_consumer_analysis_ring_soft_pipeline_events` |
+| TC-PRODUCER-CONSUMER-011 | ring-aware fallback | single-tile prologue/epilogue | 准备无 steady loop 的 prologue copy 与 epilogue matmul IR。 | 运行 pass。 | prologue copy 与 epilogue matmul 使用主 `productor` / `consumer`，不写 `loop_first`、`loop_carried` 或 `after_loop`。 | `test_producer_consumer_analysis_single_tile_prologue_epilogue_uses_main_attrs` |
 
 ## 合同验收
 

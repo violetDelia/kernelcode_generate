@@ -4,6 +4,7 @@
 功能说明:
 - 提供 `producer-consumer-analysis` pass，基于公开 `MemoryEffect` 标注生产 / 消费 event。
 - 使用当前文件内 alias 规则处理 `dma.view`、`dma.reshape`、`dma.subview`、`dma.reinterpret` 与 `dma.deslice`。
+- 对 ring soft-pipeline 形态补充 `loop_first_*`、`loop_carried_*` 与 `after_loop_*` 标注。
 - 同一 producer -> consumer edge 只写普通 event 对或一个控制流 event 对，不生成 wait/sign 或 runtime 同步 op。
 
 API 列表:
@@ -38,7 +39,7 @@ from xdsl.printer import Printer
 from xdsl.traits import MemoryEffectKind, get_effects
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
-from kernel_gen.dialect.dma import DmaReinterpretOp, DmaReshapeOp, DmaSubviewOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAdvanceRingOp, DmaCurrentRingOp, DmaReinterpretOp, DmaReshapeOp, DmaSubviewOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp
 from kernel_gen.passes.common import ensure_builtin_module
@@ -55,6 +56,10 @@ _EVENT_ATTR_NAMES = (
     "loop_body_consumer",
     "after_loop_productor",
     "after_loop_consumer",
+    "loop_first_productor",
+    "loop_first_consumer",
+    "loop_carried_productor",
+    "loop_carried_consumer",
 )
 
 _ControlOp: TypeAlias = scf.IfOp | SymbolForOp
@@ -174,6 +179,228 @@ class _ConsumerEdge:
 
     consumer_op: Operation
     relation: _EdgeRelation
+
+
+@dataclass(frozen=True)
+class _RingEventSpec:
+    """ring-aware producer/consumer event 候选。
+
+    功能说明:
+    - 绑定 producer/consumer op 与最终写回的 ring-aware attr 名。
+    - 由调用方按 op 顺序分配稳定 event id。
+
+    使用示例:
+    - spec = _RingEventSpec(producer_op, consumer_op, "loop_first_productor", "loop_first_consumer", 1, 2)
+    """
+
+    producer_op: Operation
+    consumer_op: Operation
+    producer_attr: str
+    consumer_attr: str
+    producer_order: int
+    consumer_order: int
+
+
+class _RingAwareAnalysis:
+    """ring-aware producer-consumer 事件补充逻辑容器。
+
+    功能说明:
+    - 基于 `dma.current_ring` / `dma.advance_ring` 的 cursor 语义补充 loop_first / loop_carried / after_loop 标注。
+    - 保留现有 SSA 依赖分析的普通 event 输出，不暴露共享 cursor API。
+
+    使用示例:
+    - next_event_id = _RingAwareAnalysis.add_ring_events(...)
+    """
+
+    @staticmethod
+    def ring_roots_by_op(ops: tuple[Operation, ...], alias_roots: dict[SSAValue, SSAValue]) -> dict[SSAValue, SSAValue]:
+        """构建 ring root -> ring operand 映射。
+
+        功能说明:
+        - `dma.current_ring` 的 result root 代表一个 ring cursor slot root。
+        - `dma.reinterpret` alias 链会把后续写入/读取归一到同一 root。
+
+        使用示例:
+        - ring_roots = _RingAwareAnalysis.ring_roots_by_op(ops, alias_roots)
+        """
+
+        ring_roots: dict[SSAValue, SSAValue] = {}
+        for op in ops:
+            if not isinstance(op, DmaCurrentRingOp):
+                continue
+            root = _alias_root(SSAValue.get(op.result), alias_roots)
+            ring_roots[root] = SSAValue.get(op.ring)
+        return ring_roots
+
+    @staticmethod
+    def collect_accesses(
+        ops: tuple[Operation, ...],
+        alias_roots: dict[SSAValue, SSAValue],
+        ring_roots: dict[SSAValue, SSAValue],
+        kind: MemoryEffectKind,
+    ) -> dict[SSAValue, list[tuple[int, Operation]]]:
+        """按 ring 收集 READ/WRITE 访问。
+
+        功能说明:
+        - 只记录能归一到 ring root 的 `!nn.memory` effect。
+        - 每个 `op`/`ring` 组合只记一次，避免同一 op 多个 effect value 重复污染事件顺序。
+
+        使用示例:
+        - writes = _RingAwareAnalysis.collect_accesses(loop_ops, alias_roots, ring_roots, MemoryEffectKind.WRITE)
+        """
+
+        accesses: dict[SSAValue, list[tuple[int, Operation]]] = defaultdict(list)
+        seen: set[tuple[Operation, SSAValue]] = set()
+        for op_order, op in enumerate(ops):
+            for value in _effect_values(op, kind):
+                root = _alias_root(value, alias_roots)
+                ring = ring_roots.get(root)
+                if ring is None:
+                    continue
+                key = (op, ring)
+                if key in seen:
+                    continue
+                seen.add(key)
+                accesses[ring].append((op_order, op))
+        return accesses
+
+    @staticmethod
+    def add_ring_events(
+        ops: tuple[Operation, ...],
+        alias_roots: dict[SSAValue, SSAValue],
+        event_attrs: dict[Operation, dict[str, list[int]]],
+        next_event_id: int,
+    ) -> int:
+        """补充 ring-aware event 标注。
+
+        功能说明:
+        - 对每个 `symbol.for` 单独分析 prologue / loop body / epilogue 的 ring cursor 事实。
+        - 生成 `loop_first_*`、`loop_carried_*`、`after_loop_*` 三类补充事件。
+
+        使用示例:
+        - next_event_id = _RingAwareAnalysis.add_ring_events(ops, alias_roots, event_attrs, 0)
+        """
+
+        ring_specs: list[_RingEventSpec] = []
+        ring_roots = _RingAwareAnalysis.ring_roots_by_op(ops, alias_roots)
+        op_order = {op: index for index, op in enumerate(ops)}
+        for loop in (op for op in ops if isinstance(op, SymbolForOp)):
+            parent_block = loop.parent_block()
+            blocks = tuple(loop.body.blocks)
+            if parent_block is None or len(blocks) != 1:
+                continue
+            body_block = blocks[0]
+            before_ops = tuple(op for op in parent_block.ops if op is not loop and op.is_before_in_block(loop))
+            after_ops = tuple(op for op in parent_block.ops if op is not loop and loop.is_before_in_block(op))
+            loop_ops = tuple(body_block.ops)
+            if not loop_ops:
+                continue
+            before_writes = _RingAwareAnalysis.collect_accesses(before_ops, alias_roots, ring_roots, MemoryEffectKind.WRITE)
+            loop_reads = _RingAwareAnalysis.collect_accesses(loop_ops, alias_roots, ring_roots, MemoryEffectKind.READ)
+            loop_writes = _RingAwareAnalysis.collect_accesses(loop_ops, alias_roots, ring_roots, MemoryEffectKind.WRITE)
+            after_reads = _RingAwareAnalysis.collect_accesses(after_ops, alias_roots, ring_roots, MemoryEffectKind.READ)
+            advance_index_by_ring: dict[SSAValue, int] = {}
+            for index, op in enumerate(loop_ops):
+                if isinstance(op, DmaAdvanceRingOp):
+                    ring = SSAValue.get(op.ring)
+                    advance_index_by_ring.setdefault(ring, index)
+            for ring, advance_index in advance_index_by_ring.items():
+                prologue_write = _RingAwareAnalysis.latest_access_before(tuple(before_writes.get(ring, ())))
+                loop_read = _RingAwareAnalysis.first_access_before(tuple(loop_reads.get(ring, ())), advance_index)
+                loop_write = _RingAwareAnalysis.first_access_after(tuple(loop_writes.get(ring, ())), advance_index)
+                after_read = _RingAwareAnalysis.first_access_after(tuple(after_reads.get(ring, ())), -1)
+                if prologue_write is not None and loop_read is not None:
+                    ring_specs.append(
+                        _RingEventSpec(
+                            prologue_write[1],
+                            loop_read[1],
+                            "loop_first_productor",
+                            "loop_first_consumer",
+                            op_order.get(prologue_write[1], prologue_write[0]),
+                            op_order.get(loop_read[1], loop_read[0]),
+                        )
+                    )
+                if loop_write is not None and loop_read is not None:
+                    ring_specs.append(
+                        _RingEventSpec(
+                            loop_write[1],
+                            loop_read[1],
+                            "loop_carried_productor",
+                            "loop_carried_consumer",
+                            op_order.get(loop_write[1], loop_write[0]),
+                            op_order.get(loop_read[1], loop_read[0]),
+                        )
+                    )
+                if loop_write is not None and after_read is not None:
+                    ring_specs.append(
+                        _RingEventSpec(
+                            loop_write[1],
+                            after_read[1],
+                            "after_loop_productor",
+                            "after_loop_consumer",
+                            op_order.get(loop_write[1], loop_write[0]),
+                            op_order.get(after_read[1], after_read[0]),
+                        )
+                    )
+        for spec in sorted(ring_specs, key=lambda item: (item.producer_order, item.consumer_order, item.producer_attr, item.consumer_attr)):
+            event_id = next_event_id
+            next_event_id += 1
+            _append_event(event_attrs, spec.producer_op, spec.producer_attr, event_id)
+            _append_event(event_attrs, spec.consumer_op, spec.consumer_attr, event_id)
+        return next_event_id
+
+    @staticmethod
+    def latest_access_before(accesses: tuple[tuple[int, Operation], ...]) -> tuple[int, Operation] | None:
+        """返回一组访问中的最后一个元素。
+
+        功能说明:
+        - 用于 prologue producer 选择 loop 前最后一次写入。
+
+        使用示例:
+        - access = _RingAwareAnalysis.latest_access_before(accesses)
+        """
+
+        if not accesses:
+            return None
+        return accesses[-1]
+
+    @staticmethod
+    def first_access_before(
+        accesses: tuple[tuple[int, Operation], ...],
+        upper_bound: int,
+    ) -> tuple[int, Operation] | None:
+        """返回小于上界的第一个访问。
+
+        功能说明:
+        - 用于 loop body 内 first-read 的 cursor 选择。
+
+        使用示例:
+        - access = _RingAwareAnalysis.first_access_before(accesses, advance_index)
+        """
+
+        for access in accesses:
+            if access[0] < upper_bound:
+                return access
+        return None
+
+    @staticmethod
+    def first_access_after(
+        accesses: tuple[tuple[int, Operation], ...],
+        lower_bound: int,
+    ) -> tuple[int, Operation] | None:
+        """返回大于下界的第一个访问。
+
+        功能说明:
+        - 用于 loop body 内 advance 之后的 carried producer 与 after-loop consumer 选择。
+
+        使用示例:
+        - access = _RingAwareAnalysis.first_access_after(accesses, advance_index)
+        """
+
+        for access in accesses:
+            if access[0] > lower_bound:
+                return access
+        return None
 
 
 def _raise_error(message: str) -> None:
@@ -616,6 +843,7 @@ class ProducerConsumerAnalysisPass(Pass):
     功能说明:
     - 固定公开 pass name 为 `producer-consumer-analysis`。
     - 基于公开 `MemoryEffect` 与当前文件内 alias 规则标注 producer/consumer event。
+    - 基于 `dma.current_ring` / `dma.advance_ring` cursor 事实补充 ring-aware loop event。
     - 第一阶段不接受 pass 专属 options。
 
     使用示例:
@@ -664,41 +892,6 @@ class ProducerConsumerAnalysisPass(Pass):
             _raise_error(f"unknown option: {unknown}")
         return cls()
 
-    def _apply_to_func(self: "ProducerConsumerAnalysisPass", func_op: func.FuncOp) -> None:
-        """分析单个函数。
-
-        功能说明:
-        - 每个 `func.func` 内 event id 从 0 开始分配。
-        - 先清理旧 event attrs，再根据当前 IR 重新标注。
-
-        使用示例:
-        - pass_obj._apply_to_func(func_op)
-        """
-
-        ops = _walk_func_ops(func_op)
-        for op in ops:
-            _clear_event_attrs(op)
-        alias_roots = _build_alias_roots(ops)
-        alias_groups = _build_alias_groups(ops, alias_roots)
-        read_roots = _read_roots_by_op(ops, alias_roots)
-        op_order = {op: index for index, op in enumerate(ops)}
-        event_attrs: dict[Operation, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
-        next_event_id = 0
-        for candidate in _producer_candidates(ops, alias_roots):
-            edges = _collect_consumer_edges(candidate, alias_groups, read_roots, op_order)
-            ordered_groups = sorted(
-                _group_consumer_edges(edges),
-                key=lambda group: min(op_order.get(edge.consumer_op, 0) for edge in group),
-            )
-            for group in ordered_groups:
-                event_id = next_event_id
-                next_event_id += 1
-                producer_attr, consumer_attr = _relation_attr_names(group[0].relation)
-                _append_event(event_attrs, candidate.op, producer_attr, event_id)
-                for edge in group:
-                    _append_event(event_attrs, edge.consumer_op, consumer_attr, event_id)
-        _apply_event_attrs(ops, event_attrs)
-
     def apply(self: "ProducerConsumerAnalysisPass", ctx: Context, module: ModuleOp) -> None:
         """执行生产消费分析。
 
@@ -712,9 +905,34 @@ class ProducerConsumerAnalysisPass(Pass):
 
         _ = ctx
         target = ensure_builtin_module(module)
-        for op in target.ops:
-            if isinstance(op, func.FuncOp) and not op.is_declaration:
-                self._apply_to_func(op)
+        for func_op in target.ops:
+            if not isinstance(func_op, func.FuncOp) or func_op.is_declaration:
+                continue
+            ops = _walk_func_ops(func_op)
+            for op in ops:
+                _clear_event_attrs(op)
+            alias_roots = _build_alias_roots(ops)
+            alias_groups = _build_alias_groups(ops, alias_roots)
+            read_roots = _read_roots_by_op(ops, alias_roots)
+            op_order = {op: index for index, op in enumerate(ops)}
+            event_attrs: dict[Operation, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
+            next_event_id = 0
+            for candidate in _producer_candidates(ops, alias_roots):
+                edges = _collect_consumer_edges(candidate, alias_groups, read_roots, op_order)
+                ordered_groups = sorted(
+                    _group_consumer_edges(edges),
+                    key=lambda group: min(op_order.get(edge.consumer_op, 0) for edge in group),
+                )
+                for group in ordered_groups:
+                    event_id = next_event_id
+                    next_event_id += 1
+                    producer_attr, consumer_attr = _relation_attr_names(group[0].relation)
+                    _append_event(event_attrs, candidate.op, producer_attr, event_id)
+                    for edge in group:
+                        _append_event(event_attrs, edge.consumer_op, consumer_attr, event_id)
+            next_event_id = _RingAwareAnalysis.add_ring_events(ops, alias_roots, event_attrs, next_event_id)
+            _ = next_event_id
+            _apply_event_attrs(ops, event_attrs)
 
 
 __all__ = ["ProducerConsumerAnalysisPass"]

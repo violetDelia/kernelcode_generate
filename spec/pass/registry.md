@@ -36,6 +36,8 @@
   - [`spec/pass/pipeline/npu_demo_lowering.md`](../../spec/pass/pipeline/npu_demo_lowering.md)
 - standalone arch pass：
   - [`spec/pass/arch/arch_parallelize.md`](../../spec/pass/arch/arch_parallelize.md)
+- schedule pass：
+  - [`spec/pass/loop_soft_pipeline.md`](../../spec/pass/loop_soft_pipeline.md)
 
 ## 术语
 
@@ -64,7 +66,8 @@
 - 当前内置 pipeline 至少包含 `default-lowering` 与 `npu-demo-lowering` 两个公开 builder。
 - `hoist-dma-alias-ops` 作为公开 pass name 进入内置注册表；其第一阶段只接受通用 `fold`，不接受专属 option。
 - `symbol-hoist-pipeline` 作为公开 pass name 进入内置注册表；其第一阶段只接受通用 `fold`，不接受专属 option。
-- `npu-demo-lowering` 公开 builder 支持 `options={"target": "npu_demo"}`；其固定顺序由 `spec/pass/pipeline/npu_demo_lowering.md` 约束，并包含三次 `MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=False)`、三次 `SymbolHoistPipelinePass`、`MemoryPoolPass(rewrite=True, alignment=1024)` 与公开 `arch-parallelize` 阶段；`only-kernel` / `only_kernel` 之类选项必须显式失败，不能把 host wrapper 与 device body 的 outline 流程裁成仅 kernel 形态。
+- `loop-soft-pipeline` 作为公开 pass name 进入内置注册表；其第一阶段只接受通用 `fold`，不接受专属 option。
+- `npu-demo-lowering` 公开 builder 支持 `options={"target": "npu_demo"}`；其固定顺序由 `spec/pass/pipeline/npu_demo_lowering.md` 约束，并包含三次 `MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=True)`、三次 `SymbolHoistPipelinePass`、`LoopSoftPipelinePass`、`MemoryPoolPass(rewrite=True, alignment=1024)` 与公开 `arch-parallelize` 阶段；`only-kernel` / `only_kernel` 之类选项必须显式失败，不能把 host wrapper 与 device body 的 outline 流程裁成仅 kernel 形态。
 - registry 只负责注册与查询，不承载具体 pipeline builder 实现。
 - 重复注册同名 pass 或 pipeline 必须立即失败，不得覆盖旧项。
 - 为便于工具与测试编写最小用例，仓库内置 pass 至少应包含：
@@ -80,7 +83,8 @@
   - `multi-buffer-analysis`：把可证明的 staging alloc/free 生命周期标记为三项 `multi_buffer.*` analysis 属性。
   - `multi-buffer-apply`：消费三项 `multi_buffer.*` 属性，按 fixed/auto 与 alignment 物化 DMA ring。
   - `multi-buffer`：兼容 facade，等价于 `multi-buffer-analysis -> multi-buffer-apply`。
-  - `producer-consumer-analysis`：基于公开 `MemoryEffect` 与 pass 内置 alias 规则标注普通或控制流分类简单整数列表 event attrs。
+  - `loop-soft-pipeline`：把可证明 ring-backed matmul preload loop 改写为 prologue / steady loop / epilogue。
+  - `producer-consumer-analysis`：基于公开 `MemoryEffect` 与 pass 内置 alias / ring cursor 规则标注普通、控制流分类或 ring-aware 简单整数列表 event attrs。
   - `kernel-pattern-attach`：在唯一 `entry_point` host 中生成 `tuner.select` / `tuner.launch` pattern dispatcher 与两个 pattern 函数。
   - `transform-apply`：消费 pattern 函数上的 `kernel.transform_pipeline`，在函数级 clone 上执行 pass / pipeline 字符串并移除该 attr。
   - `kernel-aggregate`：在 `matmul-acc=true` 时把可证明的 `kernel.matmul(tmp)+kernel.binary_elewise(out,out,tmp)` 聚合为 `kernel.matmul_fusion`。
@@ -94,6 +98,7 @@
 - `multi-buffer-analysis` 接受 pass 专属 `options={"memory-stage": "<positive-int>", "target": "<target-name>"}`；`fold` 仍由 registry 通用 option 处理。`memory-stage` 非整数、`<= 0`、`target` 为空或未知 option 必须由 `MultiBufferAnalysisPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'multi-buffer-analysis' option error: <原因>`。
 - `multi-buffer-apply` 接受 pass 专属 `options={"target": "<target-name>", "alignment": "<non-negative-int>"}`；`fold` 仍由 registry 通用 option 处理。`target` 为空、`alignment` 负数 / 非整数或未知 option 必须由 `MultiBufferApplyPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'multi-buffer-apply' option error: <原因>`。
 - `multi-buffer` 接受 pass 专属 `options={"memory-stage": "<positive-int>", "target": "<target-name>", "alignment": "<non-negative-int>"}`；`fold` 仍由 registry 通用 option 处理。该 pass 是兼容 facade，等价于 analysis 后接 apply。非法 `memory-stage`、空 `target`、非法 `alignment` 或未知 option 必须由 `MultiBufferPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'multi-buffer' option error: <原因>`；直接调用任一 multi-buffer pass 的 `from_options({"fold": "false"})` 必须失败，不能把通用 `fold` 兼容进 pass 专属 options。
+- `loop-soft-pipeline` 第一阶段不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `LoopSoftPipelinePass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'loop-soft-pipeline' option error: <原因>`。
 - `producer-consumer-analysis` 第一阶段不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `ProducerConsumerAnalysisPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'producer-consumer-analysis' option error: <原因>`。
 - `kernel-pattern-attach` 第一阶段不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `KernelPatternAttachPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'kernel-pattern-attach' option error: <原因>`。
 - `transform-apply` 第一阶段不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `TransformApplyPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'transform-apply' option error: <原因>`。
@@ -122,6 +127,7 @@
   - `kernel_gen.passes.hoist.dma_alias_ops`
   - `kernel_gen.passes.hoist.symbol_hoist_pipeline`
   - `kernel_gen.passes.memory.multi_buffer`
+  - `kernel_gen.passes.schedule.loop_soft_pipeline`
   - `kernel_gen.passes.tuning.outline_device_kernel`
   - `kernel_gen.passes.hoist.symbol_buffer_hoist`
   - `kernel_gen.passes.hoist.symbol_loop_hoist`
@@ -170,6 +176,7 @@
 - `kernel_gen/passes/template_name/` 是当前真实实现目录；外部 caller 只能使用该目录下的公开模块或 `kernel_gen.passes.TemplateNameInferPass` 包根 re-export。
 - pipeline builder 的 canonical public path 固定为 `kernel_gen.pipeline`；旧 `kernel_gen.passes.pipeline` 及其子模块必须稳定失败。
 - 当前 arch parallelize 专题的 canonical public path 固定为 `kernel_gen.passes.arch.arch_parallelize`；`kernel_gen.passes.ArchParallelizePass` 作为包根 re-export 保持可用；registry 名称固定为 `arch-parallelize`。
+- 当前 loop soft pipeline 专题的 canonical public path 固定为 `kernel_gen.passes.schedule.loop_soft_pipeline`；不得新增 `kernel_gen.passes.LoopSoftPipelinePass` 或 `kernel_gen.passes.schedule.LoopSoftPipelinePass` package re-export；registry 名称固定为 `loop-soft-pipeline`。
 - 本轮 rehome 的旧 direct path 继续作为薄 compat shim 保持可导入，shim 只 re-export 公开对象，不承载 pass 业务逻辑：
   - `kernel_gen.passes.arch_parallelize`
   - `kernel_gen.passes.arch_parallelize.arch_parallelize`
@@ -596,6 +603,7 @@ names = list_registered_passes()
 | TC-PASS-REGISTRY-023C | 公开入口 | arch-parallelize pass registry 名称 | 加载内置 pass 并提供 `target=npu_demo`、`parallel_level=block` option。 | 运行 `test_build_registered_arch_parallelize_pass`。 | registry 构造 `ArchParallelizePass`，且 `list_registered_passes()` 包含 `arch-parallelize`。 | `test_build_registered_arch_parallelize_pass` |
 | TC-PASS-REGISTRY-023D | 公开入口 | multi-buffer analysis/apply/facade options | 加载内置 pass，验证 `multi-buffer-analysis`、`multi-buffer-apply`、`multi-buffer` 默认值，并提供 `memory-stage=4`、`target=npu_demo`、`alignment=0` 和 registry 通用 `fold=false` option。 | 运行 `test_build_registered_multi_buffer_options`。 | registry 构造三个公开 pass；analysis 具备 `memory_stage/target`，apply 具备 `target/alignment`，facade 具备三者，通用 `fold` 写回实例。 | `test_build_registered_multi_buffer_options` |
 | TC-PASS-REGISTRY-023E | 边界/异常 | multi-buffer options 非法值 | 准备未知 option、非整数/非正 `memory-stage`、空 `target`、非法 `alignment` 或 direct `from_options({"fold": "false"})`。 | 运行 `test_build_registered_multi_buffer_rejects_invalid_options`。 | direct from_options 与 registry 包装错误均按三个公开 pass 的公开错误语义失败。 | `test_build_registered_multi_buffer_rejects_invalid_options` |
+| TC-PASS-REGISTRY-023F | 公开入口 | loop-soft-pipeline registry 名称与 canonical path | 加载内置 pass。 | 运行 `test_build_registered_loop_soft_pipeline_pass`。 | registry 构造 `LoopSoftPipelinePass`，`list_registered_passes()` 包含 `loop-soft-pipeline`，canonical module path 可导入，package root 不新增 re-export。 | `test_build_registered_loop_soft_pipeline_pass` |
 | TC-PASS-REGISTRY-024 | 公开入口 | build registered attach arch information pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_attach_arch_information_pass`。 | 公开入口在“build registered attach arch information pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_attach_arch_information_pass` |
 | TC-PASS-REGISTRY-025 | 边界/异常 | registry old lowering paths fail fast | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_registry_old_lowering_paths_fail_fast`。 | “registry old lowering paths fail fast”场景按公开错误语义失败或被拒绝。 | `test_registry_old_lowering_paths_fail_fast` |
 | TC-PASS-REGISTRY-026 | 边界/异常 | registry retired analysis pass name fails fast | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_registry_retired_analysis_pass_name_fails_fast`。 | “registry retired analysis pass name fails fast”场景按公开错误语义失败或被拒绝。 | `test_registry_retired_analysis_pass_name_fails_fast` |

@@ -11,6 +11,8 @@
   registry 只解析通用 `fold`。
 - 内置 pass 包含 `producer-consumer-analysis`，其第一阶段不接受 pass 专属 option，
   registry 只解析通用 `fold`。
+- 内置 pass 包含 `loop-soft-pipeline`，其第一阶段不接受 pass 专属 option，
+  registry 只解析通用 `fold`。
 - 内置 pass 包含 `hoist-dma-alias-ops`，其第一阶段不接受 pass 专属 option，
   registry 只解析通用 `fold`。
 - 内置 pass 包含 `dma-alias-to-reinterpret`，用于把旧 DMA alias op 归一为 `dma.reinterpret`，
@@ -531,6 +533,7 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.memory.multi_buffer import MultiBufferAnalysisPass, MultiBufferApplyPass, MultiBufferPass
     from kernel_gen.passes.memory.memory_pool import MemoryPoolPass
     from kernel_gen.passes.memory.memory_plan import MemoryPlanPass
+    from kernel_gen.passes.schedule.loop_soft_pipeline import LoopSoftPipelinePass
     from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
     from kernel_gen.passes.tuning.outline_device_kernel import OutlineDeviceKernelPass
     from kernel_gen.passes.tile.analysis import TileAnalysisPass
@@ -567,6 +570,7 @@ def load_builtin_passes() -> None:
         SymbolHoistPipelinePass,
         MemoryPoolPass,
         MemoryPlanPass,
+        LoopSoftPipelinePass,
         TemplateNameInferPass,
         TransformApplyPass,
         ProducerConsumerAnalysisPass,

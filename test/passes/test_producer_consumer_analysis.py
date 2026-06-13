@@ -42,6 +42,18 @@ _GLOBAL_TYPE = (
     "!nn.memory<[#symbol.expr<4>, #symbol.expr<4>], "
     "[#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<global>>"
 )
+_TLM1_TYPE = (
+    "!nn.memory<[#symbol.expr<4>, #symbol.expr<4>], "
+    "[#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<tlm1>>"
+)
+_TLM2_TYPE = (
+    "!nn.memory<[#symbol.expr<4>, #symbol.expr<4>], "
+    "[#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<tlm2>>"
+)
+_POOL_TLM1_TYPE = "!nn.memory<[#symbol.expr<128>], [#symbol.expr<1>], i8, #nn.space<tlm1>>"
+_POOL_TLM2_TYPE = "!nn.memory<[#symbol.expr<128>], [#symbol.expr<1>], i8, #nn.space<tlm2>>"
+_TLM1_RING_TYPE = f"!dma.ring<{_TLM1_TYPE}>"
+_TLM2_RING_TYPE = f"!dma.ring<{_TLM2_TYPE}>"
 
 
 def _run_producer_consumer_analysis(module_text: str) -> str:
@@ -74,6 +86,100 @@ def _assert_line_matches(actual: str, op_name: str, pattern: str, *, occurrence:
     matched = [line for line in actual.splitlines() if f'"{op_name}"' in line]
     assert len(matched) >= occurrence, actual
     assert re.search(pattern, matched[occurrence - 1]), matched[occurrence - 1]
+
+
+def _ring_soft_pipeline_ir() -> str:
+    """构造 soft-pipeline 后的 ring producer/consumer 输入。
+
+    功能说明:
+    - prologue 写 A/B ring current slot。
+    - steady loop 开头读取 current slot，advance 后写 next slot。
+    - loop 后 epilogue 再读取 current slot。
+
+    使用示例:
+    - actual = _run_producer_consumer_analysis(_ring_soft_pipeline_ir())
+    """
+
+    return f"""builtin.module {{
+  func.func @ring_soft_pipeline(%src_a : {_LOCAL_TYPE}, %src_b : {_LOCAL_TYPE}, %acc : {_LOCAL_TYPE}) {{
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %c2 = symbol.const 2 : !symbol.int<#symbol.expr<2>>
+    %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %c8 = symbol.const 8 : !symbol.int<#symbol.expr<8>>
+    %c64 = symbol.const 64 : !symbol.int<#symbol.expr<64>>
+    %epilogue_acc = symbol.ne %c1, %c0 : !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<0>> -> i1
+    %tlm_a_pool = "dma.alloc"() <{{operandSegmentSizes = array<i32: 0>}}> : () -> {_POOL_TLM1_TYPE}
+    %tlm_b_pool = "dma.alloc"() <{{operandSegmentSizes = array<i32: 0>}}> : () -> {_POOL_TLM2_TYPE}
+    %tlm_a_ring = "dma.make_ring"(%tlm_a_pool, %c2, %c64) : ({_POOL_TLM1_TYPE}, !symbol.int<#symbol.expr<2>>, !symbol.int<#symbol.expr<64>>) -> {_TLM1_RING_TYPE}
+    %tlm_b_ring = "dma.make_ring"(%tlm_b_pool, %c2, %c64) : ({_POOL_TLM2_TYPE}, !symbol.int<#symbol.expr<2>>, !symbol.int<#symbol.expr<64>>) -> {_TLM2_RING_TYPE}
+    %tlm_a0_slot = "dma.current_ring"(%tlm_a_ring) : ({_TLM1_RING_TYPE}) -> {_TLM1_TYPE}
+    %tlm_a0 = "dma.reinterpret"(%tlm_a0_slot, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_TLM1_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_TLM1_TYPE}
+    %tlm_b0_slot = "dma.current_ring"(%tlm_b_ring) : ({_TLM2_RING_TYPE}) -> {_TLM2_TYPE}
+    %tlm_b0 = "dma.reinterpret"(%tlm_b0_slot, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_TLM2_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_TLM2_TYPE}
+    "dma.copy"(%tlm_a0, %src_a) : ({_TLM1_TYPE}, {_LOCAL_TYPE}) -> ()
+    "dma.copy"(%tlm_b0, %src_b) : ({_TLM2_TYPE}, {_LOCAL_TYPE}) -> ()
+    symbol.for %k = %c0 to %c8 step %c4 {{iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<8>, step = #symbol.expr<4>>}} {{
+      %tlm_a_cur_slot = "dma.current_ring"(%tlm_a_ring) : ({_TLM1_RING_TYPE}) -> {_TLM1_TYPE}
+      %tlm_a_cur = "dma.reinterpret"(%tlm_a_cur_slot, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_TLM1_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_TLM1_TYPE}
+      %tlm_b_cur_slot = "dma.current_ring"(%tlm_b_ring) : ({_TLM2_RING_TYPE}) -> {_TLM2_TYPE}
+      %tlm_b_cur = "dma.reinterpret"(%tlm_b_cur_slot, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_TLM2_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_TLM2_TYPE}
+      %acc_flag = symbol.ne %k, %c0 : !symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<8>, step = #symbol.expr<4>>, !symbol.int<#symbol.expr<0>> -> i1
+      "kernel.matmul"(%acc, %tlm_a_cur, %tlm_b_cur, %acc_flag) {{space = #nn.space<tsm>}} : ({_LOCAL_TYPE}, {_TLM1_TYPE}, {_TLM2_TYPE}, i1) -> ()
+      "dma.advance_ring"(%tlm_a_ring) : ({_TLM1_RING_TYPE}) -> {_TLM1_TYPE}
+      "dma.advance_ring"(%tlm_b_ring) : ({_TLM2_RING_TYPE}) -> {_TLM2_TYPE}
+      %tlm_a_next_slot = "dma.current_ring"(%tlm_a_ring) : ({_TLM1_RING_TYPE}) -> {_TLM1_TYPE}
+      %tlm_a_next = "dma.reinterpret"(%tlm_a_next_slot, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_TLM1_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_TLM1_TYPE}
+      %tlm_b_next_slot = "dma.current_ring"(%tlm_b_ring) : ({_TLM2_RING_TYPE}) -> {_TLM2_TYPE}
+      %tlm_b_next = "dma.reinterpret"(%tlm_b_next_slot, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_TLM2_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_TLM2_TYPE}
+      "dma.copy"(%tlm_a_next, %src_a) : ({_TLM1_TYPE}, {_LOCAL_TYPE}) -> ()
+      "dma.copy"(%tlm_b_next, %src_b) : ({_TLM2_TYPE}, {_LOCAL_TYPE}) -> ()
+    }}
+    %tlm_a_last_slot = "dma.current_ring"(%tlm_a_ring) : ({_TLM1_RING_TYPE}) -> {_TLM1_TYPE}
+    %tlm_a_last = "dma.reinterpret"(%tlm_a_last_slot, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_TLM1_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_TLM1_TYPE}
+    %tlm_b_last_slot = "dma.current_ring"(%tlm_b_ring) : ({_TLM2_RING_TYPE}) -> {_TLM2_TYPE}
+    %tlm_b_last = "dma.reinterpret"(%tlm_b_last_slot, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_TLM2_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_TLM2_TYPE}
+    "kernel.matmul"(%acc, %tlm_a_last, %tlm_b_last, %epilogue_acc) {{space = #nn.space<tsm>}} : ({_LOCAL_TYPE}, {_TLM1_TYPE}, {_TLM2_TYPE}, i1) -> ()
+    func.return
+  }}
+}}
+"""
+
+
+def _single_tile_prologue_epilogue_ir() -> str:
+    """构造 single-tile 退化后的 prologue / epilogue 输入。
+
+    功能说明:
+    - 无 steady `symbol.for`，只有 loop-soft-pipeline single-tile 输出应有的两条 preload copy。
+    - epilogue matmul 直接读取 prologue copy 写入的 A/B ring current slot。
+
+    使用示例:
+    - actual = _run_producer_consumer_analysis(_single_tile_prologue_epilogue_ir())
+    """
+
+    return f"""builtin.module {{
+  func.func @single_tile_ring_pipeline(%src_a : {_LOCAL_TYPE}, %src_b : {_LOCAL_TYPE}, %acc : {_LOCAL_TYPE}) {{
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %c2 = symbol.const 2 : !symbol.int<#symbol.expr<2>>
+    %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %c64 = symbol.const 64 : !symbol.int<#symbol.expr<64>>
+    %epilogue_acc = symbol.ne %c1, %c0 : !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<0>> -> i1
+    %tlm_a_pool = "dma.alloc"() <{{operandSegmentSizes = array<i32: 0>}}> : () -> {_POOL_TLM1_TYPE}
+    %tlm_b_pool = "dma.alloc"() <{{operandSegmentSizes = array<i32: 0>}}> : () -> {_POOL_TLM2_TYPE}
+    %tlm_a_ring = "dma.make_ring"(%tlm_a_pool, %c2, %c64) : ({_POOL_TLM1_TYPE}, !symbol.int<#symbol.expr<2>>, !symbol.int<#symbol.expr<64>>) -> {_TLM1_RING_TYPE}
+    %tlm_b_ring = "dma.make_ring"(%tlm_b_pool, %c2, %c64) : ({_POOL_TLM2_TYPE}, !symbol.int<#symbol.expr<2>>, !symbol.int<#symbol.expr<64>>) -> {_TLM2_RING_TYPE}
+    %tlm_a_slot = "dma.current_ring"(%tlm_a_ring) : ({_TLM1_RING_TYPE}) -> {_TLM1_TYPE}
+    %tlm_a = "dma.reinterpret"(%tlm_a_slot, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_TLM1_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_TLM1_TYPE}
+    %tlm_b_slot = "dma.current_ring"(%tlm_b_ring) : ({_TLM2_RING_TYPE}) -> {_TLM2_TYPE}
+    %tlm_b = "dma.reinterpret"(%tlm_b_slot, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_TLM2_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_TLM2_TYPE}
+    "dma.copy"(%tlm_a, %src_a) : ({_TLM1_TYPE}, {_LOCAL_TYPE}) -> ()
+    "dma.copy"(%tlm_b, %src_b) : ({_TLM2_TYPE}, {_LOCAL_TYPE}) -> ()
+    "kernel.matmul"(%acc, %tlm_a, %tlm_b, %epilogue_acc) {{space = #nn.space<tsm>}} : ({_LOCAL_TYPE}, {_TLM1_TYPE}, {_TLM2_TYPE}, i1) -> ()
+    func.return
+  }}
+}}
+"""
 
 
 def test_producer_consumer_analysis_basic_memory_effect_chain() -> None:
@@ -423,6 +529,82 @@ def test_producer_consumer_analysis_loop_body_plain_edge_uses_main_attrs() -> No
         actual,
         "kernel.matmul",
         r"^(?!.*loop_body_consumer)(?!.*\bproductor\s*=)(?=.*\bconsumer\s*= \[0\]).*$",
+        occurrence=1,
+    )
+
+
+def test_producer_consumer_analysis_ring_soft_pipeline_events() -> None:
+    """验证 ring soft-pipeline 的 loop_first / loop_carried / after_loop 标注。
+
+    功能说明:
+    - prologue copy 标 `loop_first_productor`，loop matmul 标 `loop_first_consumer`。
+    - loop body copy 标 `loop_carried_productor` 与 `after_loop_productor`。
+    - `dma.advance_ring` 只改变 cursor，不应携带 producer/consumer 标注。
+
+    使用示例:
+    - pytest -q test/passes/test_producer_consumer_analysis.py -k ring_soft_pipeline_events
+    """
+
+    actual = _run_producer_consumer_analysis(_ring_soft_pipeline_ir())
+
+    _assert_line_matches(actual, "dma.copy", r"loop_first_productor", occurrence=1)
+    _assert_line_matches(actual, "dma.copy", r"loop_first_productor", occurrence=2)
+    _assert_line_matches(
+        actual,
+        "kernel.matmul",
+        r"(?=.*loop_first_consumer)(?=.*loop_carried_consumer).*$",
+        occurrence=1,
+    )
+    _assert_line_matches(
+        actual,
+        "dma.copy",
+        r"(?=.*loop_carried_productor)(?=.*after_loop_productor).*$",
+        occurrence=3,
+    )
+    _assert_line_matches(
+        actual,
+        "dma.copy",
+        r"(?=.*loop_carried_productor)(?=.*after_loop_productor).*$",
+        occurrence=4,
+    )
+    _assert_line_matches(actual, "kernel.matmul", r"after_loop_consumer", occurrence=2)
+    _assert_line_matches(actual, "dma.advance_ring", r'^(?!.*productor)(?!.*consumer).*"dma.advance_ring"', occurrence=1)
+    _assert_line_matches(actual, "dma.advance_ring", r'^(?!.*productor)(?!.*consumer).*"dma.advance_ring"', occurrence=2)
+
+
+def test_producer_consumer_analysis_single_tile_prologue_epilogue_uses_main_attrs() -> None:
+    """验证 single-tile 退化形态使用普通 productor/consumer。
+
+    功能说明:
+    - 输入没有 steady loop，因此不满足 ring-aware loop_first/loop_carried/after_loop 结构。
+    - 两条 prologue copy 到 epilogue matmul 的边必须落在主 event attr 上。
+
+    使用示例:
+    - pytest -q test/passes/test_producer_consumer_analysis.py -k single_tile
+    """
+
+    actual = _run_producer_consumer_analysis(_single_tile_prologue_epilogue_ir())
+
+    assert "symbol.for" not in actual
+    assert "loop_first" not in actual
+    assert "loop_carried" not in actual
+    assert "after_loop" not in actual
+    _assert_line_matches(
+        actual,
+        "dma.copy",
+        r"^(?!.*loop_first)(?!.*loop_carried)(?!.*after_loop)(?=.*\bproductor\s*= \[0\]).*$",
+        occurrence=1,
+    )
+    _assert_line_matches(
+        actual,
+        "dma.copy",
+        r"^(?!.*loop_first)(?!.*loop_carried)(?!.*after_loop)(?=.*\bproductor\s*= \[1\]).*$",
+        occurrence=2,
+    )
+    _assert_line_matches(
+        actual,
+        "kernel.matmul",
+        r"^(?!.*loop_first)(?!.*loop_carried)(?!.*after_loop)(?=.*\bconsumer\s*= \[0, 1\]).*$",
         occurrence=1,
     )
 
