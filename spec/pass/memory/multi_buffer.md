@@ -103,10 +103,12 @@ multi_buffer.num = "auto" | "<positive-int>"
   - 无法证明 footprint 时，该 auto group 保持 no-op，避免生成 memory-pool 后会越界的 backing。
 - auto candidate：
   - 按 target loop / insertion scope / memory space 分组。
+  - 同组 mixed fixed / auto 候选必须先汇总同 insertion scope / target loop / memory space 下 fixed backing 与 same-scope live alloc reserved，再计算 auto group。
   - `available = target_capacity[space] - fixed_reserved_bytes[space] - same_scope_reserved_bytes[space]`。
   - `group_unit = sum(align_unit(slot_bytes(candidate), alignment) for candidate in auto group)`。
   - `auto_num = available floordiv group_unit`。
   - target 缺失、capacity 非正、available 非正、group_unit 非正或 auto_num 非正时，该 auto group no-op。
+  - `npu_demo` TSM 静态 mixed 场景中，三个 fixed `num=2` 的 4096/256/4096 个 f32 slot 必须先占 `67584` bytes；后续 3584/2816 个 f32 auto group 共享 `auto_num=79`，不得按未扣 fixed 的 `81` 生成 ring。
 - ring 物化：
   - backing alloc 为同 memory space 的一维 `i8`，大小 `effective_num * aligned_slot_bytes`。
   - `dma.make_ring(backing, effective_num, aligned_slot_bytes, ring<原 slot type>)`。
@@ -195,6 +197,7 @@ pass_obj = build_registered_pass(
 | TC-MULTI-BUFFER-012 | target same-space static num | 同 space 按 aligned slot 合计计算共享 auto num。 |
 | TC-MULTI-BUFFER-013 | target different-space static num | 不同 space 各自按本 space capacity 与 aligned slot 计算 num。 |
 | TC-MULTI-BUFFER-014 | target dynamic same-space num | dynamic shape 来自 alloc operands，offset/backing 和 auto num 包含 `1023/1024/floordiv` 对齐公式，不使用 `symbol.get_dim`。 |
+| TC-MULTI-BUFFER-014A | mixed fixed/auto fixed-reserved-before-auto | 同一 insertion scope / target loop / memory space 下 3 个 fixed `num=2` 先占 TSM 容量，2 个 auto 共享 `num=79`，输出不出现 `81` 或临时属性。 |
 | TC-MULTI-BUFFER-015 | loop-local direct use | loop body 内 direct use 改写为 `num=1` aligned ring；已有 prefix/suffix 时 current 在 prefix 前，advance 在 suffix 后。 |
 | TC-MULTI-BUFFER-015B | loop-local direct use / terminator | use block 有 terminator 时，advance 插在 terminator 前。 |
 | TC-MULTI-BUFFER-015C | if path analysis | `scf.if` branch 内 direct use 写 `analysis.loop_id/if_id`、列表 points，非最大 depth 写 `num=2`。 |

@@ -1201,6 +1201,109 @@ def test_multi_buffer_target_dynamic_same_space_num() -> None:
     module.verify()
 
 
+# TC-MULTI-BUFFER-014A
+# 功能说明: 验证 mixed fixed/auto apply 先扣同 scope fixed reserved，再为 auto group 计算共享 num。
+# 使用示例: pytest -q test/passes/memory/test_multi_buffer.py -k test_multi_buffer_apply_fixed_reserved_before_auto_static_num
+# 对应功能实现文件路径: kernel_gen/passes/memory/multi_buffer.py
+# 对应 spec 文件路径: spec/pass/memory/multi_buffer.md
+# 对应测试文件路径: test/passes/memory/test_multi_buffer.py
+def test_multi_buffer_apply_fixed_reserved_before_auto_static_num() -> None:
+    fixed_a_type = _make_memory_type(shape=(4096,), stride=(1,), space="tsm", element_type=f32)
+    fixed_b_type = _make_memory_type(shape=(256,), stride=(1,), space="tsm", element_type=f32)
+    fixed_c_type = _make_memory_type(shape=(4096,), stride=(1,), space="tsm", element_type=f32)
+    auto_lhs_type = _make_memory_type(shape=(3584,), stride=(1,), space="tsm", element_type=f32)
+    auto_rhs_type = _make_memory_type(shape=(2816,), stride=(1,), space="tsm", element_type=f32)
+    source_types = [
+        _make_memory_type(shape=(4096,), stride=(1,), space="global", element_type=f32),
+        _make_memory_type(shape=(256,), stride=(1,), space="global", element_type=f32),
+        _make_memory_type(shape=(4096,), stride=(1,), space="global", element_type=f32),
+        _make_memory_type(shape=(3584,), stride=(1,), space="global", element_type=f32),
+        _make_memory_type(shape=(2816,), stride=(1,), space="global", element_type=f32),
+    ]
+    func_type = FunctionType.from_lists(source_types, [])
+    top_block = Block(arg_types=source_types)
+    c0 = SymbolConstOp(0)
+    cend = SymbolConstOp(5)
+    c1 = SymbolConstOp(1)
+    size_fixed_large = SymbolConstOp(4096)
+    size_fixed_small = SymbolConstOp(256)
+    size_auto_lhs = SymbolConstOp(3584)
+    size_auto_rhs = SymbolConstOp(2816)
+    fixed_a = DmaAllocOp([], fixed_a_type)
+    fixed_b = DmaAllocOp([], fixed_b_type)
+    fixed_c = DmaAllocOp([], fixed_c_type)
+    auto_lhs = DmaAllocOp([], auto_lhs_type)
+    auto_rhs = DmaAllocOp([], auto_rhs_type)
+    for alloc, raw_num in (
+        (fixed_a, "2"),
+        (fixed_b, "2"),
+        (fixed_c, "2"),
+        (auto_lhs, "auto"),
+        (auto_rhs, "auto"),
+    ):
+        alloc.attributes["multi_buffer.update_points"] = _string_attr_array(("loop1-1",))
+        alloc.attributes["multi_buffer.use_points"] = _string_attr_array(("loop1-1",))
+        alloc.attributes["multi_buffer.num"] = StringAttr(raw_num)
+
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "5", "1")])
+    loop_block.add_ops(
+        [
+            DmaSliceOp(fixed_a.result, top_block.args[0], [c0.result], [size_fixed_large.result], [c1.result]),
+            DmaSliceOp(fixed_b.result, top_block.args[1], [c0.result], [size_fixed_small.result], [c1.result]),
+            DmaSliceOp(fixed_c.result, top_block.args[2], [c0.result], [size_fixed_large.result], [c1.result]),
+            DmaSliceOp(auto_lhs.result, top_block.args[3], [c0.result], [size_auto_lhs.result], [c1.result]),
+            DmaSliceOp(auto_rhs.result, top_block.args[4], [c0.result], [size_auto_rhs.result], [c1.result]),
+        ]
+    )
+    loop_op = SymbolForOp(c0.result, cend.result, c1.result, loop_block)
+    loop_op.attributes["analysis.loop_id"] = StringAttr("loop1-1")
+    top_block.add_ops(
+        [
+            c0,
+            cend,
+            c1,
+            size_fixed_large,
+            size_fixed_small,
+            size_auto_lhs,
+            size_auto_rhs,
+            fixed_a,
+            fixed_b,
+            fixed_c,
+            auto_lhs,
+            auto_rhs,
+            loop_op,
+            DmaFreeOp(fixed_a.result),
+            DmaFreeOp(fixed_b.result),
+            DmaFreeOp(fixed_c.result),
+            DmaFreeOp(auto_lhs.result),
+            DmaFreeOp(auto_rhs.result),
+            func.ReturnOp(),
+        ]
+    )
+    module = ModuleOp([func.FuncOp("multi_buffer_fixed_reserved_before_auto", func_type, Region(top_block))])
+
+    MultiBufferApplyPass(target="npu_demo").apply(Context(), module)
+
+    make_rings = _walk_ops(module, DmaMakeRingOp)
+    assert len(make_rings) == 5
+    expected_rings = (
+        (fixed_a_type, 2),
+        (fixed_b_type, 2),
+        (fixed_c_type, 2),
+        (auto_lhs_type, 79),
+        (auto_rhs_type, 79),
+    )
+    for make_ring, (slot_type, num) in zip(make_rings, expected_rings, strict=True):
+        _assert_static_ring(make_ring, slot_type, num)
+    assert len(_walk_ops(module, DmaCurrentRingOp)) == 5
+    assert len(_walk_ops(module, DmaAdvanceRingOp)) == 5
+    assert not _walk_ops(module, DmaFreeOp)
+    module_text = str(module)
+    assert "multi_buffer." not in module_text
+    assert "symbol.const 81" not in module_text
+    module.verify()
+
+
 # TC-MULTI-BUFFER-015
 # 功能说明: 验证 loop-local direct alloc use 可改写为 `num=1` ring。
 # 使用示例: pytest -q test/passes/memory/test_multi_buffer.py -k test_multi_buffer_rewrites_loop_local_direct_slice_use
