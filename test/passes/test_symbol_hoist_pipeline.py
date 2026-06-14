@@ -18,6 +18,10 @@ from __future__ import annotations
 import importlib
 
 import pytest
+from xdsl.context import Context
+from xdsl.dialects.builtin import ModuleOp
+from xdsl.transforms.canonicalize import CanonicalizePass
+from xdsl.transforms.common_subexpression_elimination import CommonSubexpressionElimination
 
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
@@ -25,6 +29,44 @@ from kernel_gen.tools.ircheck import run_ircheck_text
 
 pass_module = importlib.import_module("kernel_gen.passes.hoist.symbol_hoist_pipeline")
 SymbolHoistPipelinePass = pass_module.SymbolHoistPipelinePass
+
+_SYMBOL_HOIST_CLEANUP_EVENTS: list[str] = []
+
+
+def _record_symbol_hoist_cse_apply(self: CommonSubexpressionElimination, ctx: Context, module: ModuleOp) -> None:
+    """记录 symbol-hoist-pipeline 内嵌 CSE 调用。
+
+    功能说明:
+    - 作为公开 xDSL `CommonSubexpressionElimination.apply(...)` 的测试替身。
+    - 只记录调用事件，不改写测试 module。
+
+    使用示例:
+    - monkeypatch.setattr(CommonSubexpressionElimination, "apply", _record_symbol_hoist_cse_apply)
+    """
+
+    _ = self
+    _ = ctx
+    _ = module
+    marker = "cse"
+    _SYMBOL_HOIST_CLEANUP_EVENTS.append(marker)
+
+
+def _record_symbol_hoist_canonicalize_apply(self: CanonicalizePass, ctx: Context, module: ModuleOp) -> None:
+    """记录 symbol-hoist-pipeline 内嵌 canonicalize 调用。
+
+    功能说明:
+    - 作为公开 xDSL `CanonicalizePass.apply(...)` 的测试替身。
+    - 只记录调用事件，不改写测试 module。
+
+    使用示例:
+    - monkeypatch.setattr(CanonicalizePass, "apply", _record_symbol_hoist_canonicalize_apply)
+    """
+
+    _ = self
+    _ = ctx
+    _ = module
+    marker = "canonicalize"
+    _SYMBOL_HOIST_CLEANUP_EVENTS.append(marker)
 
 
 def _run_public_ircheck_case(case_text: str) -> str:
@@ -59,32 +101,75 @@ def test_symbol_hoist_pipeline_registry_and_public_path() -> None:
 
     load_builtin_passes()
 
-    pass_obj = build_registered_pass("symbol-hoist-pipeline", {"fold": "false"})
+    pass_obj = build_registered_pass(
+        "symbol-hoist-pipeline",
+        {"fold": "false", "cse": "false", "canonicalize": "false"},
+    )
 
     assert isinstance(pass_obj, SymbolHoistPipelinePass)
     assert pass_obj.name == "symbol-hoist-pipeline"
     assert pass_obj.fold is False
+    assert pass_obj.cse is False
+    assert pass_obj.canonicalize is False
     assert pass_obj.__class__.__module__ == "kernel_gen.passes.hoist.symbol_hoist_pipeline"
 
 
-def test_symbol_hoist_pipeline_rejects_private_options() -> None:
-    """验证 `symbol-hoist-pipeline` 不接受专属 option。
+def test_symbol_hoist_pipeline_registry_rejects_invalid_options() -> None:
+    """验证 `symbol-hoist-pipeline` 拒绝非法专属 option。
 
     功能说明:
-    - 当前公开 API 只承接 registry 通用 `fold`。
-    - 未确认的 `hoist-ops` option 必须按 registry 稳定错误失败。
+    - 当前公开 API 只承接 `cse` / `canonicalize` 专属 option 与 registry 通用 `fold`。
+    - 未确认的 `hoist-ops` option、非法 bool 文本和 direct `from_options({"fold": ...})` 必须稳定失败。
 
     使用示例:
-    - pytest -q test/passes/test_symbol_hoist_pipeline.py -k rejects_private_options
+    - pytest -q test/passes/test_symbol_hoist_pipeline.py -k rejects_invalid_options
     """
 
     load_builtin_passes()
 
     with pytest.raises(
         KernelCodeError,
-        match=r"^PassRegistryError: pass 'symbol-hoist-pipeline' does not accept options$",
+        match=r"^PassRegistryError: pass 'symbol-hoist-pipeline' option error: symbol-hoist-pipeline options unknown: hoist-ops$",
     ):
         build_registered_pass("symbol-hoist-pipeline", {"hoist-ops": "dma.fill"})
+    with pytest.raises(
+        KernelCodeError,
+        match=r"^PassRegistryError: pass 'symbol-hoist-pipeline' option error: symbol-hoist-pipeline options cse expects bool$",
+    ):
+        build_registered_pass("symbol-hoist-pipeline", {"cse": "maybe"})
+    with pytest.raises(KernelCodeError, match=r"^symbol-hoist-pipeline options unknown: fold$"):
+        SymbolHoistPipelinePass.from_options({"fold": "false"})
+
+
+def test_symbol_hoist_pipeline_cleanup_options_are_independent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """验证内嵌 cleanup 由 `cse` / `canonicalize` 独立控制。
+
+    功能说明:
+    - 通过公开 pass 构造与 xDSL pass `apply(...)` monkeypatch 观察 cleanup 调用顺序。
+    - 证明 `fold=False` 不会关闭内嵌 CSE / canonicalize。
+
+    使用示例:
+    - pytest -q test/passes/test_symbol_hoist_pipeline.py -k cleanup_options
+    """
+
+    _SYMBOL_HOIST_CLEANUP_EVENTS.clear()
+    monkeypatch.setattr(CommonSubexpressionElimination, "apply", _record_symbol_hoist_cse_apply)
+    monkeypatch.setattr(CanonicalizePass, "apply", _record_symbol_hoist_canonicalize_apply)
+
+    SymbolHoistPipelinePass(fold=False).apply(Context(), ModuleOp([]))
+    assert _SYMBOL_HOIST_CLEANUP_EVENTS == ["cse", "canonicalize"]
+
+    _SYMBOL_HOIST_CLEANUP_EVENTS.clear()
+    SymbolHoistPipelinePass(cse=False).apply(Context(), ModuleOp([]))
+    assert _SYMBOL_HOIST_CLEANUP_EVENTS == ["canonicalize"]
+
+    _SYMBOL_HOIST_CLEANUP_EVENTS.clear()
+    SymbolHoistPipelinePass(canonicalize=False).apply(Context(), ModuleOp([]))
+    assert _SYMBOL_HOIST_CLEANUP_EVENTS == ["cse"]
+
+    _SYMBOL_HOIST_CLEANUP_EVENTS.clear()
+    SymbolHoistPipelinePass(cse=False, canonicalize=False).apply(Context(), ModuleOp([]))
+    assert _SYMBOL_HOIST_CLEANUP_EVENTS == []
 
 
 def test_symbol_hoist_pipeline_combines_reinterpret_and_loop_hoist() -> None:
@@ -99,7 +184,7 @@ def test_symbol_hoist_pipeline_combines_reinterpret_and_loop_hoist() -> None:
     """
 
     actual_ir = _run_public_ircheck_case(
-        """// COMPILE_ARGS: --pass "symbol-hoist-pipeline={fold=false}"
+        """// COMPILE_ARGS: --pass "symbol-hoist-pipeline={fold=false,cse=false,canonicalize=false}"
 // CHECK: func.func @combined_reinterpret_and_symbol_hoist
 // CHECK: %[[ALIAS:.*]] = "dma.reinterpret"
 // CHECK: %[[ADD:.*]] = symbol.add

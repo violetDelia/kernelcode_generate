@@ -3,11 +3,13 @@
 功能说明:
 - 提供 `symbol-hoist-pipeline` pass，在一个 pass 内组合 alias 归一、symbol loop hoist 与 dma alias hoist pattern。
 - pattern 顺序固定为 alias-to-reinterpret 先独立收敛，随后 symbol-loop-hoist、symbol-buffer-hoist 与 dma-alias-hoist 共同收敛。
+- 可按公开 `cse` / `canonicalize` 选项在组合 rewrite 后运行 pass-local cleanup。
 - pass 成功验证后才替换原 module，验证失败时保持输入 module 不被部分改写。
 
 API 列表:
-- `class SymbolHoistPipelinePass(fold: bool = True)`
+- `class SymbolHoistPipelinePass(fold: bool = True, cse: bool = True, canonicalize: bool = True)`
 - `SymbolHoistPipelinePass.name: str`
+- `SymbolHoistPipelinePass.from_options(options: dict[str, str]) -> SymbolHoistPipelinePass`
 - `SymbolHoistPipelinePass.apply(ctx: Context, module: ModuleOp) -> None`
 
 使用示例:
@@ -27,6 +29,8 @@ from dataclasses import dataclass
 from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.pattern_rewriter import GreedyRewritePatternApplier, PatternRewriteWalker
+from xdsl.transforms.canonicalize import CanonicalizePass
+from xdsl.transforms.common_subexpression_elimination import CommonSubexpressionElimination
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
@@ -47,14 +51,59 @@ class SymbolHoistPipelinePass(Pass):
     - 固定公开 pass name 为 `symbol-hoist-pipeline`。
     - 不调用旧 `dma-alias-to-reinterpret` / `symbol-loop-hoist` / `hoist-dma-alias-ops` pass 的 `apply(...)`。
     - 在 clone 上先运行 alias 归一，再运行 symbol-loop-hoist、symbol-buffer-hoist 与 dma-alias-hoist
-      的固定点组合，验证成功后替换原 module。
+      的固定点组合。
+    - `cse` / `canonicalize` 独立控制组合 rewrite 后的 pass-local cleanup，`fold` 不控制 cleanup。
+    - 验证成功后替换原 module。
 
     使用示例:
-    - SymbolHoistPipelinePass(fold=False).apply(ctx, module)
+    - SymbolHoistPipelinePass(fold=False, cse=True, canonicalize=True).apply(ctx, module)
     """
 
     name = "symbol-hoist-pipeline"
     fold: bool = True
+    cse: bool = True
+    canonicalize: bool = True
+
+    @classmethod
+    def from_options(cls: type["SymbolHoistPipelinePass"], options: dict[str, str]) -> "SymbolHoistPipelinePass":
+        """从 registry pass 专属 options 构造 `symbol-hoist-pipeline`。
+
+        功能说明:
+        - 只接受 `cse` 与 `canonicalize` 两个 pass 专属 bool option。
+        - `fold` 是 registry 通用 option，直接传给本入口必须失败。
+        - 非法 bool 文本和未知 option 使用稳定 `symbol-hoist-pipeline options ...` 失败语义。
+
+        使用示例:
+        - SymbolHoistPipelinePass.from_options({"cse": "false", "canonicalize": "true"})
+        """
+
+        cse = True
+        canonicalize = True
+        for name, value in options.items():
+            if name not in {"cse", "canonicalize"}:
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.PASS,
+                    f"symbol-hoist-pipeline options unknown: {name}",
+                )
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                parsed = True
+            elif normalized in {"0", "false", "no", "off"}:
+                parsed = False
+            else:
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.PASS,
+                    f"symbol-hoist-pipeline options {name} expects bool",
+                )
+            if name == "cse":
+                cse = parsed
+                continue
+            if name == "canonicalize":
+                canonicalize = parsed
+                continue
+        return cls(cse=cse, canonicalize=canonicalize)
 
     def apply(self: "SymbolHoistPipelinePass", ctx: Context, module: ModuleOp) -> None:
         """执行 `symbol-hoist-pipeline` ModulePass。
@@ -63,6 +112,7 @@ class SymbolHoistPipelinePass(Pass):
         - 确保 `Symbol` dialect 可用，供 alias 归一过程生成 `symbol.const/add/mul`。
         - 在 clone 上分两阶段运行 pattern，保证 verifier 失败时原 module 保持不变。
         - 第一阶段仅 alias-to-reinterpret；第二阶段顺序为 symbol-loop-hoist、symbol-buffer-hoist、hoist-dma-alias-ops。
+        - pattern rewrite 后按 `cse` / `canonicalize` 选项在 clone 上执行 cleanup。
 
         使用示例:
         - SymbolHoistPipelinePass().apply(ctx, module)
@@ -95,6 +145,10 @@ class SymbolHoistPipelinePass(Pass):
                 ),
                 apply_recursively=True,
             ).rewrite_module(rewritten)
+            if self.cse:
+                CommonSubexpressionElimination().apply(ctx, rewritten)
+            if self.canonicalize:
+                CanonicalizePass().apply(ctx, rewritten)
             rewritten.verify()
         except VerifyException as exc:
             raise KernelCodeError(

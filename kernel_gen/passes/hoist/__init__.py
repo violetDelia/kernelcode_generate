@@ -21,11 +21,12 @@ API 列表:
 - `class DmaSubviewInSymbolForHoistPattern()`
 - `get_symbol_buffer_hoist_patterns() -> list[RewritePattern]`
 - `class SymbolBufferHoistPass(fold: bool = True)`
-- `class SymbolHoistPipelinePass(fold: bool = True)`
+- `class SymbolHoistPipelinePass(fold: bool = True, cse: bool = True, canonicalize: bool = True)`
+- `SymbolHoistPipelinePass.from_options(options: dict[str, str]) -> SymbolHoistPipelinePass`
 
 使用示例:
 - from kernel_gen.passes.hoist import SymbolHoistPipelinePass
-- pass_obj = SymbolHoistPipelinePass()
+- pass_obj = SymbolHoistPipelinePass(cse=True, canonicalize=True)
 
 关联文件:
 - spec: spec/pass/symbol_hoist_pipeline.md

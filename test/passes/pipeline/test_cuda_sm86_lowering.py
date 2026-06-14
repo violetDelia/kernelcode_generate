@@ -90,6 +90,9 @@ def _record_pass_apply(self: Pass, ctx: Context, target: ModuleOp) -> None:
     pass_name = _PASS_NAME_BY_CLASS.get(class_name, class_name)
     _PIPELINE_ORDER.append(pass_name)
     assert _PIPELINE_ORDER[-1] == pass_name
+    if isinstance(self, SymbolHoistPipelinePass):
+        assert self.cse is False
+        assert self.canonicalize is False
 
 
 def _record_kernel_pattern_attach_apply(self: KernelPatternAttachPass, ctx: Context, target: ModuleOp) -> None:
@@ -306,8 +309,11 @@ def test_cuda_sm86_lowering_pipeline_dump_pass_order_markers(
     assert "memory-pool" not in base_markers
     assert raw_markers[1] == "inline{fold=true}"
     assert raw_markers[6] == "memory-plan{insert_free=true fold=false reuse=true auto_pad=false}"
+    assert raw_markers[7] == "symbol-hoist-pipeline{fold=true cse=false canonicalize=false}"
     assert raw_markers[11] == "kernel-pattern-attach"
+    assert raw_markers[14] == "symbol-hoist-pipeline{fold=true cse=false canonicalize=false}"
     assert raw_markers[17] == "kernel-aggregate{matmul_acc=true fold=true}"
+    assert raw_markers[20] == "symbol-hoist-pipeline{fold=true cse=false canonicalize=false}"
     assert raw_markers[25] == "arch-parallelize"
     assert raw_markers[26] == 'attach-arch-information{target="cuda_sm86" fold=true}'
     assert raw_markers[27] == "outline-device-kernel{fold=true}"

@@ -531,16 +531,21 @@ def test_build_registered_symbol_hoist_pipeline_pass() -> None:
     load_builtin_passes()
     hoist_module = importlib.import_module("kernel_gen.passes.hoist.symbol_hoist_pipeline")
 
-    pass_obj = build_registered_pass("symbol-hoist-pipeline", {"fold": "false"})
+    pass_obj = build_registered_pass(
+        "symbol-hoist-pipeline",
+        {"fold": "false", "cse": "false", "canonicalize": "false"},
+    )
 
     assert isinstance(pass_obj, hoist_module.SymbolHoistPipelinePass)
     assert pass_obj.name == "symbol-hoist-pipeline"
     assert pass_obj.__class__.__module__ == "kernel_gen.passes.hoist.symbol_hoist_pipeline"
     assert pass_obj.fold is False
+    assert pass_obj.cse is False
+    assert pass_obj.canonicalize is False
 
 
 # TC-REGISTRY-007A-1F
-# 功能说明: 验证 symbol-hoist-pipeline 不接受 pass 专属 option。
+# 功能说明: 验证 symbol-hoist-pipeline 拒绝非法 pass 专属 option。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_symbol_hoist_pipeline_rejects_private_options
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
@@ -550,9 +555,14 @@ def test_build_registered_symbol_hoist_pipeline_rejects_private_options() -> Non
 
     with pytest.raises(
         KernelCodeError,
-        match=r"^PassRegistryError: pass 'symbol-hoist-pipeline' does not accept options$",
+        match=r"^PassRegistryError: pass 'symbol-hoist-pipeline' option error: symbol-hoist-pipeline options unknown: hoist-ops$",
     ):
         build_registered_pass("symbol-hoist-pipeline", {"hoist-ops": "dma.fill"})
+    with pytest.raises(
+        KernelCodeError,
+        match=r"^PassRegistryError: pass 'symbol-hoist-pipeline' option error: symbol-hoist-pipeline options canonicalize expects bool$",
+    ):
+        build_registered_pass("symbol-hoist-pipeline", {"canonicalize": "maybe"})
 
 
 # TC-REGISTRY-007A-2

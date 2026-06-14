@@ -1169,7 +1169,8 @@ class _SymbolExprOps:
 
         功能说明:
         - 对 `B -> B + 24 step 8` 与 `B -> B + 3*S step S` 这类一阶表达做当前文件内结构化证明。
-        - `iter<...>`、`?`、`min/max` 或非线性表达一律保守返回 `False`，避免 full-tile fold 依赖外部化简器状态。
+        - 对 `0 -> N*S step S` 与 `B -> B + N*S step S` 这类 symbolic count dynamic step 做结构化证明。
+        - `iter<...>`、`?`、`min/max` 或无法识别的非线性表达一律保守返回 `False`，避免 full-tile fold 依赖外部化简器状态。
 
         使用示例:
         - if _SYMBOL_EXPR.bounds_are_full_tiles(start, end, step): ...
@@ -1182,25 +1183,72 @@ class _SymbolExprOps:
 
         start_linear = _SYMBOL_EXPR.linear_terms(start)
         end_linear = _SYMBOL_EXPR.linear_terms(end)
-        if start_linear is None or end_linear is None:
-            return False
-        start_terms, start_offset = start_linear
-        end_terms, end_offset = end_linear
-        diff_terms = dict(end_terms)
-        for name, coeff in start_terms.items():
-            diff_terms[name] = diff_terms.get(name, 0) - coeff
-        distance = end_offset - start_offset
-        step_value = _SYMBOL_EXPR.concrete_value(step)
-        if step_value is not None:
-            if step_value == 0 or any(coeff != 0 for coeff in diff_terms.values()):
-                return False
-            return distance > 0 and distance % step_value == 0
+        if start_linear is not None and end_linear is not None:
+            start_terms, start_offset = start_linear
+            end_terms, end_offset = end_linear
+            diff_terms = dict(end_terms)
+            for name, coeff in start_terms.items():
+                diff_terms[name] = diff_terms.get(name, 0) - coeff
+            distance = end_offset - start_offset
+            step_value = _SYMBOL_EXPR.concrete_value(step)
+            if step_value is not None:
+                if step_value == 0 or any(coeff != 0 for coeff in diff_terms.values()):
+                    return False
+                return distance > 0 and distance % step_value == 0
 
-        step_linear = _SYMBOL_EXPR.linear_terms(step)
-        if step_linear is None:
+            step_linear = _SYMBOL_EXPR.linear_terms(step)
+            if step_linear is not None:
+                step_terms, step_offset = step_linear
+                if _SYMBOL_EXPR.linear_distance_is_positive_multiple(diff_terms, distance, step_terms, step_offset):
+                    return True
+
+        if _SYMBOL_EXPR.concrete_value(start) == 0 and _SYMBOL_EXPR.positive_symbolic_multiple(end, step):
+            return True
+        if end.kind != "add":
             return False
-        step_terms, step_offset = step_linear
-        return _SYMBOL_EXPR.linear_distance_is_positive_multiple(diff_terms, distance, step_terms, step_offset)
+        for index, term in enumerate(end.args):
+            if term != start:
+                continue
+            residual_terms = [candidate for offset, candidate in enumerate(end.args) if offset != index]
+            if len(residual_terms) == 1 and _SYMBOL_EXPR.positive_symbolic_multiple(residual_terms[0], step):
+                return True
+        return False
+
+    @staticmethod
+    def positive_symbolic_multiple(distance: _SymbolExprNode, step: _SymbolExprNode) -> bool:
+        """判断距离表达式是否是 step 的正符号倍数。
+
+        功能说明:
+        - 接受 `step` 自身，或乘积中恰好包含一个 `step` 因子的表达式。
+        - 其它乘积因子只允许正整数常量或具名 symbol，服务 full-tile symbolic count 证明。
+        - 拒绝 `?`、`iter<...>`、`min/max`、负号和加减表达式，避免把普通动态边界误折叠。
+
+        使用示例:
+        - _SYMBOL_EXPR.positive_symbolic_multiple(_SYMBOL_EXPR.parse_text("N*S"), _SYMBOL_EXPR.parse_text("S"))
+        """
+
+        if distance == step:
+            return True
+        if distance.kind != "mul":
+            return False
+        remaining: list[_SymbolExprNode] = []
+        step_seen = False
+        for factor in distance.args:
+            if not step_seen and factor == step:
+                step_seen = True
+                continue
+            remaining.append(factor)
+        if not step_seen or not remaining:
+            return False
+        for factor in remaining:
+            concrete = _SYMBOL_EXPR.concrete_value(factor)
+            if concrete is not None:
+                if concrete <= 0:
+                    return False
+                continue
+            if factor.kind != "symbol":
+                return False
+        return True
 
     @staticmethod
     def linear_distance_is_positive_multiple(

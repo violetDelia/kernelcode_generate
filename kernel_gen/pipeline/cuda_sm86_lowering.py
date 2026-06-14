@@ -5,6 +5,7 @@
 - 提供 `cuda-sm86-lowering` pipeline 的 builder。
 - 固定 CUDA SM86 首版 lowering 顺序，复用通用 NN / tile / tuning / outline 能力。
 - 明确不接入 `MemoryPoolPass(rewrite=True)`，避免把 TLM fragment 语义改写为动态 byte pool。
+- 显式使用 `SymbolHoistPipelinePass(cse=False, canonicalize=False)`，保留 CUDA 既有外置 cleanup。
 - 通过 registry 装饰器完成 pipeline 注册。
 
 API 列表:
@@ -167,6 +168,7 @@ def build_cuda_sm86_lowering_pipeline(options: dict[str, str] | None = None) -> 
       `ArchParallelizePass(target="cuda_sm86", parallel_level="block")` 与 `AttachArchInformationPass`。
     - 不接入 `MemoryPoolPass(rewrite=True)`，保证 TLM1/TLM2/TLM3 不被改写成
       `arch.get_dynamic_memory + dma.reinterpret` byte pool 形态。
+    - 三段 `symbol-hoist-pipeline` 显式关闭 pass-local `cse` / `canonicalize`，继续依赖外置 cleanup。
 
     使用示例:
     - pm = build_cuda_sm86_lowering_pipeline()
@@ -196,20 +198,20 @@ def build_cuda_sm86_lowering_pipeline(options: dict[str, str] | None = None) -> 
     pm.add_pass(DecompassPass())
     pm.add_pass(NnLoweringPass())
     pm.add_pass(MemoryPlanPass(insert_free=True, reuse=True, fold=False))
-    pm.add_pass(SymbolHoistPipelinePass())
+    pm.add_pass(SymbolHoistPipelinePass(cse=False, canonicalize=False))
     pm.add_pass(CommonSubexpressionElimination())
     pm.add_pass(CanonicalizePass())
     pm.add_pass(TileAnalysisPass())
     pm.add_pass(_CudaSm86KernelPatternAttachPass())
     pm.add_pass(TransformApplyPass())
     pm.add_pass(MemoryPlanPass(insert_free=True, reuse=True, fold=False))
-    pm.add_pass(SymbolHoistPipelinePass())
+    pm.add_pass(SymbolHoistPipelinePass(cse=False, canonicalize=False))
     pm.add_pass(CommonSubexpressionElimination())
     pm.add_pass(CanonicalizePass())
     pm.add_pass(KernelAggregatePass(matmul_acc=True))
     pm.add_pass(KernelDecomposePass())
     pm.add_pass(MemoryPlanPass(insert_free=True, reuse=True, fold=False))
-    pm.add_pass(SymbolHoistPipelinePass())
+    pm.add_pass(SymbolHoistPipelinePass(cse=False, canonicalize=False))
     pm.add_pass(CommonSubexpressionElimination())
     pm.add_pass(CanonicalizePass())
     pm.add_pass(ProducerConsumerAnalysisPass())

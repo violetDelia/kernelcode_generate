@@ -65,7 +65,7 @@
 - 内置 pipeline 模块放在 `kernel_gen/pipeline`；`load_builtin_passes()` 负责导入这些模块以触发注册。
 - 当前内置 pipeline 至少包含 `default-lowering` 与 `npu-demo-lowering` 两个公开 builder。
 - `hoist-dma-alias-ops` 作为公开 pass name 进入内置注册表；其第一阶段只接受通用 `fold`，不接受专属 option。
-- `symbol-hoist-pipeline` 作为公开 pass name 进入内置注册表；其第一阶段只接受通用 `fold`，不接受专属 option。
+- `symbol-hoist-pipeline` 作为公开 pass name 进入内置注册表；其 pass 专属 option 接受 `cse` 与 `canonicalize`，通用 `fold` 仍由 registry 外层解析。
 - `loop-soft-pipeline` 作为公开 pass name 进入内置注册表；其第一阶段只接受通用 `fold`，不接受专属 option。
 - `npu-demo-lowering` 公开 builder 支持 `options={"target": "npu_demo"}`；其固定顺序由 `spec/pass/pipeline/npu_demo_lowering.md` 约束，并包含三次 `MemoryPlanPass(insert_free=True, reuse=True, fold=False, auto_pad=True)`、三次 `SymbolHoistPipelinePass`、`LoopSoftPipelinePass`、`MemoryPoolPass(rewrite=True, alignment=1024)` 与公开 `arch-parallelize` 阶段；`only-kernel` / `only_kernel` 之类选项必须显式失败，不能把 host wrapper 与 device body 的 outline 流程裁成仅 kernel 形态。
 - registry 只负责注册与查询，不承载具体 pipeline builder 实现。
@@ -78,7 +78,7 @@
   - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前；若存在唯一合法 `dma.free`，把 alloc/free 成对移动到 owner loop 两侧。
   - `dma-alias-to-reinterpret`：把 `dma.view` / `dma.reshape` / `dma.subview` 归一为 root source 上的 `dma.reinterpret`。
   - `hoist-dma-alias-ops`：把同 block 内紧邻的 `dma.reshape` 上移穿过 `dma.fill`，作为第一阶段 alias hoist pass。
-  - `symbol-hoist-pipeline`：在一个 pass 内先执行 alias-to-reinterpret 能力，再按 `symbol-loop-hoist -> symbol-buffer-hoist -> hoist-dma-alias-ops` 固定顺序收敛相关 pattern；`symbol-buffer-hoist` 仍是可手动注册的独立 pass，但不作为 `npu-demo-lowering` 顶层阶段出现。
+  - `symbol-hoist-pipeline`：在一个 pass 内先执行 alias-to-reinterpret 能力，再按 `symbol-loop-hoist -> symbol-buffer-hoist -> hoist-dma-alias-ops` 固定顺序收敛相关 pattern，并按 `cse` / `canonicalize` 选项执行内嵌 cleanup；`symbol-buffer-hoist` 仍是可手动注册的独立 pass，但不作为 `npu-demo-lowering` 顶层阶段出现。
   - `memory-plan`：显式 `insert-free=true` 时为受控 `dma.alloc` 生命周期补插 `dma.free`；显式 `reuse=true` 且 `insert-free=true` 时启用保守 alloc 复用；显式 `auto-pad=true` 时启用 dynamic tail alloc 的 padded backing + logical alias rewrite。
   - `multi-buffer-analysis`：把可证明的 staging alloc/free 生命周期标记为三项 `multi_buffer.*` analysis 属性。
   - `multi-buffer-apply`：消费三项 `multi_buffer.*` 属性，按 fixed/auto 与 alignment 物化 DMA ring。
@@ -99,6 +99,7 @@
 - `multi-buffer-apply` 接受 pass 专属 `options={"target": "<target-name>", "alignment": "<non-negative-int>"}`；`fold` 仍由 registry 通用 option 处理。`target` 为空、`alignment` 负数 / 非整数或未知 option 必须由 `MultiBufferApplyPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'multi-buffer-apply' option error: <原因>`。
 - `multi-buffer` 接受 pass 专属 `options={"memory-stage": "<positive-int>", "target": "<target-name>", "alignment": "<non-negative-int>"}`；`fold` 仍由 registry 通用 option 处理。该 pass 是兼容 facade，等价于 analysis 后接 apply。非法 `memory-stage`、空 `target`、非法 `alignment` 或未知 option 必须由 `MultiBufferPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'multi-buffer' option error: <原因>`；直接调用任一 multi-buffer pass 的 `from_options({"fold": "false"})` 必须失败，不能把通用 `fold` 兼容进 pass 专属 options。
 - `loop-soft-pipeline` 第一阶段不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `LoopSoftPipelinePass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'loop-soft-pipeline' option error: <原因>`。
+- `symbol-hoist-pipeline` 接受 pass 专属 `options={"cse": "true|false|1|0|yes|no|on|off", "canonicalize": "true|false|1|0|yes|no|on|off"}`；`fold` 仍由 registry 通用 option 处理。未知 option 或非法 bool 必须由 `SymbolHoistPipelinePass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'symbol-hoist-pipeline' option error: <原因>`；直接调用 `SymbolHoistPipelinePass.from_options({"fold": "false"})` 必须失败。
 - `producer-consumer-analysis` 第一阶段不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `ProducerConsumerAnalysisPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'producer-consumer-analysis' option error: <原因>`。
 - `kernel-pattern-attach` 第一阶段不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `KernelPatternAttachPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'kernel-pattern-attach' option error: <原因>`。
 - `transform-apply` 第一阶段不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `TransformApplyPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'transform-apply' option error: <原因>`。

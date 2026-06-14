@@ -615,6 +615,44 @@ def test_symbol_min_fold_full_tile_zero_to_symbol_multiple() -> None:
     _assert_symbol_min_folds_to_existing_value(min_op, step_value)
 
 
+def test_symbol_min_fold_full_tile_symbolic_count_dynamic_step_to_existing_step() -> None:
+    """symbol.min 对 `0 -> N*S1 step S1` 的 full-tile tail fold 为原 step SSA。"""
+
+    start_expr = "0"
+    count_expr = "N"
+    step_expr = "S1"
+    end_expr = f"{count_expr}*{step_expr}"
+    iter_expr = f"iter<{start_expr},{end_expr},{step_expr}>"
+    step_value = _make_symbol_value(step_expr)
+    iter_value = _TestOp(result_types=[SymbolIterType.from_bounds(start_expr, end_expr, step_expr)]).results[0]
+    residual = SymbolSubOp(_make_symbol_value(end_expr), iter_value, SymbolValueType.from_expr(f"{end_expr} - {iter_expr}"))
+    min_op = SymbolMinOp(step_value, residual.result, SymbolValueType.from_expr(step_expr))
+
+    residual.verify()
+    min_op.verify()
+    _assert_symbol_min_folds_to_existing_value(min_op, step_value)
+
+
+def test_symbol_max_fold_static_and_rejects_dynamic_boundaries() -> None:
+    """symbol.max 只折叠静态整数，并保守拒绝动态、unknown、iter 与 result mismatch。"""
+
+    folder = Folder(_build_context())
+    static_op = SymbolMaxOp(SymbolConstOp(7).result, SymbolConstOp(3).result, SymbolValueType.from_expr("7"))
+    unknown_result_op = SymbolMaxOp(SymbolConstOp(7).result, SymbolConstOp(3).result, SymbolValueType.from_expr("?"))
+    dynamic_op = SymbolMaxOp(_make_symbol_value("DYN"), SymbolConstOp(3).result, SymbolValueType.from_expr("max(DYN, 3)"))
+    unknown_op = SymbolMaxOp(_make_symbol_value("?"), SymbolConstOp(3).result, SymbolValueType.from_expr("?"))
+    iter_value = _TestOp(result_types=[SymbolIterType.from_bounds("0", "N", "S1")]).results[0]
+    iter_op = SymbolMaxOp(_make_symbol_value("DYN"), iter_value, SymbolValueType.from_expr("max(DYN, iter<0,N,S1>)"))
+    mismatch_op = SymbolMaxOp(SymbolConstOp(7).result, SymbolConstOp(3).result, SymbolValueType.from_expr("6"))
+
+    _assert_symbol_min_folds_to_const(static_op, 7)
+    _assert_symbol_min_folds_to_const(unknown_result_op, 7)
+    assert folder.try_fold(dynamic_op) is None
+    assert folder.try_fold(unknown_op) is None
+    assert folder.try_fold(iter_op) is None
+    assert folder.try_fold(mismatch_op) is None
+
+
 # TC-SYM-051
 # 测试目的: 验证 symbol.const 会拒绝不匹配的结果类型。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol/
