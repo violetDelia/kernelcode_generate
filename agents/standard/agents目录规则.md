@@ -8,6 +8,7 @@
 - 角色提示词只写角色差异和硬边界；通用流程、权限、记录和验收规则写入 `agents/standard/*.md`。
 - 每个角色私有 `memory.md` 只记录长期规则、重大决策、异常阻塞和重要上下文，不记录日常执行结果。
 - `agents/codex-multi-agents/log/task_records/` 下的常规任务日志、阻塞记录和待确认记录写入对应任务 `worktree`。
+- 任务记录规范路径为 `agents/codex-multi-agents/log/task_records/<YYYY>/<WW>/<record>.md`；计划归档规范路径为 `agents/codex-multi-agents/log/task_records/done_plan/<YYYY>/<WW>/<plan>.md`。`WW` 使用两位 ISO 周，例如 `24`。
 - 无独立 `worktree` 的计划互评、专题 `spec` 互评、计划书入档验收和归档结论写入计划书、专题 `spec` 或 `done_plan`。
 - 共享状态文件、角色列表和标准文档只在明确任务范围内修改。
 - 合并任务必须带入当前链路对应任务记录，且任务记录与代码 / `spec` / 测试等任务改动同批合入；不得先合代码再补记录提交。未点名的角色提示词、标准文档和共享状态文件不得顺手合入。
@@ -20,6 +21,11 @@ agents/
     agents-lists.md
     log/
       task_records/
+        <YYYY>/
+          <WW>/
+        done_plan/
+          <YYYY>/
+            <WW>/
   standard/
 ```
 
@@ -29,11 +35,13 @@ agents/
 | 常规 execute / review / merge | 当前任务 `worktree` 的任务记录 |
 | 计划互评 / 专题 spec 互评 | 计划书或专题 `spec` 正文 |
 | 计划书入档验收 / 复验 / 修复复核 | 计划书正文 |
-| 归档结论 | `done_plan` 记录文件 |
+| 归档结论 | `done_plan/<YYYY>/<WW>/` 记录文件 |
 | 共享规则调整 | 明确任务范围内的 `agents/standard/*.md` 或对应提示词 |
 
 ## 禁止项
 - 不在主仓根目录写常规任务日志。
+- 不在 `agents/task_records/` 新增或保留任务记录；该路径是旧落点。
+- 不在 `agents/codex-multi-agents/log/task_records/<YYYY>/` 或 `agents/codex-multi-agents/log/task_records/done_plan/<YYYY>/` 直接放置 `.md` 文件。
 - 不把计划内小任务卡拆成独立任务记录。
 - 不在未授权任务中修改其他角色提示词。
 - 不把 `expectation/` 改动作为普通任务记录或普通合并内容处理。

@@ -24,6 +24,7 @@
 - 所有功能实现文件与新增/修改函数都必须遵守 [`agents/standard/实现文件规范.md`](agents/standard/实现文件规范.md)：文件级说明必须包含 `功能说明 / API 列表 / 使用示例 / 关联文件`，其中 `API 列表` 必须紧跟在 `功能说明` 后；函数注释必须至少包含 `功能说明 / 使用示例`。
 - 人员元信息字段不纳入文件级说明、函数注释、`spec` 或审查强制项。
 - 常规任务日志、阻塞记录与待确认记录默认写入对应 `worktree`；主仓根目录不作为常规日志落点，只保留共享状态文件与无独立 `worktree` 的例外结论。
+- 任务记录与计划归档的规范落点必须包含年份和两位 ISO 周：任务记录为 `agents/codex-multi-agents/log/task_records/<YYYY>/<WW>/<record>.md`，计划归档为 `agents/codex-multi-agents/log/task_records/done_plan/<YYYY>/<WW>/<plan>.md`。不得在 `agents/task_records/`、`task_records/<YYYY>/` 或 `done_plan/<YYYY>/` 直接新增记录或计划文件。
 - 文件链接示例：
   - `spec`：[`spec/codex-multi-agents/scripts/codex-multi-agents-list.md`](spec/codex-multi-agents/scripts/codex-multi-agents-list.md)
   - `test`：[`test/codex-multi-agents/test_codex-multi-agents-list.py`](test/codex-multi-agents/test_codex-multi-agents-list.py)
