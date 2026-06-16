@@ -2,7 +2,7 @@
 
 
 功能说明:
-- 承接内置 `cpu` / `npu_demo` / `cuda_sm86` 后端共享的源码校验、entry shim、编译命令和 SourceBundle 基础能力。
+- 承接内置 `cpu` / `npu_demo` / `cuda_sm89` 后端共享的源码校验、entry shim、编译命令和 SourceBundle 基础能力。
 - 提供 `builtin_strategy` package 内部跨 target 复用的文件级 API。
 - compile unit 源码、dry-run 占位产物和 runtime trance 目录路径派生统一委托 `kernel_gen.core.tools.dump_dir.DumpDirWriter`。
 - 不运行期导入 `compiler.py`，不构造 `CompiledKernel`，不进入 `kernel_gen.execute_engine` 包根公开 API。
@@ -29,7 +29,7 @@ helper 清单:
 - 功能实现: kernel_gen/execute_engine/builtin_strategy/__init__.py
 - 功能实现: kernel_gen/execute_engine/builtin_strategy/cpu.py
 - 功能实现: kernel_gen/execute_engine/builtin_strategy/npu_demo.py
-- 功能实现: kernel_gen/execute_engine/builtin_strategy/cuda_sm86.py
+- 功能实现: kernel_gen/execute_engine/builtin_strategy/cuda_sm89.py
 """
 
 from __future__ import annotations
@@ -474,7 +474,7 @@ class _BuiltinStrategySupport:
         """返回 target 对应的 include set。
 
         功能说明:
-        - 固定 `cpu`、`npu_demo` 与 `cuda_sm86` 的 include 注入集合。
+        - 固定 `cpu`、`npu_demo` 与 `cuda_sm89` 的 include 注入集合。
         - 不支持的 target 返回空集合，由上层转成稳定失败。
 
         使用示例:
@@ -483,8 +483,8 @@ class _BuiltinStrategySupport:
 
         if target == "npu_demo":
             return ('#include "include/npu_demo/npu_demo.h"',)
-        if target == "cuda_sm86":
-            return ('#include "include/cuda_sm86/cuda_sm86.cuh"',)
+        if target == "cuda_sm89":
+            return ('#include "include/cuda_sm89/cuda_sm89.cuh"',)
         if target == "cpu":
             return (
                 '#include "include/cpu/Memory.h"',
@@ -1135,7 +1135,7 @@ class _BuiltinStrategySupport:
         """从 source 粗略推断 include family。
 
         功能说明:
-        - 只识别仓库约定路径片段：`include/cpu/`、`include/npu_demo/` 与 `include/cuda_sm86/`。
+        - 只识别仓库约定路径片段：`include/cpu/`、`include/npu_demo/` 与 `include/cuda_sm89/`。
         - 混合 include 返回 `mixed`，由上层转成稳定失败。
 
         使用示例:
@@ -1144,15 +1144,15 @@ class _BuiltinStrategySupport:
 
         has_cpu = "include/cpu/" in source
         has_npu = "include/npu_demo/" in source
-        has_cuda_sm86 = "include/cuda_sm86/" in source
-        if sum(1 for item in (has_cpu, has_npu, has_cuda_sm86) if item) > 1:
+        has_cuda_sm89 = "include/cuda_sm89/" in source
+        if sum(1 for item in (has_cpu, has_npu, has_cuda_sm89) if item) > 1:
             return "mixed"
         if has_cpu:
             return "cpu"
         if has_npu:
             return "npu_demo"
-        if has_cuda_sm86:
-            return "cuda_sm86"
+        if has_cuda_sm89:
+            return "cuda_sm89"
         return None
 
 

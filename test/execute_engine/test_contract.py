@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import ast
+from concurrent.futures import ThreadPoolExecutor
 import importlib
 import importlib.util
 import itertools
@@ -51,6 +52,36 @@ from kernel_gen.execute_engine import (
 )
 
 
+def _run_execute_engine_import_order(order: tuple[str, ...]) -> tuple[tuple[str, ...], int, str]:
+    """Run one execute_engine import-order subprocess.
+
+    功能说明:
+    - 在独立 Python 进程中按给定顺序 import execute_engine 相关模块。
+    - 为单个顺序设置硬超时，避免某个循环导入问题让整个 pytest 进程无限等待。
+    - 返回顺序、退出码和 stderr 摘要，供矩阵测试统一渲染失败。
+
+    使用示例:
+    - order, returncode, stderr = _run_execute_engine_import_order(("kernel_gen.execute_engine",))
+    """
+
+    script = "import importlib\n" + "\n".join(f'importlib.import_module("{module}")' for module in order)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return order, -1, f"timeout after {exc.timeout}s"
+    return order, result.returncode, result.stderr[-2000:]
+
+
 # EE-S1-000
 # 测试目的: 确认 S1 约定的 spec/test 骨架文件存在。
 # 对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
@@ -69,7 +100,7 @@ def test_execute_engine_contract_files_exist() -> None:
     assert (execute_engine_dir / "builtin_strategy" / "__init__.py").is_file()
     assert (execute_engine_dir / "builtin_strategy" / "cpu.py").is_file()
     assert (execute_engine_dir / "builtin_strategy" / "npu_demo.py").is_file()
-    assert (execute_engine_dir / "builtin_strategy" / "cuda_sm86.py").is_file()
+    assert (execute_engine_dir / "builtin_strategy" / "cuda_sm89.py").is_file()
     assert (execute_engine_dir / "runtime_args.py").is_file()
     assert not old_target_module.exists()
     assert (REPO_ROOT / "test/execute_engine/test_contract.py").is_file()
@@ -212,19 +243,11 @@ def test_execute_engine_strategy_import_order_matrix() -> None:
         "kernel_gen.execute_engine.compiler",
         "kernel_gen.execute_engine",
     )
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(REPO_ROOT)
-    for order in itertools.permutations(modules):
-        script = "import importlib\n" + "\n".join(f'importlib.import_module("{module}")' for module in order)
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            cwd=REPO_ROOT,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        assert result.returncode == 0, result.stderr
+    orders = tuple(itertools.permutations(modules))
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = tuple(executor.map(_run_execute_engine_import_order, orders))
+    failures = [(order, returncode, stderr) for order, returncode, stderr in results if returncode != 0]
+    assert failures == []
 
 
 # EE-S1-000E
@@ -379,7 +402,7 @@ def test_execute_engine_private_callable_gate() -> None:
         REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy" / "__init__.py",
         REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy" / "cpu.py",
         REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy" / "npu_demo.py",
-        REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy" / "cuda_sm86.py",
+        REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy" / "cuda_sm89.py",
         REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy" / "common.py",
         REPO_ROOT / "kernel_gen/execute_engine/runtime_args.py",
     )

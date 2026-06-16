@@ -35,7 +35,7 @@
   - 直接构造：`LowerDmaMemoryHierarchyPass(fold=True, apply_op=None)`
   - options 构造：`LowerDmaMemoryHierarchyPass.from_options({"apply_op": "matmul{[\\"\\", \\"tlm1\\", \\"tlm2\\"]}"})`
   - registry 构造：`build_registered_pass("lower-dma-memory-hierarchy", {"apply_op": "matmul{[\\"\\", \\"tlm1\\", \\"tlm2\\"]}"})`
-- CUDA SM86 C5 调用侧固定使用 `matmul{["tlm1", "tlm1", "tlm1"]}`，该规则仍通过本文公开语法表达，不新增 pass option。
+- CUDA SM89 C5 调用侧固定使用 `matmul{["tlm1", "tlm1", "tlm1"]}`，该规则仍通过本文公开语法表达，不新增 pass option。
 - 固定当前规则语法为单条 `matmul{[...]}`，本轮不支持多规则、不支持非 `matmul` op。
 - 固定目标 space 集合为 `shared/local/tsm/tlm1/tlm2/tlm3`；空字符串 `""` 表示对应 operand 不变。
 - 允许 `kernel.matmul(out@A, lhs@B, rhs@C)` 的 mixed-space 结果通过 verifier；`kernel.matmul.space` attribute 只保留为已有 op 空间属性，不重新定义为 out 或执行主导 space。

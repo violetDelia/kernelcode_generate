@@ -1,7 +1,7 @@
 """execute_engine builtin strategy package.
 
 功能说明:
-- 保留内置 compile strategy 的文件级 API，并按 target 分发到 `cpu`、`npu_demo`、`cuda_sm86` 实现模块。
+- 保留内置 compile strategy 的文件级 API，并按 target 分发到 `cpu`、`npu_demo`、`cuda_sm89` 实现模块。
 - 不进入 `kernel_gen.execute_engine` 包根公开 API，不运行期导入 `compiler.py`，不构造 `CompiledKernel`。
 
 API 列表:
@@ -21,7 +21,7 @@ API 列表:
 - 功能实现: kernel_gen/execute_engine/compiler.py
 - 功能实现: kernel_gen/execute_engine/builtin_strategy/cpu.py
 - 功能实现: kernel_gen/execute_engine/builtin_strategy/npu_demo.py
-- 功能实现: kernel_gen/execute_engine/builtin_strategy/cuda_sm86.py
+- 功能实现: kernel_gen/execute_engine/builtin_strategy/cuda_sm89.py
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from kernel_gen.execute_engine.builtin_strategy.common import (
     BuiltinStrategySupport,
 )
 from kernel_gen.execute_engine.builtin_strategy.cpu import build_cpu_compile_artifacts
-from kernel_gen.execute_engine.builtin_strategy.cuda_sm86 import build_cuda_sm86_compile_artifacts
+from kernel_gen.execute_engine.builtin_strategy.cuda_sm89 import build_cuda_sm89_compile_artifacts
 from kernel_gen.execute_engine.builtin_strategy.npu_demo import build_npu_demo_compile_artifacts
 from kernel_gen.execute_engine.strategy import CompileStrategy, register_compile_strategy
 
@@ -42,7 +42,7 @@ def build_builtin_compile_artifacts(request: "CompileRequest") -> BuiltinCompile
     """生成内置 target 编译产物。
 
     功能说明:
-    - 校验公共 compile request 边界后，按 target 分发到 `cpu`、`npu_demo` 或 `cuda_sm86` 模块。
+    - 校验公共 compile request 边界后，按 target 分发到 `cpu`、`npu_demo` 或 `cuda_sm89` 模块。
     - 返回不依赖 `compiler.py` 类型的产物描述，由 facade 负责装配 `CompiledKernel`。
 
     使用示例:
@@ -70,7 +70,7 @@ def build_builtin_compile_artifacts(request: "CompileRequest") -> BuiltinCompile
     if not isinstance(entry_point, str) or not entry_point.strip():
         raise BuiltinStrategySupport.builtin_compile_error("symbol_resolve_failed", "entry_point is empty")
 
-    if target == "cuda_sm86" and request.compiler is None:
+    if target == "cuda_sm89" and request.compiler is None:
         compiler = "nvcc"
     else:
         compiler = BuiltinStrategySupport.resolve_compiler_name(request.compiler)
@@ -81,8 +81,8 @@ def build_builtin_compile_artifacts(request: "CompileRequest") -> BuiltinCompile
         return build_cpu_compile_artifacts(request, compiler, compiler_flags, request.link_flags)
     if target == "npu_demo":
         return build_npu_demo_compile_artifacts(request, compiler, compiler_flags, request.link_flags)
-    if target == "cuda_sm86":
-        return build_cuda_sm86_compile_artifacts(request, compiler, compiler_flags, request.link_flags)
+    if target == "cuda_sm89":
+        return build_cuda_sm89_compile_artifacts(request, compiler, compiler_flags, request.link_flags)
     raise BuiltinStrategySupport.builtin_compile_error("target_header_mismatch", f"unsupported target: {target}")
 
 
@@ -90,7 +90,7 @@ def install_builtin_compile_strategies(strategy_factory: Callable[[], CompileStr
     """安装内置 compile strategy。
 
     功能说明:
-    - 使用调用方提供的 factory 为 `cpu`、`npu_demo` 与 `cuda_sm86` 分别创建 strategy 实例。
+    - 使用调用方提供的 factory 为 `cpu`、`npu_demo` 与 `cuda_sm89` 分别创建 strategy 实例。
     - 安装时使用 `override=True`，保持模块重载或重复导入时的既有覆盖语义。
 
     使用示例:
@@ -99,7 +99,7 @@ def install_builtin_compile_strategies(strategy_factory: Callable[[], CompileStr
 
     register_compile_strategy("cpu", strategy_factory(), override=True)
     register_compile_strategy("npu_demo", strategy_factory(), override=True)
-    register_compile_strategy("cuda_sm86", strategy_factory(), override=True)
+    register_compile_strategy("cuda_sm89", strategy_factory(), override=True)
 
 
 __all__ = [

@@ -22,7 +22,7 @@
   - [`kernel_gen/dsl/gen_kernel/emit/register.py`](../../../kernel_gen/dsl/gen_kernel/emit/register.py)
   - [`kernel_gen/dsl/gen_kernel/emit/cpu/__init__.py`](../../../kernel_gen/dsl/gen_kernel/emit/cpu/__init__.py)
   - [`kernel_gen/dsl/gen_kernel/emit/npu_demo/__init__.py`](../../../kernel_gen/dsl/gen_kernel/emit/npu_demo/__init__.py)
-  - [`kernel_gen/dsl/gen_kernel/emit/cuda_sm86/__init__.py`](../../../kernel_gen/dsl/gen_kernel/emit/cuda_sm86/__init__.py)
+  - [`kernel_gen/dsl/gen_kernel/emit/cuda_sm89/__init__.py`](../../../kernel_gen/dsl/gen_kernel/emit/cuda_sm89/__init__.py)
 - `test`：[`test/dsl/gen_kernel/emit/test_package.py`](../../../test/dsl/gen_kernel/emit/test_package.py)
 
 ## 依赖
@@ -33,7 +33,7 @@
 - [`spec/dsl/gen_kernel/source_product.md`](../../../spec/dsl/gen_kernel/source_product.md)
 - [`spec/dsl/gen_kernel/emit/cpu/__init__.md`](../../../spec/dsl/gen_kernel/emit/cpu/__init__.md)
 - [`spec/dsl/gen_kernel/emit/npu_demo.md`](../../../spec/dsl/gen_kernel/emit/npu_demo.md)
-- [`spec/dsl/gen_kernel/emit/cuda_sm86.md`](../../../spec/dsl/gen_kernel/emit/cuda_sm86.md)
+- [`spec/dsl/gen_kernel/emit/cuda_sm89.md`](../../../spec/dsl/gen_kernel/emit/cuda_sm89.md)
 
 ## 目标
 
@@ -62,7 +62,7 @@
 - `gen_kernel` 可在源码中写入 `// kg.allow_absent_memory_args: <index>:<dtype>:<rank>;...` 元数据，供执行引擎按公开 runtime `None` 合同识别 allow-absent memory 参数；该注释不新增 `emit` package 公开 API。
 - `kernel.binary_elewise(kind="min"|"max")` 在 `target="cpu"` 下必须发射为 `cpu::min(lhs, rhs, out)` / `cpu::max(lhs, rhs, out)`，在 `target="npu_demo"` 下必须发射为 `min<Space, InType, OutType>(ctx, out, lhs, rhs)` / `max<Space, InType, OutType>(ctx, out, lhs, rhs)`；历史 standalone 成本发射映射到 `cost::min/max<Space, InType, OutType, Kind>(out, lhs, rhs)`，不作为 context-first generated source 主链路。
 - `target="npu_demo"` 的 DMA / cost helper layout 参数必须消费 include 层 `Vector` 公开参数；rank 1..8 发射为 `{...} /*shape*/`、`{...} /*stride*/`、`{...} /*offset*/`、`{...} /*size*/` 并绑定临时 `Vector`，rank >8 必须按公开错误失败；不得生成 `std::initializer_list<long long>` DMA / cost helper overload 或 `Vector{...}` 文本。
-- `target="cuda_sm86"` 的 `ModuleOp` 发射必须通过 registry 自动加载 `kernel_gen.dsl.gen_kernel.emit.cuda_sm86`，返回公开 SourceBundle aggregate string；artifact 至少包含 `kernel.cu`，且 generated source 必须按 lowered final IR 中真实 op/attrs/operand type/result type/region block 信息生成 hash marker、trace comment、hash 专属 generated kernel、device body、wrapper call 和 operand binding；generated kernel 必须包含 CUDA include、`__global__` kernel marker、参与最终 matmul 输出的真实 Tensor Core `mma.sync` 或 `nvcuda::wmma` 执行路径与 `kg_execute_entry(slots, count)` C ABI；`arch.launch` callee 必须在所属 final IR 控制流分支内按 launch operand 映射进入 generated device body 或 device helper 调用，不得包含 `include/npu_demo`、`npu_demo::` 或 `get_dynamic_memory<TLM`；不得用 entry 名称、printed IR 字符串 token 或 unknown fallback 选择 source。
+- `target="cuda_sm89"` 的 `ModuleOp` 发射必须通过 registry 自动加载 `kernel_gen.dsl.gen_kernel.emit.cuda_sm89`，返回公开 SourceBundle aggregate string；artifact 至少包含 `kernel.cu`，且 generated source 必须按 lowered final IR 中真实 op/attrs/operand type/result type/region block 信息生成 hash marker、trace comment、hash 专属 generated kernel、device body、wrapper call 和 operand binding；generated kernel 必须包含 CUDA include、`__global__` kernel marker、参与最终 matmul 输出的真实 Tensor Core `mma.sync` 或 `nvcuda::wmma` 执行路径与 `kg_execute_entry(slots, count)` C ABI；`arch.launch` callee 必须在所属 final IR 控制流分支内按 launch operand 映射进入 generated device body 或 device helper 调用，不得包含 `include/npu_demo`、`npu_demo::` 或 `get_dynamic_memory<TLM`；不得用 entry 名称、printed IR 字符串 token 或 unknown fallback 选择 source。
 
 ## API详细说明
 
@@ -114,8 +114,8 @@
 ## 测试
 
 - 测试文件：`test/dsl/gen_kernel/emit/test_package.py`
-- 测试文件：`test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py`
-- 执行命令：`pytest -q test/dsl/gen_kernel/emit/test_package.py test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py`
+- 测试文件：`test/dsl/gen_kernel/emit/test_cuda_sm89_emit.py`
+- 执行命令：`pytest -q test/dsl/gen_kernel/emit/test_package.py test/dsl/gen_kernel/emit/test_cuda_sm89_emit.py`
 
 ### 测试目标
 
@@ -154,7 +154,7 @@
 | TC-DSL-GEN-KERNEL-EMIT-023 | pass 改写 | emit c op lowers mlir gen NN add variants after pass | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_op_lowers_mlir_gen_nn_add_variants_after_pass`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c op lowers mlir gen NN add variants after pass”场景。 | `test_emit_c_op_lowers_mlir_gen_nn_add_variants_after_pass` |
 | TC-DSL-GEN-KERNEL-EMIT-024 | 生成/编译 | emit c op keeps NN add unsupported without prebound result or on non cpu | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_emit_c_op_keeps_nn_add_unsupported_without_prebound_result_or_on_non_cpu`。 | 生成源码、IR 文本或编译结果体现“emit c op keeps NN add unsupported without prebound result or on non cpu”场景。 | `test_emit_c_op_keeps_nn_add_unsupported_without_prebound_result_or_on_non_cpu` |
 | TC-DSL-GEN-KERNEL-EMIT-025 | 生成/编译 | emit c memory space template alloc | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_emit_c_memory_space_template_alloc`。 | 生成源码、IR 文本或编译结果体现“emit c memory space template alloc”场景。 | `test_emit_c_memory_space_template_alloc` |
-| TC-DSL-GEN-KERNEL-EMIT-026 | 边界/异常 | emit c op lowers kernel op emitters and rejects unsupported reduce kind | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_emit_c_op_lowers_kernel_family_and_rejects_unsupported_reduce_kind`。 | `kernel.binary_elewise` 覆盖 CPU `min/max` 与 npu_demo `max` 发射；不支持 kind 按公开错误语义失败；CUDA SM86 module source 由 final IR SourceBundle traversal 承接。 | `test_emit_c_op_lowers_kernel_family_and_rejects_unsupported_reduce_kind` |
+| TC-DSL-GEN-KERNEL-EMIT-026 | 边界/异常 | emit c op lowers kernel op emitters and rejects unsupported reduce kind | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_emit_c_op_lowers_kernel_family_and_rejects_unsupported_reduce_kind`。 | `kernel.binary_elewise` 覆盖 CPU `min/max` 与 npu_demo `max` 发射；不支持 kind 按公开错误语义失败；CUDA SM89 module source 由 final IR SourceBundle traversal 承接。 | `test_emit_c_op_lowers_kernel_family_and_rejects_unsupported_reduce_kind` |
 | TC-DSL-GEN-KERNEL-EMIT-027 | pass 改写 | emit c lowers npu demo DMA alloc helper contract | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_dma_alloc_helper_contract`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo DMA alloc helper contract”场景。 | `test_emit_c_lowers_npu_demo_dma_alloc_helper_contract` |
 | TC-DSL-GEN-KERNEL-EMIT-028 | pass 改写 | emit c lowers npu demo DMA broadcast helper contract | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_dma_broadcast_helper_contract`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo DMA broadcast helper contract”场景。 | `test_emit_c_lowers_npu_demo_dma_broadcast_helper_contract` |
 | TC-DSL-GEN-KERNEL-EMIT-029 | pass 改写 | emit c lowers npu demo DMA scalar broadcast as fill contract | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_dma_scalar_broadcast_as_fill_contract`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo DMA scalar broadcast as fill contract”场景。 | `test_emit_c_lowers_npu_demo_dma_scalar_broadcast_as_fill_contract` |

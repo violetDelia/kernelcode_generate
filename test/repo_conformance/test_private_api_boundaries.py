@@ -515,34 +515,34 @@ def testcurrent_diff_module_helpers_use_private_prefix_or_public_api() -> None:
     )
 
 
-def testcuda_sm86_final_ir_builder_stays_package_local_by_text() -> None:
-    """Assert CUDA SM86 final IR builder is not re-exported.
+def testcuda_sm89_final_ir_builder_stays_package_local_by_text() -> None:
+    """Assert CUDA SM89 final IR builder is not re-exported.
 
     功能说明:
     - 只读取 CUDA emit package 文件和 AST，不 import / direct call package-local helper。
     - 锁定 final IR SourceBundle builder 存在、root `__all__` 为空、旧 source-selection helper 文件退场。
 
     使用示例:
-    - pytest.main(["test/repo_conformance/test_private_api_boundaries.py", "-k", "cuda_sm86_final_ir_builder"])
+    - pytest.main(["test/repo_conformance/test_private_api_boundaries.py", "-k", "cuda_sm89_final_ir_builder"])
     """
 
     root = _PrivateApiBoundaryHelpers.repo_root()
-    package_root = root / "kernel_gen" / "dsl" / "gen_kernel" / "emit" / "cuda_sm86"
+    package_root = root / "kernel_gen" / "dsl" / "gen_kernel" / "emit" / "cuda_sm89"
     source_bundle_tree = ast.parse((package_root / "source_bundle.py").read_text(encoding="utf-8"))
     public_classes = {node.name for node in ast.walk(source_bundle_tree) if isinstance(node, ast.ClassDef)}
     public_functions = {node.name for node in ast.walk(source_bundle_tree) if isinstance(node, ast.FunctionDef)}
     old_tokens = (
-        "CudaSm86" + "ModuleSummary",
-        "detect_cuda_sm86_" + "kernel_family",
-        "summarize_cuda_sm86_" + "module",
+        "CudaSm89" + "ModuleSummary",
+        "detect_cuda_sm89_" + "kernel_family",
+        "summarize_cuda_sm89_" + "module",
         "emit_" + "matmul_source",
         "emit_" + "conv2d_source",
         "emit_" + "flash_attention_source",
     )
 
-    assert "CudaSm86SourceBuilder" in public_classes
-    assert "CudaSm86IrTrace" in public_classes
-    assert "build_cuda_sm86_source_bundle" in public_functions
+    assert "CudaSm89SourceBuilder" in public_classes
+    assert "CudaSm89IrTrace" in public_classes
+    assert "build_cuda_sm89_source_bundle" in public_functions
     assert not (package_root / "detect.py").exists()
     init_text = (package_root / "__init__.py").read_text(encoding="utf-8")
     assert "__all__: list[str] = []" in init_text
@@ -552,25 +552,25 @@ def testcuda_sm86_final_ir_builder_stays_package_local_by_text() -> None:
             assert token not in text, (path, token)
 
 
-def testcuda_sm86_source_builder_public_methods_match_exact_sets_by_text() -> None:
-    """Assert CudaSm86SourceBuilder public methods are listed in exact sets.
+def testcuda_sm89_source_builder_public_methods_match_exact_sets_by_text() -> None:
+    """Assert CudaSm89SourceBuilder public methods are listed in exact sets.
 
     功能说明:
     - 只用 AST 和文本对照 `source_bundle.py`，不 import 或 direct call package-local helper。
-    - 锁定无下划线 `CudaSm86SourceBuilder` 方法必须同步到文件级 API 列表和 cuda_sm86 spec exact set。
+    - 锁定无下划线 `CudaSm89SourceBuilder` 方法必须同步到文件级 API 列表和 cuda_sm89 spec exact set。
 
     使用示例:
-    - pytest.main(["test/repo_conformance/test_private_api_boundaries.py", "-k", "cuda_sm86_source_builder_public_methods"])
+    - pytest.main(["test/repo_conformance/test_private_api_boundaries.py", "-k", "cuda_sm89_source_builder_public_methods"])
     """
 
     root = _PrivateApiBoundaryHelpers.repo_root()
-    source_path = root / "kernel_gen" / "dsl" / "gen_kernel" / "emit" / "cuda_sm86" / "source_bundle.py"
-    spec_path = root / "spec" / "dsl" / "gen_kernel" / "emit" / "cuda_sm86.md"
+    source_path = root / "kernel_gen" / "dsl" / "gen_kernel" / "emit" / "cuda_sm89" / "source_bundle.py"
+    spec_path = root / "spec" / "dsl" / "gen_kernel" / "emit" / "cuda_sm89.md"
     source_text = source_path.read_text(encoding="utf-8")
     spec_text = spec_path.read_text(encoding="utf-8")
     source_tree = ast.parse(source_text)
     builder_class = next(
-        node for node in source_tree.body if isinstance(node, ast.ClassDef) and node.name == "CudaSm86SourceBuilder"
+        node for node in source_tree.body if isinstance(node, ast.ClassDef) and node.name == "CudaSm89SourceBuilder"
     )
     expected_lines: list[str] = []
     for node in builder_class.body:
@@ -606,7 +606,7 @@ def testcuda_sm86_source_builder_public_methods_match_exact_sets_by_text() -> No
                 rendered_arg += f": {ast.unparse(node.args.kwarg.annotation)}"
             rendered_args.append(rendered_arg)
         return_type = "None" if node.returns is None else ast.unparse(node.returns)
-        expected_lines.append(f"- `CudaSm86SourceBuilder.{node.name}({', '.join(rendered_args)}) -> {return_type}`")
+        expected_lines.append(f"- `CudaSm89SourceBuilder.{node.name}({', '.join(rendered_args)}) -> {return_type}`")
 
     source_api_block = source_text.split("API 列表:", maxsplit=1)[1].split("使用示例:", maxsplit=1)[0]
     spec_exact_set = spec_text.split("package-local 文件级 API exact set：", maxsplit=1)[1].split(
@@ -621,6 +621,6 @@ def testcuda_sm86_source_builder_public_methods_match_exact_sets_by_text() -> No
         f"missing_source={len(source_missing)}):\n" + "\n".join(source_missing)
     )
     assert not spec_missing, (
-        f"cuda_sm86 spec exact set missing (public_methods={len(expected_lines)} "
+        f"cuda_sm89 spec exact set missing (public_methods={len(expected_lines)} "
         f"missing_spec={len(spec_missing)}):\n" + "\n".join(spec_missing)
     )

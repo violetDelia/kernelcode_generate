@@ -5,7 +5,7 @@
 - 保留 `compiler.py` 旧公开导入路径，并 re-export strategy registry 公开 API。
 - 通过 `builtin_strategy/` package 生成内置后端编译产物，通过 `runtime_args.py` 完成运行时 ABI 调用。
 - `capture_function_output=True` 仅用于 npu_demo 生成源码的 cost summary companion，文本放入 `ExecuteResult.run_stdout`。
-- CUDA SM86 后端通过同一 `ExecutionEngine(target="cuda_sm86")` 公开入口编译并执行 `.so` slot C ABI。
+- CUDA SM89 后端通过同一 `ExecutionEngine(target="cuda_sm89")` 公开入口编译并执行 `.so` slot C ABI。
 
 API 列表:
 - `class CompileRequest(source: str, target: str, function: str, entry_point: str = "kg_execute_entry", compiler: str | None = None, compiler_flags: tuple[str, ...] = ("-std=c++17",), link_flags: tuple[str, ...] = ())`
@@ -39,7 +39,7 @@ result = kernel.execute(request=ExecuteRequest(args=()))
 - kernel_gen/execute_engine/builtin_strategy/__init__.py
 - kernel_gen/execute_engine/builtin_strategy/cpu.py
 - kernel_gen/execute_engine/builtin_strategy/npu_demo.py
-- kernel_gen/execute_engine/builtin_strategy/cuda_sm86.py
+- kernel_gen/execute_engine/builtin_strategy/cuda_sm89.py
 - kernel_gen/execute_engine/runtime_args.py
 - test/execute_engine/test_contract.py
 - test/execute_engine/test_compile.py
@@ -284,12 +284,12 @@ class CompiledKernel:
             capture_function_output = request.capture_function_output
             stream = request.stream
         if stream is not None:
-            detail = "cuda_sm86 does not support non-None stream" if self.target == "cuda_sm86" else "ExecuteRequest.stream is not supported in P0"
+            detail = "cuda_sm89 does not support non-None stream" if self.target == "cuda_sm89" else "ExecuteRequest.stream is not supported in P0"
             raise _ExecutionEngineSupport.error(
                 _STREAM_NOT_SUPPORTED,
                 detail,
             )
-        if self.target not in ("cpu", "npu_demo", "cuda_sm86"):
+        if self.target not in ("cpu", "npu_demo", "cuda_sm89"):
             raise _ExecutionEngineSupport.error(
                 _EXECUTION_UNSUPPORTED,
                 "compiled target does not expose runtime execution",

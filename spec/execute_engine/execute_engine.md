@@ -6,7 +6,7 @@
 - **生命周期**：`compile(request) -> CompiledKernel`，随后 `CompiledKernel.execute(exec_request) -> ExecuteResult`；当编译过程使用内部临时工作区时，`CompiledKernel.close()` 或对象析构必须释放该工作区。
 - **输入**：
   - `source`：C++ 源码字符串（单个 translation unit）。
-  - `target`：目标后端标识（`cpu` / `npu_demo` / `cuda_sm86`）。
+  - `target`：目标后端标识（`cpu` / `npu_demo` / `cuda_sm89`）。
   - `function`：要调用的目标函数符号（例如 `"npu_demo::add"`）。
   - `args`：按形参顺序排列的入参序列，元素类型仅允许：`memory` / `int` / `float`；Python / numpy integer scalar 与 Python / numpy floating scalar 进入 ABI 前规整为 Python scalar。
 - **失败短语入口**：所有失败必须在 `ExecuteResult.failure_phrase` 以“固定短语”表达，禁止静默 fallback 或同义词扩散。
@@ -37,7 +37,7 @@
 - `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/__init__.py`](kernel_gen/execute_engine/builtin_strategy/__init__.py)
 - `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/cpu.py`](kernel_gen/execute_engine/builtin_strategy/cpu.py)
 - `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/npu_demo.py`](kernel_gen/execute_engine/builtin_strategy/npu_demo.py)
-- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/cuda_sm86.py`](kernel_gen/execute_engine/builtin_strategy/cuda_sm86.py)
+- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/cuda_sm89.py`](kernel_gen/execute_engine/builtin_strategy/cuda_sm89.py)
 - `功能实现`：[`kernel_gen/execute_engine/runtime_args.py`](kernel_gen/execute_engine/runtime_args.py)
 - `test`：[`test/execute_engine/test_contract.py`](test/execute_engine/test_contract.py)
 - `test`：[`test/execute_engine/test_builtin_strategy.py`](test/execute_engine/test_builtin_strategy.py)
@@ -73,7 +73,7 @@
 ### 模块级补充
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
-- `P0` 内置真实编译/执行支持 `target in {"cpu","npu_demo","cuda_sm86"}`；其他 target 必须注册 compile strategy，缺失时 `failure_phrase == "target_header_mismatch"`。
+- `P0` 内置真实编译/执行支持 `target in {"cpu","npu_demo","cuda_sm89"}`；其他 target 必须注册 compile strategy，缺失时 `failure_phrase == "target_header_mismatch"`。
 - 第三方 compile-only target 的 `CompiledKernel.execute(...)` 必须以 `failure_phrase == "execution_unsupported"` 公开失败，不得 fallback 到普通 kernel。
 - `P0` 不支持 `stream`；当 `ExecuteRequest.stream is not None` 必须失败，且 `failure_phrase == "stream_not_supported"`。
 - `P0` 不支持通用函数输出回收；当 `ExecuteRequest.capture_function_output=True` 且不是 npu_demo cost summary companion 场景时必须失败，且 `failure_phrase == "function_output_capture_not_supported"`。npu_demo cost summary companion 成功时，`ExecuteResult.run_stdout` 承载捕获文本。

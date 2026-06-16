@@ -33,7 +33,7 @@
 - `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/__init__.py`](kernel_gen/execute_engine/builtin_strategy/__init__.py)
 - `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/cpu.py`](kernel_gen/execute_engine/builtin_strategy/cpu.py)
 - `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/npu_demo.py`](kernel_gen/execute_engine/builtin_strategy/npu_demo.py)
-- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/cuda_sm86.py`](kernel_gen/execute_engine/builtin_strategy/cuda_sm86.py)
+- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/cuda_sm89.py`](kernel_gen/execute_engine/builtin_strategy/cuda_sm89.py)
 - `功能实现`：[`kernel_gen/execute_engine/runtime_args.py`](kernel_gen/execute_engine/runtime_args.py)
 - `test`：[`test/execute_engine/test_contract.py`](test/execute_engine/test_contract.py)
 - `test`：[`test/execute_engine/test_compile_strategy.py`](test/execute_engine/test_compile_strategy.py)
