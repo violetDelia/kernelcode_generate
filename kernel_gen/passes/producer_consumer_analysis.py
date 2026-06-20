@@ -4,6 +4,7 @@
 功能说明:
 - 提供 `producer-consumer-analysis` pass，基于公开 `MemoryEffect` 标注生产 / 消费 event。
 - 使用当前文件内 alias 规则处理 `dma.view`、`dma.reshape`、`dma.subview`、`dma.reinterpret` 与 `dma.deslice`。
+- 对 `dma.alloc` 与 `dma.make_ring` init root 只连接第一组真实 READ / WRITE first-touch edge。
 - 对 ring soft-pipeline 形态补充 `loop_first_*`、`loop_carried_*` 与 `after_loop_*` 标注。
 - 同一 producer -> consumer edge 只写普通 event 对或一个控制流 event 对，不生成 wait/sign 或 runtime 同步 op。
 
@@ -39,7 +40,15 @@ from xdsl.printer import Printer
 from xdsl.traits import MemoryEffectKind, get_effects
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
-from kernel_gen.dialect.dma import DmaAdvanceRingOp, DmaCurrentRingOp, DmaReinterpretOp, DmaReshapeOp, DmaSubviewOp, DmaViewOp
+from kernel_gen.dialect.dma import (
+    DmaAdvanceRingOp,
+    DmaCurrentRingOp,
+    DmaMakeRingOp,
+    DmaReinterpretOp,
+    DmaReshapeOp,
+    DmaSubviewOp,
+    DmaViewOp,
+)
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp
 from kernel_gen.passes.common import ensure_builtin_module
@@ -133,16 +142,17 @@ class _ProducerCandidate:
     """单个 producer value 及其 owner op。
 
     功能说明:
-    - 记录 `ALLOC/WRITE` effect 产生的 memory value。
-    - 每个 candidate 独立遍历 downstream meaningful consumer。
+    - 记录 `ALLOC/WRITE` effect 产生的 memory value，或 `dma.make_ring` 产生的 ring init root。
+    - `kind` 区分 init first-touch candidate 与普通 WRITE data candidate。
 
     使用示例:
-    - candidate = _ProducerCandidate(op, value, root)
+    - candidate = _ProducerCandidate(op, value, root, "write")
     """
 
     op: Operation
     value: SSAValue
     root: SSAValue
+    kind: str
 
 
 @dataclass(frozen=True)
@@ -689,36 +699,6 @@ def _read_roots_by_op(
     return roots
 
 
-def _producer_candidates(
-    ops: tuple[Operation, ...],
-    alias_roots: dict[SSAValue, SSAValue],
-) -> tuple[_ProducerCandidate, ...]:
-    """收集 ALLOC / WRITE producer candidates。
-
-    功能说明:
-    - `ALLOC` 与 `WRITE` 都作为 producer value 起点。
-    - 后续只有找到 downstream consumer 时才写 `productor`。
-
-    使用示例:
-    - candidates = _producer_candidates(ops, alias_roots)
-    """
-
-    candidates: list[_ProducerCandidate] = []
-    for op in ops:
-        values = [
-            *_effect_values(op, MemoryEffectKind.ALLOC),
-            *_effect_values(op, MemoryEffectKind.WRITE),
-        ]
-        seen_roots: set[SSAValue] = set()
-        for value in values:
-            root = _alias_root(value, alias_roots)
-            if root in seen_roots:
-                continue
-            seen_roots.add(root)
-            candidates.append(_ProducerCandidate(op, value, root))
-    return tuple(candidates)
-
-
 def _group_consumer_edges(edges: tuple[_ConsumerEdge, ...]) -> tuple[tuple[_ConsumerEdge, ...], ...]:
     """按 event 共享规则分组 downstream consumer edges。
 
@@ -898,6 +878,7 @@ class ProducerConsumerAnalysisPass(Pass):
         功能说明:
         - 校验输入为 `builtin.module`。
         - 对每个非声明 `func.func` 分别标注 producer/consumer event。
+        - 对 `dma.alloc` 与 `dma.make_ring` init candidate 只连接 first-touch edge group。
 
         使用示例:
         - ProducerConsumerAnalysisPass().apply(Context(), module)
@@ -914,15 +895,89 @@ class ProducerConsumerAnalysisPass(Pass):
             alias_roots = _build_alias_roots(ops)
             alias_groups = _build_alias_groups(ops, alias_roots)
             read_roots = _read_roots_by_op(ops, alias_roots)
+            touch_roots: dict[Operation, set[SSAValue]] = {}
+            for op in ops:
+                op_roots = {
+                    _alias_root(value, alias_roots)
+                    for value in (
+                        *_effect_values(op, MemoryEffectKind.READ),
+                        *_effect_values(op, MemoryEffectKind.WRITE),
+                    )
+                }
+                if op_roots:
+                    touch_roots[op] = op_roots
+            init_alias_roots: dict[SSAValue, SSAValue] = {}
+            ring_init_roots: dict[SSAValue, SSAValue] = {}
+            for op in ops:
+                if isinstance(op, DmaMakeRingOp):
+                    ring_value = SSAValue.get(op.result)
+                    ring_init_roots[ring_value] = ring_value
+                    init_alias_roots[ring_value] = ring_value
+                    continue
+                if isinstance(op, (DmaCurrentRingOp, DmaAdvanceRingOp)):
+                    ring_value = SSAValue.get(op.ring)
+                    ring_root = ring_init_roots.get(ring_value)
+                    if ring_root is not None:
+                        init_alias_roots[_alias_root(SSAValue.get(op.result), alias_roots)] = ring_root
             op_order = {op: index for index, op in enumerate(ops)}
             event_attrs: dict[Operation, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
             next_event_id = 0
-            for candidate in _producer_candidates(ops, alias_roots):
-                edges = _collect_consumer_edges(candidate, alias_groups, read_roots, op_order)
-                ordered_groups = sorted(
-                    _group_consumer_edges(edges),
-                    key=lambda group: min(op_order.get(edge.consumer_op, 0) for edge in group),
-                )
+            candidates: list[_ProducerCandidate] = []
+            for op in ops:
+                seen_roots: set[SSAValue] = set()
+                for value in _effect_values(op, MemoryEffectKind.ALLOC):
+                    root = _alias_root(value, alias_roots)
+                    if root in seen_roots:
+                        continue
+                    seen_roots.add(root)
+                    candidates.append(_ProducerCandidate(op, value, root, "init"))
+                if isinstance(op, DmaMakeRingOp):
+                    value = SSAValue.get(op.result)
+                    root = init_alias_roots.get(value)
+                    if root is not None and root not in seen_roots:
+                        seen_roots.add(root)
+                        candidates.append(_ProducerCandidate(op, value, root, "init"))
+                for value in _effect_values(op, MemoryEffectKind.WRITE):
+                    root = _alias_root(value, alias_roots)
+                    if root in seen_roots:
+                        continue
+                    seen_roots.add(root)
+                    candidates.append(_ProducerCandidate(op, value, root, "write"))
+            for candidate in candidates:
+                if candidate.kind == "init":
+                    init_value_roots = (
+                        candidate.root,
+                        *(root for root, init_root in init_alias_roots.items() if init_root is candidate.root),
+                    )
+                    init_root_values: set[SSAValue] = set()
+                    for root in init_value_roots:
+                        init_root_values.update(alias_groups.get(root, {root}))
+                    init_edges_by_op: dict[Operation, _ConsumerEdge] = {}
+                    for value in init_root_values:
+                        for use in tuple(value.uses):
+                            consumer_op = use.operation
+                            if not any(
+                                root in touch_roots.get(consumer_op, set()) for root in init_value_roots
+                            ):
+                                continue
+                            relation = _classify_edge(candidate.op, consumer_op)
+                            if relation is None:
+                                continue
+                            if consumer_op not in init_edges_by_op:
+                                init_edges_by_op[consumer_op] = _ConsumerEdge(consumer_op, relation)
+                    sorted_init_edges = tuple(
+                        sorted(init_edges_by_op.values(), key=lambda edge: op_order.get(edge.consumer_op, 0))
+                    )
+                    ordered_groups = sorted(
+                        _group_consumer_edges(sorted_init_edges),
+                        key=lambda group: min(op_order.get(edge.consumer_op, 0) for edge in group),
+                    )[:1]
+                else:
+                    edges = _collect_consumer_edges(candidate, alias_groups, read_roots, op_order)
+                    ordered_groups = sorted(
+                        _group_consumer_edges(edges),
+                        key=lambda group: min(op_order.get(edge.consumer_op, 0) for edge in group),
+                    )
                 for group in ordered_groups:
                     event_id = next_event_id
                     next_event_id += 1

@@ -182,6 +182,36 @@ def _single_tile_prologue_epilogue_ir() -> str:
 """
 
 
+def _ring_backing_init_alias_ir() -> str:
+    """构造 alloc -> make_ring -> slot first WRITE 输入。
+
+    功能说明:
+    - backing `dma.alloc` 只作为 ring storage，不应写 event attr。
+    - `dma.make_ring` 承接 init producer，slot first WRITE 消费 init 并生产 data event。
+
+    使用示例:
+    - actual = _run_producer_consumer_analysis(_ring_backing_init_alias_ir())
+    """
+
+    return f"""builtin.module {{
+  func.func @ring_backing_init_alias(%src : {_LOCAL_TYPE}, %rhs : {_LOCAL_TYPE}, %out : {_LOCAL_TYPE}) {{
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %c2 = symbol.const 2 : !symbol.int<#symbol.expr<2>>
+    %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %c64 = symbol.const 64 : !symbol.int<#symbol.expr<64>>
+    %pool = "dma.alloc"() <{{operandSegmentSizes = array<i32: 0>}}> : () -> {_POOL_TLM1_TYPE}
+    %ring = "dma.make_ring"(%pool, %c2, %c64) : ({_POOL_TLM1_TYPE}, !symbol.int<#symbol.expr<2>>, !symbol.int<#symbol.expr<64>>) -> {_TLM1_RING_TYPE}
+    %slot = "dma.current_ring"(%ring) : ({_TLM1_RING_TYPE}) -> {_TLM1_TYPE}
+    %view = "dma.reinterpret"(%slot, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_TLM1_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_TLM1_TYPE}
+    "dma.slice"(%view, %src, %c0, %c0, %c4, %c4, %c1, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2, 2>}}> : ({_TLM1_TYPE}, {_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> ()
+    "kernel.matmul"(%out, %view, %rhs) {{space = #nn.space<tsm>}} : ({_LOCAL_TYPE}, {_TLM1_TYPE}, {_LOCAL_TYPE}) -> ()
+    func.return
+  }}
+}}
+"""
+
+
 def test_producer_consumer_analysis_basic_memory_effect_chain() -> None:
     """验证基础 `dma.copy -> dma.copy` producer/consumer event。
 
@@ -276,6 +306,186 @@ def test_producer_consumer_analysis_fanout_alloc_and_duplicate_read() -> None:
     _assert_line_matches(actual, "kernel.binary_elewise", r"consumer = \[1\](?!.*productor)", occurrence=1)
     _assert_line_matches(actual, "dma.copy", r"consumer = \[2\](?!.*productor)", occurrence=2)
     _assert_line_matches(actual, "dma.copy", r"consumer = \[0\](?!.*productor)", occurrence=3)
+
+
+def test_producer_consumer_analysis_alloc_first_touch_write_uses_init_event_once() -> None:
+    """验证 alloc 后首个 WRITE touch 消费 init event 且只消费一次。
+
+    功能说明:
+    - `dma.alloc` 写 init producer event。
+    - 首个 `dma.slice` WRITE 同时消费 init event 并生产后续 data event。
+    - 后续 `dma.copy` 只消费 `dma.slice` 生产的 data event。
+
+    使用示例:
+    - pytest -q test/passes/test_producer_consumer_analysis.py -k alloc_first_touch_write
+    """
+
+    actual = _run_producer_consumer_analysis(
+        f"""builtin.module {{
+  func.func @alloc_first_touch_write(%src : {_LOCAL_TYPE}, %dst : {_LOCAL_TYPE}) {{
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %buf = "dma.alloc"() <{{operandSegmentSizes = array<i32: 0>}}> : () -> {_LOCAL_TYPE}
+    "dma.slice"(%buf, %src, %c0, %c0, %c4, %c4, %c1, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2, 2>}}> : ({_LOCAL_TYPE}, {_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> ()
+    "dma.copy"(%dst, %buf) : ({_LOCAL_TYPE}, {_LOCAL_TYPE}) -> ()
+    func.return
+  }}
+}}
+"""
+    )
+    _assert_line_matches(actual, "dma.alloc", r"productor = \[0\]", occurrence=1)
+    _assert_line_matches(actual, "dma.slice", r"(?=.*consumer = \[0\])(?=.*productor = \[1\]).*$", occurrence=1)
+    _assert_line_matches(actual, "dma.copy", r"consumer = \[1\](?!.*productor)", occurrence=1)
+
+
+def test_producer_consumer_analysis_alloc_first_touch_read_uses_init_event_once() -> None:
+    """验证 alloc 后首个 READ touch 消费 init event。
+
+    功能说明:
+    - 首个真实 touch 可以是 READ。
+    - 后续同一 root 的 READ 不再重复消费 alloc init event。
+
+    使用示例:
+    - pytest -q test/passes/test_producer_consumer_analysis.py -k alloc_first_touch_read
+    """
+
+    actual = _run_producer_consumer_analysis(
+        f"""builtin.module {{
+  func.func @alloc_first_touch_read(%dst1 : {_LOCAL_TYPE}, %dst2 : {_LOCAL_TYPE}) {{
+    %buf = "dma.alloc"() <{{operandSegmentSizes = array<i32: 0>}}> : () -> {_LOCAL_TYPE}
+    "dma.copy"(%dst1, %buf) : ({_LOCAL_TYPE}, {_LOCAL_TYPE}) -> ()
+    "dma.copy"(%dst2, %buf) : ({_LOCAL_TYPE}, {_LOCAL_TYPE}) -> ()
+    func.return
+  }}
+}}
+"""
+    )
+    _assert_line_matches(actual, "dma.alloc", r"productor = \[0\]", occurrence=1)
+    _assert_line_matches(actual, "dma.copy", r"consumer = \[0\](?!.*productor)", occurrence=1)
+    _assert_line_matches(actual, "dma.copy", r'^(?!.*consumer).*"dma.copy"', occurrence=2)
+
+
+def test_producer_consumer_analysis_alloc_first_touch_ignores_alias_only_ops() -> None:
+    """验证 alias-only op 不算 alloc first touch。
+
+    功能说明:
+    - `dma.view` / `dma.reinterpret` 只传播 alias，不写 event attr。
+    - first-touch event 落到后续真实 WRITE op。
+
+    使用示例:
+    - pytest -q test/passes/test_producer_consumer_analysis.py -k alloc_first_touch_ignores_alias
+    """
+
+    actual = _run_producer_consumer_analysis(
+        f"""builtin.module {{
+  func.func @alloc_first_touch_alias(%src : {_LOCAL_TYPE}, %dst : {_LOCAL_TYPE}) {{
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %buf = "dma.alloc"() <{{operandSegmentSizes = array<i32: 0>}}> : () -> {_LOCAL_TYPE}
+    %view = "dma.view"(%buf, %c0, %c0, %c4, %c4, %c1, %c1) <{{operandSegmentSizes = array<i32: 1, 2, 2, 2>}}> : ({_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> {_LOCAL_TYPE}
+    %reinterpret = "dma.reinterpret"(%view, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_LOCAL_TYPE}
+    "dma.slice"(%reinterpret, %src, %c0, %c0, %c4, %c4, %c1, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2, 2>}}> : ({_LOCAL_TYPE}, {_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> ()
+    "dma.copy"(%dst, %reinterpret) : ({_LOCAL_TYPE}, {_LOCAL_TYPE}) -> ()
+    func.return
+  }}
+}}
+"""
+    )
+    _assert_line_matches(actual, "dma.view", r'^(?!.*productor)(?!.*consumer).*"dma.view"', occurrence=1)
+    _assert_line_matches(actual, "dma.reinterpret", r'^(?!.*productor)(?!.*consumer).*"dma.reinterpret"', occurrence=1)
+    _assert_line_matches(actual, "dma.alloc", r"productor = \[0\]", occurrence=1)
+    _assert_line_matches(actual, "dma.slice", r"(?=.*consumer = \[0\])(?=.*productor = \[1\]).*$", occurrence=1)
+    _assert_line_matches(actual, "dma.copy", r"consumer = \[1\](?!.*productor)", occurrence=1)
+
+
+def test_producer_consumer_analysis_alloc_first_touch_write_candidate_still_has_read_only_consumers() -> None:
+    """验证普通 WRITE candidate 不扩成 WRITE consumer。
+
+    功能说明:
+    - alloc init edge 允许首个 WRITE touch。
+    - 普通 WRITE producer 后续只能连接 READ consumer，不能把下一个 WRITE 当 consumer。
+
+    使用示例:
+    - pytest -q test/passes/test_producer_consumer_analysis.py -k alloc_first_touch_write_candidate
+    """
+
+    actual = _run_producer_consumer_analysis(
+        f"""builtin.module {{
+  func.func @alloc_first_touch_write_candidate(%src : {_LOCAL_TYPE}, %dst : {_LOCAL_TYPE}) {{
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %buf = "dma.alloc"() <{{operandSegmentSizes = array<i32: 0>}}> : () -> {_LOCAL_TYPE}
+    "dma.slice"(%buf, %src, %c0, %c0, %c4, %c4, %c1, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2, 2>}}> : ({_LOCAL_TYPE}, {_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> ()
+    "dma.slice"(%buf, %src, %c0, %c0, %c4, %c4, %c1, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2, 2>}}> : ({_LOCAL_TYPE}, {_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> ()
+    "dma.copy"(%dst, %buf) : ({_LOCAL_TYPE}, {_LOCAL_TYPE}) -> ()
+    func.return
+  }}
+}}
+"""
+    )
+    _assert_line_matches(actual, "dma.alloc", r"productor = \[0\]", occurrence=1)
+    _assert_line_matches(actual, "dma.slice", r"(?=.*consumer = \[0\])(?=.*productor = \[1\]).*$", occurrence=1)
+    _assert_line_matches(actual, "dma.slice", r"^(?!.*consumer)(?=.*productor = \[2\]).*$", occurrence=2)
+    _assert_line_matches(actual, "dma.copy", r"consumer = \[1, 2\](?!.*productor)", occurrence=1)
+
+
+def test_producer_consumer_analysis_alloc_first_touch_if_branch_shares_init_event() -> None:
+    """验证 alloc first-touch 在 then/else 分支共享 if_branch init event。
+
+    功能说明:
+    - `dma.alloc` 位于 `scf.if` 前。
+    - then/else 互斥分支都存在第一条真实 WRITE touch。
+    - 两个分支 touch 必须消费同一个 `if_branch` init event。
+
+    使用示例:
+    - pytest -q test/passes/test_producer_consumer_analysis.py -k alloc_first_touch_if_branch
+    """
+
+    actual = _run_producer_consumer_analysis(
+        f"""builtin.module {{
+  func.func @alloc_first_touch_if_branch(%cond : i1, %src1 : {_LOCAL_TYPE}, %src2 : {_LOCAL_TYPE}, %dst : {_LOCAL_TYPE}) {{
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %buf = "dma.alloc"() <{{operandSegmentSizes = array<i32: 0>}}> : () -> {_LOCAL_TYPE}
+    scf.if %cond {{
+      "dma.slice"(%buf, %src1, %c0, %c0, %c4, %c4, %c1, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2, 2>}}> : ({_LOCAL_TYPE}, {_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> ()
+    }} else {{
+      "dma.slice"(%buf, %src2, %c0, %c0, %c4, %c4, %c1, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2, 2>}}> : ({_LOCAL_TYPE}, {_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> ()
+    }}
+    "dma.copy"(%dst, %buf) : ({_LOCAL_TYPE}, {_LOCAL_TYPE}) -> ()
+    func.return
+  }}
+}}
+"""
+    )
+    _assert_line_matches(
+        actual,
+        "dma.alloc",
+        r"^(?!.*\bproductor\s*=)(?=.*if_branch_productor = \[0\]).*$",
+        occurrence=1,
+    )
+    _assert_line_matches(
+        actual,
+        "dma.slice",
+        r"^(?!.*\bconsumer\s*=)(?=.*if_branch_consumer = \[0\])(?=.*after_if_productor = \[1\]).*$",
+        occurrence=1,
+    )
+    _assert_line_matches(
+        actual,
+        "dma.slice",
+        r"^(?!.*\bconsumer\s*=)(?=.*if_branch_consumer = \[0\])(?=.*after_if_productor = \[2\]).*$",
+        occurrence=2,
+    )
+    _assert_line_matches(
+        actual,
+        "dma.copy",
+        r"^(?!.*\bconsumer\s*=)(?=.*after_if_consumer = \[1, 2\]).*$",
+        occurrence=1,
+    )
 
 
 def test_producer_consumer_analysis_if_branch_and_after_if_edges() -> None:
@@ -572,6 +782,89 @@ def test_producer_consumer_analysis_ring_soft_pipeline_events() -> None:
     _assert_line_matches(actual, "dma.advance_ring", r'^(?!.*productor)(?!.*consumer).*"dma.advance_ring"', occurrence=2)
 
 
+def test_producer_consumer_analysis_ring_backing_init_alias_first_slot_write_uses_init_event_once() -> None:
+    """验证 make_ring init event 由 slot first WRITE 消费。
+
+    功能说明:
+    - backing `dma.alloc` 在 ring 路径不写 event attr。
+    - `dma.make_ring` 写 init producer，slot first WRITE 消费该 init event。
+    - 后续 reader 只消费 first WRITE 的普通 data event。
+
+    使用示例:
+    - pytest -q test/passes/test_producer_consumer_analysis.py -k ring_backing_init_alias_first_slot
+    """
+
+    actual = _run_producer_consumer_analysis(_ring_backing_init_alias_ir())
+
+    _assert_line_matches(actual, "dma.alloc", r'^(?!.*productor)(?!.*consumer).*"dma.alloc"', occurrence=1)
+    _assert_line_matches(actual, "dma.make_ring", r"^(?!.*consumer)(?=.*productor = \[0\]).*$", occurrence=1)
+    _assert_line_matches(actual, "dma.current_ring", r'^(?!.*productor)(?!.*consumer).*"dma.current_ring"', occurrence=1)
+    _assert_line_matches(actual, "dma.reinterpret", r'^(?!.*productor)(?!.*consumer).*"dma.reinterpret"', occurrence=1)
+    _assert_line_matches(actual, "dma.slice", r"(?=.*consumer = \[0\])(?=.*productor = \[1\]).*$", occurrence=1)
+    _assert_line_matches(actual, "kernel.matmul", r"consumer = \[1\](?!.*productor)", occurrence=1)
+
+
+def test_producer_consumer_analysis_ring_backing_init_alias_does_not_pollute_ring_data_events() -> None:
+    """验证 make_ring init alias 不污染普通 ring data edge。
+
+    功能说明:
+    - 后续 reader 不消费 make_ring init event。
+    - ring data edge 仍由 slot first WRITE 的普通 `productor` / `consumer` 表达。
+
+    使用示例:
+    - pytest -q test/passes/test_producer_consumer_analysis.py -k ring_backing_init_alias_does_not_pollute
+    """
+
+    actual = _run_producer_consumer_analysis(_ring_backing_init_alias_ir())
+
+    _assert_line_matches(actual, "dma.make_ring", r"productor = \[0\]", occurrence=1)
+    _assert_line_matches(actual, "dma.slice", r"(?=.*consumer = \[0\])(?=.*productor = \[1\]).*$", occurrence=1)
+    _assert_line_matches(actual, "kernel.matmul", r"^(?!.*\[0\])(?=.*consumer = \[1\]).*$", occurrence=1)
+    assert "loop_first" not in actual
+    assert "loop_carried" not in actual
+    assert "after_loop" not in actual
+
+
+def test_producer_consumer_analysis_ring_backing_init_alias_current_advance_reinterpret_have_no_event_attrs() -> None:
+    """验证 ring cursor 与 alias-only op 不带 init event attr。
+
+    功能说明:
+    - `dma.current_ring` / `dma.advance_ring` 只传播 init-only slot 归属或 cursor boundary。
+    - `dma.reinterpret` 只传播 memory alias，不写 producer/consumer attr。
+
+    使用示例:
+    - pytest -q test/passes/test_producer_consumer_analysis.py -k ring_backing_init_alias_current_advance
+    """
+
+    actual = _run_producer_consumer_analysis(
+        f"""builtin.module {{
+  func.func @ring_backing_init_alias_advance(%src : {_LOCAL_TYPE}, %rhs : {_LOCAL_TYPE}, %out : {_LOCAL_TYPE}) {{
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %c2 = symbol.const 2 : !symbol.int<#symbol.expr<2>>
+    %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %c64 = symbol.const 64 : !symbol.int<#symbol.expr<64>>
+    %pool = "dma.alloc"() <{{operandSegmentSizes = array<i32: 0>}}> : () -> {_POOL_TLM1_TYPE}
+    %ring = "dma.make_ring"(%pool, %c2, %c64) : ({_POOL_TLM1_TYPE}, !symbol.int<#symbol.expr<2>>, !symbol.int<#symbol.expr<64>>) -> {_TLM1_RING_TYPE}
+    "dma.advance_ring"(%ring) : ({_TLM1_RING_TYPE}) -> {_TLM1_TYPE}
+    %slot = "dma.current_ring"(%ring) : ({_TLM1_RING_TYPE}) -> {_TLM1_TYPE}
+    %view = "dma.reinterpret"(%slot, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_TLM1_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_TLM1_TYPE}
+    "dma.slice"(%view, %src, %c0, %c0, %c4, %c4, %c1, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2, 2>}}> : ({_TLM1_TYPE}, {_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> ()
+    "kernel.matmul"(%out, %view, %rhs) {{space = #nn.space<tsm>}} : ({_LOCAL_TYPE}, {_TLM1_TYPE}, {_LOCAL_TYPE}) -> ()
+    func.return
+  }}
+}}
+"""
+    )
+
+    _assert_line_matches(actual, "dma.make_ring", r"productor = \[0\]", occurrence=1)
+    _assert_line_matches(actual, "dma.advance_ring", r'^(?!.*productor)(?!.*consumer).*"dma.advance_ring"', occurrence=1)
+    _assert_line_matches(actual, "dma.current_ring", r'^(?!.*productor)(?!.*consumer).*"dma.current_ring"', occurrence=1)
+    _assert_line_matches(actual, "dma.reinterpret", r'^(?!.*productor)(?!.*consumer).*"dma.reinterpret"', occurrence=1)
+    _assert_line_matches(actual, "dma.slice", r"(?=.*consumer = \[0\])(?=.*productor = \[1\]).*$", occurrence=1)
+    _assert_line_matches(actual, "kernel.matmul", r"consumer = \[1\](?!.*productor)", occurrence=1)
+
+
 def test_producer_consumer_analysis_single_tile_prologue_epilogue_uses_main_attrs() -> None:
     """验证 single-tile 退化形态使用普通 productor/consumer。
 
@@ -591,20 +884,32 @@ def test_producer_consumer_analysis_single_tile_prologue_epilogue_uses_main_attr
     assert "after_loop" not in actual
     _assert_line_matches(
         actual,
+        "dma.make_ring",
+        r"^(?!.*consumer)(?=.*\bproductor\s*= \[0\]).*$",
+        occurrence=1,
+    )
+    _assert_line_matches(
+        actual,
+        "dma.make_ring",
+        r"^(?!.*consumer)(?=.*\bproductor\s*= \[1\]).*$",
+        occurrence=2,
+    )
+    _assert_line_matches(
+        actual,
         "dma.copy",
-        r"^(?!.*loop_first)(?!.*loop_carried)(?!.*after_loop)(?=.*\bproductor\s*= \[0\]).*$",
+        r"^(?!.*loop_first)(?!.*loop_carried)(?!.*after_loop)(?=.*\bconsumer\s*= \[0\])(?=.*\bproductor\s*= \[2\]).*$",
         occurrence=1,
     )
     _assert_line_matches(
         actual,
         "dma.copy",
-        r"^(?!.*loop_first)(?!.*loop_carried)(?!.*after_loop)(?=.*\bproductor\s*= \[1\]).*$",
+        r"^(?!.*loop_first)(?!.*loop_carried)(?!.*after_loop)(?=.*\bconsumer\s*= \[1\])(?=.*\bproductor\s*= \[3\]).*$",
         occurrence=2,
     )
     _assert_line_matches(
         actual,
         "kernel.matmul",
-        r"^(?!.*loop_first)(?!.*loop_carried)(?!.*after_loop)(?=.*\bconsumer\s*= \[0, 1\]).*$",
+        r"^(?!.*loop_first)(?!.*loop_carried)(?!.*after_loop)(?=.*\bconsumer\s*= \[2, 3\]).*$",
         occurrence=1,
     )
 

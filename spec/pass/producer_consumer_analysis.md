@@ -3,7 +3,7 @@
 ## 功能简介
 
 - `ProducerConsumerAnalysisPass` 是独立公开 `ModulePass`，registry 名称固定为 `producer-consumer-analysis`。
-- pass 基于 xDSL 公开 `MemoryEffect` 读取 memory `ALLOC/WRITE/READ/FREE` 语义，并用当前 pass 内置 alias / ring cursor 规则标注普通、控制流分类或 ring-aware event 简单整数列表属性。
+- pass 基于 xDSL 公开 `MemoryEffect` 读取 memory `ALLOC/WRITE/READ/FREE` 语义，并用当前 pass 内置 alias / ring cursor / init-only ring alias 规则标注普通、控制流分类或 ring-aware event 简单整数列表属性。
 - pass 只做 IR 分析标注，不生成 `arch.wait`、`arch.sign`、runtime event、double buffer overlap、ring buffer 或 core 分配逻辑。
 
 ## API 列表
@@ -18,7 +18,7 @@
 - `spec`：`spec/pass/producer_consumer_analysis.md`
 - `功能实现`：`kernel_gen/passes/producer_consumer_analysis.py`
 - `test`：`test/passes/test_producer_consumer_analysis.py`
-- `expectation`：主仓只读合同资产 `expectation/pass/producer_consumer_analysis/**`
+- `expectation`：主仓本地 ignored / untracked 只读合同来源 `expectation/pass/producer_consumer_analysis/**`
 
 ## 依赖
 
@@ -35,6 +35,7 @@
 - 将 `productor` / `consumer` 标注从专题脚本迁移为当前仓库通用 pass。
 - 让同一个 producer value 到 downstream meaningful consumers 的关系可以通过 IR attr 直接检查。
 - 让 `loop-soft-pipeline` 生成的多 tile ring-backed current/advance steady 结构可以用 `loop_first` / `loop_carried` / `after_loop` attr 直接表达跨迭代生产消费关系。
+- 让 `dma.alloc` 与 `dma.make_ring` 的初始化同步只连接第一组真实 READ / WRITE first-touch，不污染后续普通 data event。
 
 ## 额外补充
 
@@ -47,6 +48,8 @@
 - `FREE` 第一阶段不参与标注。
 - 没有 downstream meaningful consumer 的 producer 不写 `productor`。
 - 找不到 producer 的 consumer 不写 `consumer`，也不创建虚拟 producer。
+- `ALLOC` init candidate 与 `dma.make_ring` init candidate 使用 first-touch 语义：只选同一 init root 按 op 顺序的第一组真实 READ 或 WRITE touch 写 `consumer`；若第一组是 `scf.if` then/else 互斥分支的同序 touch，复用既有 `if_branch_*` 共享 event 规则。
+- 普通 `WRITE` candidate 保持 dataflow 语义，只连接 downstream meaningful `READ` consumer，不把后续 WRITE 当作 consumer。
 
 ### Event Attr 合同
 
@@ -70,17 +73,28 @@
 
 | effect / op | 合同 |
 | --- | --- |
-| `ALLOC(value)` | `value` 是 producer value 候选；只有存在 downstream meaningful consumer 时才写 `productor`。 |
+| `ALLOC(value)` | `value` 是 init producer value 候选；只有存在第一组真实 READ 或 WRITE first-touch 时才写 `productor`，后续 touch 不再消费该 init event。 |
 | `WRITE(value)` | `value` 是 producer value 候选；每条 downstream meaningful `READ` edge 分配 event。 |
 | `READ(value)` | 只有被某个 producer value 的 downstream traversal 命中时才写 `consumer`。 |
 | `FREE(value)` | 第一阶段不标注。 |
+| `dma.make_ring(memory, num, offset) -> ring` | 当 ring slot 后续存在第一条真实 READ 或 WRITE touch 时，`dma.make_ring` 是 ring init producer；backing `dma.alloc` 在该 ring 路径不写 event attr。 |
 | `dma.view(source) -> result` | `result` alias `source`；不生产、不消费。 |
 | `dma.reshape(source) -> result` | `result` alias `source`；不生产、不消费。 |
 | `dma.subview(source) -> result` | `result` alias `source`；不生产、不消费。 |
 | `dma.reinterpret(source) -> result` | `result` alias `source`；不生产、不消费。 |
 | `dma.deslice(target, source, ...)` | 通过 effect 消费 `source`、生产 `target`；op 本身不产生 result。 |
-| `dma.current_ring(ring) -> result` | `result` 是 ring cursor slot root；op 本身不写 producer/consumer attr。 |
-| `dma.advance_ring(ring)` | cursor advance boundary；op 本身不写 producer/consumer attr。 |
+| `dma.current_ring(ring) -> result` | `result` 是 ring cursor slot root；在 init-only alias 表中归属 `dma.make_ring`，op 本身不写 producer/consumer attr。 |
+| `dma.advance_ring(ring)` | cursor advance boundary；其 result 在 init-only alias 表中归属 `dma.make_ring`，op 本身不写 producer/consumer attr。 |
+
+### ALLOC 与 make_ring init first-touch 合同
+
+- `dma.alloc` 直接被使用时，alloc op 只为同一 alias root 的第一组真实 READ 或 WRITE touch 分配 init event；普通顺序路径第一组只有一个 op，`scf.if` then/else 互斥分支同序 first-touch 可以共享同一个 `if_branch` event。
+- 如果第一条 touch 是 WRITE，例如 `dma.slice(target=%alloc, source=...)`，该 WRITE op 同时写 `consumer=[alloc_init_event]` 与后续普通 data `productor=[data_event]`。
+- 后续读取同一 root 的 op 只消费普通 WRITE data event，不再消费 alloc init event。
+- `dma.view`、`dma.reshape`、`dma.subview`、`dma.reinterpret`、`dma.current_ring`、`dma.advance_ring` 等 alias-only / cursor-only op 不算真实 first touch，且自身不写 init event attr。
+- `dma.alloc -> dma.make_ring` 场景中，backing `dma.alloc` 不写 `productor` / `consumer`；`dma.make_ring` 写 init `productor`，通过 init-only alias 表连接 ring slot 的第一条真实 READ 或 WRITE touch。
+- `dma.current_ring` / `dma.advance_ring` result 及其 `dma.reinterpret` alias 链只在 init-only 表中回到 `dma.make_ring` root；普通 alias_roots 与 ring-aware current/advance dataflow 不因此改变。
+- init first-touch 只复用现有 `productor` / `consumer`、`if_branch_*`、`after_if_*`、`loop_body_*`、`after_loop_*` 等 event attr，不新增公开 attr。
 
 ### Ring-aware current/advance 合同
 
@@ -150,6 +164,9 @@ ProducerConsumerAnalysisPass().apply(ctx, module)
   - 必须使用公开 `MemoryEffect` 读取 read/write，不得调用 dma/kernel 跨文件私有 effect helper。
   - 同一路径 fanout 中，同一个 produced memory version 有多个 static user 时，每个 user 分配独立 event。
   - 同一个 consumer op 对同一个 producer group 重复读取只消费一个 event。
+- `dma.alloc` init root 与 `dma.make_ring` init root 只连接第一组真实 READ / WRITE first-touch；后续 touch 不重复消费 init event。
+  - `dma.alloc -> dma.make_ring` 时，backing alloc 不写 event attr，init producer attr 写在 `dma.make_ring` 上。
+  - 普通 `WRITE` candidate 仍只连接 downstream READ consumer；不得把后续 WRITE 当作普通 data consumer。
   - `scf.if` 中 if 前 producer 被 then / else 互斥分支消费时共享同一个 event。
   - `scf.if` 同一分支内部的 producer 到多个 downstream consumer 仍按同一路径 fanout 处理，每个 consumer 分配独立 event。
   - `scf.if` 前 producer 进入同一分支内多个 downstream consumer 时也按同一路径 fanout 处理；只允许 then / else 互斥分支的同序 consumer 共享 event。
@@ -168,7 +185,8 @@ ProducerConsumerAnalysisPass().apply(ctx, module)
 
 - 验证 `MemoryEffect` 正向链路。
 - 验证 alias 规则与 `dma.deslice` 读写/alias 组合。
-- 验证 fanout、alloc result、重复 read 去重。
+- 验证 fanout、alloc result、alloc first-touch、重复 read 去重。
+- 验证 `dma.make_ring` init producer、ring slot first-touch 和 init-only alias 不污染普通 ring data edge。
 - 验证 `scf.if` 与 `symbol.for` 控制流分类 attr。
 - 验证 ring-backed soft-pipeline 的 `loop_first` / `loop_carried` / `after_loop` 分类 attr。
 - 验证 single-tile prologue/epilogue 退化形态只写普通 `productor` / `consumer`。
@@ -190,11 +208,21 @@ ProducerConsumerAnalysisPass().apply(ctx, module)
 | TC-PRODUCER-CONSUMER-009 | registry | 公开 pass name | 调用 `load_builtin_passes()`。 | `build_registered_pass("producer-consumer-analysis", {"fold": "false"})`。 | 返回 `ProducerConsumerAnalysisPass(fold=False)`。 | `test_producer_consumer_analysis_registry_entry_and_fold_option` |
 | TC-PRODUCER-CONSUMER-010 | ring-aware | soft-pipeline current/advance | 准备 loop 前 preload、loop body matmul/advance/preload next、loop 后 epilogue matmul IR。 | 运行 pass。 | prologue copy 标 `loop_first_productor`，loop matmul 标 `loop_first_consumer` 与 `loop_carried_consumer`，body copy 标 `loop_carried_productor` 与 `after_loop_productor`，advance op 不带 event attr。 | `test_producer_consumer_analysis_ring_soft_pipeline_events` |
 | TC-PRODUCER-CONSUMER-011 | ring-aware fallback | single-tile prologue/epilogue | 准备无 steady loop 的 prologue copy 与 epilogue matmul IR。 | 运行 pass。 | prologue copy 与 epilogue matmul 使用主 `productor` / `consumer`，不写 `loop_first`、`loop_carried` 或 `after_loop`。 | `test_producer_consumer_analysis_single_tile_prologue_epilogue_uses_main_attrs` |
+| TC-PRODUCER-CONSUMER-012 | alloc init | alloc 后首个 WRITE touch | 准备 `dma.alloc -> dma.slice WRITE -> dma.copy READ` IR。 | 运行 pass。 | alloc 写 init `productor`，slice 写 init `consumer` 与普通 data `productor`，copy 只消费 data event。 | `test_producer_consumer_analysis_alloc_first_touch_write_uses_init_event_once` |
+| TC-PRODUCER-CONSUMER-013 | alloc init | alloc 后首个 READ touch | 准备 `dma.alloc -> dma.copy READ -> dma.copy READ` IR。 | 运行 pass。 | 只有第一条 copy 消费 alloc init event，第二条 copy 不重复消费 init event。 | `test_producer_consumer_analysis_alloc_first_touch_read_uses_init_event_once` |
+| TC-PRODUCER-CONSUMER-014 | alloc init | alias-only op before first touch | 准备 alloc 后接 view/reinterpret，再接真实 WRITE。 | 运行 pass。 | alias-only op 不带 event attr，first WRITE 消费 alloc init event。 | `test_producer_consumer_analysis_alloc_first_touch_ignores_alias_only_ops` |
+| TC-PRODUCER-CONSUMER-015 | alloc init | 普通 WRITE 不扩成 WRITE consumer | 准备 alloc first WRITE 后接第二个 WRITE 与 reader。 | 运行 pass。 | 第二个 WRITE 不消费第一个 WRITE 的 data event，reader 消费两个普通 WRITE data events。 | `test_producer_consumer_analysis_alloc_first_touch_write_candidate_still_has_read_only_consumers` |
+| TC-PRODUCER-CONSUMER-016 | alloc init + control-flow | alloc first-touch then/else 共享 init event | 准备 `dma.alloc` 后接 `scf.if`，then/else 各有第一条真实 WRITE touch，if 后读取 alloc root。 | 运行 pass。 | alloc 写 `if_branch_productor=[0]`，两个分支 touch 均写 `if_branch_consumer=[0]`，if 后 reader 只消费两个分支 WRITE 的 `after_if` data events。 | `test_producer_consumer_analysis_alloc_first_touch_if_branch_shares_init_event` |
+| TC-PRODUCER-CONSUMER-017 | ring init | make_ring 承接 init producer | 准备 `alloc -> make_ring -> current_ring -> reinterpret -> slice WRITE -> matmul READ` IR。 | 运行 pass。 | backing alloc 无 event attr，make_ring 写 init `productor`，slice 消费 init 并生产 data，matmul 只消费 data。 | `test_producer_consumer_analysis_ring_backing_init_alias_first_slot_write_uses_init_event_once` |
+| TC-PRODUCER-CONSUMER-018 | ring init | init-only alias 与普通 ring data 隔离 | 准备 ring slot first WRITE 后接 reader。 | 运行 pass。 | reader 不消费 make_ring init event，普通 data edge 仍用主 `productor` / `consumer`。 | `test_producer_consumer_analysis_ring_backing_init_alias_does_not_pollute_ring_data_events` |
+| TC-PRODUCER-CONSUMER-019 | ring init | cursor / reinterpret 无 event attr | 准备 advance/current/reinterpret 后 first WRITE。 | 运行 pass。 | advance/current/reinterpret 不写 event attr，first WRITE 消费 make_ring init event。 | `test_producer_consumer_analysis_ring_backing_init_alias_current_advance_reinterpret_have_no_event_attrs` |
 
 ## 合同验收
 
-- 主仓只读合同资产：`expectation/pass/producer_consumer_analysis/**`。
-- execute / review / merge 不得修改、复制、新建、删除或同步 expectation 文件。
+- 主仓本地 ignored / untracked 只读合同来源：`expectation/pass/producer_consumer_analysis/**`。
+- execute / review / archive_acceptance / merge / 管理员不得修改、复制、新建、移动、删除、重命名或同步 expectation 文件。
+- 当前相关 leaf 至少包括 `alloc_first_touch` 与 `ring_backing_init_alias`；完整 family 还覆盖 `memory_effect_alias`、`if_branch`、`after_if`、`loop_body`、`after_loop`、`ring_loop_first`、`ring_loop_carried`、`ring_after_loop`、`ring_cursor_current_advance`。
+- 记录必须写清 expectation import 来源、关键 leaf 名称、manifest / hash、`git check-ignore` 与 `git ls-files --stage` 证据。
 - 验收命令：
 
 ```bash
