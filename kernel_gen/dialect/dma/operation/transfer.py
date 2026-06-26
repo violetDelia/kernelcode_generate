@@ -642,7 +642,7 @@ class DmaTransposeOp (IRDLOperation ):
 
         功能说明:
         - target/source 必须为 nn.memory。
-        - element_type 与 space 必须一致。
+        - element_type 必须一致，space 允许不同，用于跨层级物化转置。
         - perm 必须是 0..rank-1 的排列，target shape 为 source 的重排。
         - target stride 必须是 target shape 的默认连续 stride。
 
@@ -659,8 +659,6 @@ class DmaTransposeOp (IRDLOperation ):
         source_type =_DmaTransferHelpers .verify_memory_type (self .source .type ,"source")
         if target_type .element_type !=source_type .element_type :
             raise kernel_code_error (ErrorKind .VERIFY ,ErrorModule .DIALECT ,"dma.transpose element_type mismatch")
-        if target_type .space .space .data !=source_type .space .space .data :
-            raise kernel_code_error (ErrorKind .VERIFY ,ErrorModule .DIALECT ,"dma.transpose space mismatch")
         perm_values =_DmaTransferHelpers .verify_transpose_perm (self .perm ,len (source_type .shape .data ))
         _DmaTransferHelpers .verify_transpose_layout (source_type ,target_type ,perm_values )
 

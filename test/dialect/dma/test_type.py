@@ -221,15 +221,6 @@ def test_dma_public_verifier_boundary_matrix() -> None:
             [1, 0],
             "dma.transpose element_type mismatch",
         ),
-        (
-            _make_memory_type(
-                shape=_dim_array([3, 2]),
-                stride=_dim_array([2, 1]),
-                space="shared",
-            ),
-            [1, 0],
-            "dma.transpose space mismatch",
-        ),
     ]:
         with pytest.raises(KernelCodeError, match=message):
             DmaTransposeOp(

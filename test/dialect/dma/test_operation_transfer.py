@@ -179,6 +179,23 @@ def test_dma_transpose_accepts_valid_perm() -> None:
 
     DmaTransposeOp(target, source, perm=[1, 0]).verify()
 
+def test_dma_transpose_accepts_cross_space_target() -> None:
+    source_type = _make_memory_type(
+        shape=_dim_array([2, 3]),
+        stride=_dim_array([3, 1]),
+        space="tsm",
+    )
+    target_type = _make_memory_type(
+        shape=_dim_array([3, 2]),
+        stride=_dim_array([2, 1]),
+        space="tlm2",
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    target = _TestOp(result_types=[target_type]).results[0]
+
+    DmaTransposeOp(target, source, perm=[1, 0]).verify()
+
+
 def test_dma_transpose_accepts_unknown_outer_stride() -> None:
     source_type = _make_memory_type(
         shape=_dim_array(["A", "?", "N"]),

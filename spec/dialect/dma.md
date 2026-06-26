@@ -458,7 +458,7 @@ dma.transpose(%src, %out) {perm = [1, 0]} : (!nn.memory<[M, N], f16, #nn.space<L
 
 - 注意事项：
 
-- `source/target` 必须为 `!nn.memory<...>`，且 `element_type/space` 必须一致。
+- `source/target` 必须为 `!nn.memory<...>`，且 `element_type` 必须一致；`space` 可以不同，用于表达跨层级物化转置。
 - `perm` 必须为合法排列且长度等于 `source.rank`；存在重复索引或越界时 verifier 必须失败。
 - `target.shape` 必须与按 `perm` 重排的 `source.shape` 机械一致；当相关维度为静态整数或可直接比较的符号时必须执行一致性校验，不做数值求解。
 - `target.stride` 必须是 `target.shape` 的默认连续 stride；`dma.transpose` 是物化搬运，不表达非连续视图。
