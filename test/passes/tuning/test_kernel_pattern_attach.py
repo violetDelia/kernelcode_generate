@@ -29,6 +29,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.core.context import build_default_context
+from kernel_gen.core.config import restore_config, set_target, snapshot_config
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.passes.tuning.kernel_pattern_attach import KernelPatternAttachPass
 
@@ -108,6 +109,22 @@ def test_kernel_pattern_attach_generates_dispatcher_and_two_patterns() -> None:
     assert "kernel.pattern_id = #builtin.int<1>" in text
     assert "lower-dma-memory-hierarchy" in text
     assert "tuner.pattern_ref" not in text
+
+
+def test_kernel_pattern_attach_uses_all_tlm1_for_xpu5_target() -> None:
+    snapshot = snapshot_config()
+    try:
+        set_target("xpu_sdnn5")
+        module = _parse_module(f"builtin.module {{{_matmul_func('matmul_entry', entry_point=True)}}}")
+
+        KernelPatternAttachPass().apply(Context(), module)
+        text = _print_ir(module)
+
+        assert text.count('matmul{[\\"\\", \\"tlm1\\", \\"tlm1\\"]}') == 2
+        assert 'matmul{[\\"\\", \\"tlm1\\", \\"tlm2\\"]}' not in text
+        assert 'matmul{[\\"\\", \\"tlm2\\", \\"tlm1\\"]}' not in text
+    finally:
+        restore_config(snapshot)
 
 
 def test_kernel_pattern_attach_generates_patterns_for_nested_matmul() -> None:

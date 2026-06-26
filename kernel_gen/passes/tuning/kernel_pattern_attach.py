@@ -29,6 +29,7 @@ from xdsl.dialects import func, scf
 from xdsl.dialects.builtin import IntAttr, ModuleOp, StringAttr, UnregisteredOp, i1
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 
+from kernel_gen.core.config import get_target
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dialect.kernel import KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemoryType
@@ -41,6 +42,16 @@ _PATTERN_PIPELINES = (
     '--pass "lower-dma-memory-hierarchy={fold=true,apply_op=matmul{[\\"\\", \\"tlm1\\", \\"tlm2\\"]}}" --pass canonicalize',
     '--pass "lower-dma-memory-hierarchy={fold=true,apply_op=matmul{[\\"\\", \\"tlm2\\", \\"tlm1\\"]}}" --pass canonicalize',
 )
+_XPU5_PATTERN_PIPELINES = (
+    '--pass "lower-dma-memory-hierarchy={fold=true,apply_op=matmul{[\\"\\", \\"tlm1\\", \\"tlm1\\"]}}" --pass canonicalize',
+    '--pass "lower-dma-memory-hierarchy={fold=true,apply_op=matmul{[\\"\\", \\"tlm1\\", \\"tlm1\\"]}}" --pass canonicalize',
+)
+
+
+def _pattern_pipelines_for_current_target() -> tuple[str, str]:
+    """Return target-specific pattern transform pipelines."""
+
+    return _XPU5_PATTERN_PIPELINES if get_target() == "xpu_sdnn5" else _PATTERN_PIPELINES
 
 
 def _kernel_pattern_error(message: str) -> KernelCodeError:
@@ -240,9 +251,10 @@ def _replace_entry_with_patterns(module: ModuleOp, entry_func: func.FuncOp) -> N
     if any(name in existing_names for name in pattern_names):
         raise _kernel_pattern_error("pattern name collision")
     dispatcher = _build_host_dispatcher(entry_func, pattern_names)
+    pipelines = _pattern_pipelines_for_current_target()
     patterns = tuple(
         _clone_pattern_func(entry_func, pattern_name, index, pipeline)
-        for index, (pattern_name, pipeline) in enumerate(zip(pattern_names, _PATTERN_PIPELINES, strict=True))
+        for index, (pattern_name, pipeline) in enumerate(zip(pattern_names, pipelines, strict=True))
     )
     parent_block = entry_func.parent_block()
     if parent_block is None:
