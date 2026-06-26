@@ -45,6 +45,7 @@ from kernel_gen.dialect.dma import (
     DmaReshapeOp,
     DmaSliceOp,
     DmaSubviewOp,
+    DmaTransposeOp,
     DmaViewOp,
 )
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
@@ -1334,6 +1335,68 @@ def _build_dynamic_matmul_loop_local_scratch_module() -> ModuleOp:
     return ModuleOp([func_op])
 
 
+def _build_nested_transpose_scratch_module() -> ModuleOp:
+    """构造 nested loop 内 transpose source/target scratch 外提正例。
+
+
+    功能说明:
+    - 模拟 FC weight staging：inner loop 内 source scratch 经 `dma.slice` 写入，target scratch 经
+      `dma.transpose` 写入，两个 alloc 的 dynamic shape 均来自函数级 tile symbol。
+    - `symbol-buffer-hoist` 应把 source/target alloc/free 逐层外提到 outer loop 前。
+
+    使用示例:
+    - module = _build_nested_transpose_scratch_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
+    """
+
+    symbol_types = [
+        SymbolValueType.from_expr("TN"),
+        SymbolValueType.from_expr("K"),
+        SymbolValueType.from_expr("N"),
+    ]
+    source_type = _memory_type(("N", "K"), space="global")
+    staging_type = _memory_type(("TN", "K"), space="tsm")
+    transposed_type = _memory_type(("K", "TN"), space="tsm")
+    zero = SymbolConstOp(0)
+    one = SymbolConstOp(1)
+    top_block = Block(arg_types=[source_type, *symbol_types])
+    weight, tn, k, n = top_block.args
+    outer_block = Block(arg_types=[SymbolIterType.from_bounds("0", "N", "TN")])
+    inner_block = Block(arg_types=[SymbolIterType.from_bounds("0", "N", "TN")])
+    staging = DmaAllocOp([tn, k], staging_type)
+    transposed = DmaAllocOp([k, tn], transposed_type)
+    staging_view = DmaReinterpretOp(staging.result, zero.result, [tn, k], [k, one.result], staging_type)
+    transposed_view = DmaReinterpretOp(transposed.result, zero.result, [k, tn], [tn, one.result], transposed_type)
+    slice_op = DmaSliceOp(staging_view.result, weight, [inner_block.args[0], zero.result], [tn, k], [one.result, one.result])
+    transpose = DmaTransposeOp(transposed_view.result, staging_view.result, [1, 0])
+    inner_block.add_ops(
+        [
+            staging,
+            transposed,
+            staging_view,
+            transposed_view,
+            slice_op,
+            transpose,
+            DmaFreeOp(staging.result),
+            DmaFreeOp(transposed.result),
+        ]
+    )
+    inner_loop = SymbolForOp(zero.result, n, tn, inner_block)
+    outer_block.add_op(inner_loop)
+    outer_loop = SymbolForOp(zero.result, n, tn, outer_block)
+    top_block.add_ops([zero, one, outer_loop, func.ReturnOp()])
+    func_op = func.FuncOp(
+        "nested_transpose_scratch_case",
+        FunctionType.from_lists([source_type, *symbol_types], []),
+        Region(top_block),
+    )
+    return ModuleOp([func_op])
+
+
 def _build_nested_acc_fill_before_read_module() -> ModuleOp:
     """构造 owner block fill 支配 nested kernel read 的 acc buffer 正例。
 
@@ -2280,6 +2343,41 @@ def test_symbol_buffer_hoist_hoists_dynamic_matmul_loop_local_scratch_allocs() -
     assert any(fill.target is lhs_value for fill in inner_fills)
     assert any(fill.target is rhs_value for fill in inner_fills)
     assert all(any(_free_source_is(free, value) for free in top_frees) for value in (acc_value, tmp_value, lhs_value, rhs_value))
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H5B
+# 功能说明: 验证 nested transpose source/target scratch alloc/free 可逐层外提。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_nested_transpose_scratch_allocs
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_nested_transpose_scratch_allocs() -> None:
+    module = _build_nested_transpose_scratch_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, outer_loop, outer_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    inner_loop = next(op for op in outer_block.ops if isinstance(op, SymbolForOp))
+    inner_block = inner_loop.body.blocks[0]
+    top_allocs = [op for op in top_ops if isinstance(op, DmaAllocOp)]
+    top_frees = [op for op in top_ops if isinstance(op, DmaFreeOp)]
+    top_alloc_values = tuple(alloc.result for alloc in top_allocs)
+    transpose = next(op for op in inner_block.ops if isinstance(op, DmaTransposeOp))
+    slice_op = next(op for op in inner_block.ops if isinstance(op, DmaSliceOp))
+
+    assert len(top_allocs) == 2
+    assert len(top_frees) == 2
+    outer_index = top_ops.index(outer_loop)
+    assert all(top_ops.index(alloc) < outer_index for alloc in top_allocs)
+    assert all(top_ops.index(free) > outer_index for free in top_frees)
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in outer_block.ops)
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in inner_block.ops)
+    assert SSAValue.get(slice_op.target).owner in top_ops
+    assert SSAValue.get(transpose.target).owner in top_ops
+    assert SSAValue.get(transpose.source).owner in top_ops
+    assert all(any(_free_source_is(free, value) for free in top_frees) for value in top_alloc_values)
+    module.verify()
 
 
 # TC-SYMBOL-BUFFER-HOIST-004H6

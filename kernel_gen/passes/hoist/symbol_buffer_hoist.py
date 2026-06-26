@@ -85,6 +85,7 @@ from kernel_gen.dialect.dma import (
     DmaReshapeOp,
     DmaSliceOp,
     DmaSubviewOp,
+    DmaTransposeOp,
     DmaViewOp,
 )
 from kernel_gen.dialect.kernel import KernelMatmulOp
@@ -235,6 +236,8 @@ def _hoist_alias_op_if_safe(op: Operation, rewriter: PatternRewriter) -> None:
             or isinstance(user, DmaCopyOp)
             and use.index in (0, 1)
             or isinstance(user, DmaBroadcastOp)
+            and use.index in (0, 1)
+            or isinstance(user, DmaTransposeOp)
             and use.index in (0, 1)
         )
         if not supported_use and user.name.startswith("kernel."):
@@ -543,6 +546,8 @@ def _write_covers_access_value(event_user: Operation, event_use_index: int) -> b
             and len(size_texts) == len(shape_texts)
             and all(size == shape for size, shape in zip(size_texts, shape_texts))
         )
+    if isinstance(event_user, DmaTransposeOp) and event_use_index == 0:
+        return True
     return event_user.name.startswith("kernel.")
 
 
@@ -675,6 +680,8 @@ class DmaAllocWithMatmulFirstUseHoistPattern(RewritePattern):
                             or isinstance(result_user, DmaCopyOp)
                             and result_use.index in (0, 1)
                             or isinstance(result_user, DmaBroadcastOp)
+                            and result_use.index in (0, 1)
+                            or isinstance(result_user, DmaTransposeOp)
                             and result_use.index in (0, 1)
                         )
                         if not supported_result_use and result_user.name.startswith("kernel."):
@@ -972,6 +979,8 @@ class DmaAllocInSymbolForHoistPattern(RewritePattern):
                             or isinstance(result_user, DmaCopyOp)
                             and result_use.index in (0, 1)
                             or isinstance(result_user, DmaBroadcastOp)
+                            and result_use.index in (0, 1)
+                            or isinstance(result_user, DmaTransposeOp)
                             and result_use.index in (0, 1)
                         )
                         if not supported_result_use and result_user.name.startswith("kernel."):
