@@ -41,6 +41,7 @@ _PATTERN_PIPELINES = (
     '--pass "lower-dma-memory-hierarchy={fold=true,apply_op=matmul{[\\"\\", \\"tlm1\\", \\"tlm2\\"]}}" --pass canonicalize',
     '--pass "lower-dma-memory-hierarchy={fold=true,apply_op=matmul{[\\"\\", \\"tlm2\\", \\"tlm1\\"]}}" --pass canonicalize',
 )
+PatternPipelines = tuple[str, ...]
 
 
 def _kernel_pattern_error(message: str) -> KernelCodeError:
@@ -166,7 +167,44 @@ def _clone_pattern_func(entry_func: func.FuncOp, pattern_name: str, pattern_id: 
     return pattern_func
 
 
-def _build_host_dispatcher(entry_func: func.FuncOp, pattern_names: tuple[str, str]) -> func.FuncOp:
+def _validate_pattern_pipelines(pattern_pipelines: PatternPipelines) -> PatternPipelines:
+    """Validate custom transform pipelines for generated pattern functions."""
+
+    if not pattern_pipelines:
+        raise _kernel_pattern_error("pattern_pipelines must be non-empty")
+    if len(pattern_pipelines) > 2:
+        raise _kernel_pattern_error("pattern_pipelines supports at most two patterns")
+    for pipeline in pattern_pipelines:
+        if not isinstance(pipeline, str) or not pipeline.strip():
+            raise _kernel_pattern_error("pattern_pipelines must be non-empty strings")
+    return tuple(pattern_pipelines)
+
+
+def _build_single_pattern_dispatcher(entry_func: func.FuncOp, pattern_name: str) -> func.FuncOp:
+    """Construct a host dispatcher that directly launches the only pattern."""
+
+    input_types = list(entry_func.function_type.inputs.data)
+    output_types = list(entry_func.function_type.outputs.data)
+    if output_types:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "kernel-pattern-attach entry_point dispatcher must have zero results")
+    block = Block(arg_types=input_types)
+    for new_arg, old_arg in zip(block.args, entry_func.args, strict=True):
+        new_arg.name_hint = old_arg.name_hint
+    block.add_ops([TunerLaunchOp(pattern_name, tuple(block.args)), func.ReturnOp()])
+    dispatcher = func.FuncOp(
+        entry_func.sym_name.data,
+        (input_types, output_types),
+        Region(block),
+        visibility=entry_func.sym_visibility,
+        arg_attrs=entry_func.arg_attrs,
+        res_attrs=entry_func.res_attrs,
+    )
+    dispatcher.attributes.update(dict(entry_func.attributes))
+    verify_generated_ops([dispatcher])
+    return dispatcher
+
+
+def _build_host_dispatcher(entry_func: func.FuncOp, pattern_names: tuple[str, ...]) -> func.FuncOp:
     """构造替换 entry 的 host dispatcher。
 
     功能说明:
@@ -182,6 +220,8 @@ def _build_host_dispatcher(entry_func: func.FuncOp, pattern_names: tuple[str, st
     output_types = list(entry_func.function_type.outputs.data)
     if output_types:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "kernel-pattern-attach entry_point dispatcher must have zero results")
+    if len(pattern_names) == 1:
+        return _build_single_pattern_dispatcher(entry_func, pattern_names[0])
     block = Block(arg_types=input_types)
     for new_arg, old_arg in zip(block.args, entry_func.args, strict=True):
         new_arg.name_hint = old_arg.name_hint
@@ -223,7 +263,7 @@ def _build_host_dispatcher(entry_func: func.FuncOp, pattern_names: tuple[str, st
     return dispatcher
 
 
-def _replace_entry_with_patterns(module: ModuleOp, entry_func: func.FuncOp) -> None:
+def _replace_entry_with_patterns(module: ModuleOp, entry_func: func.FuncOp, pattern_pipelines: PatternPipelines) -> None:
     """将 entry 替换为 dispatcher 并插入两个 pattern func。
 
     功能说明:
@@ -236,13 +276,13 @@ def _replace_entry_with_patterns(module: ModuleOp, entry_func: func.FuncOp) -> N
 
     existing_names = {op.sym_name.data for op in _module_funcs(module)}
     entry_name = entry_func.sym_name.data
-    pattern_names = (f"{entry_name}_pattern0", f"{entry_name}_pattern1")
+    pattern_names = tuple(f"{entry_name}_pattern{index}" for index in range(len(pattern_pipelines)))
     if any(name in existing_names for name in pattern_names):
         raise _kernel_pattern_error("pattern name collision")
     dispatcher = _build_host_dispatcher(entry_func, pattern_names)
     patterns = tuple(
         _clone_pattern_func(entry_func, pattern_name, index, pipeline)
-        for index, (pattern_name, pipeline) in enumerate(zip(pattern_names, _PATTERN_PIPELINES, strict=True))
+        for index, (pattern_name, pipeline) in enumerate(zip(pattern_names, pattern_pipelines, strict=True))
     )
     parent_block = entry_func.parent_block()
     if parent_block is None:
@@ -274,6 +314,15 @@ class KernelPatternAttachPass(Pass):
 
     name = "kernel-pattern-attach"
     fold: bool = True
+    pattern_pipelines: PatternPipelines = _PATTERN_PIPELINES
+
+    def __init__(
+        self: "KernelPatternAttachPass",
+        fold: bool = True,
+        pattern_pipelines: PatternPipelines = _PATTERN_PIPELINES,
+    ) -> None:
+        object.__setattr__(self, "fold", bool(fold))
+        object.__setattr__(self, "pattern_pipelines", _validate_pattern_pipelines(pattern_pipelines))
 
     @classmethod
     def from_options(cls: type["KernelPatternAttachPass"], options: dict[str, str]) -> "KernelPatternAttachPass":
@@ -308,7 +357,7 @@ class KernelPatternAttachPass(Pass):
         eligible = _eligible_matmul_ops(entry_func)
         if not eligible:
             return
-        _replace_entry_with_patterns(module, entry_func)
+        _replace_entry_with_patterns(module, entry_func, self.pattern_pipelines)
 
 
 __all__ = ["KernelPatternAttachPass"]

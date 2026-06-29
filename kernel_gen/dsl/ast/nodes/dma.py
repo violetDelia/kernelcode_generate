@@ -46,7 +46,7 @@ from xdsl.dialects.builtin import ArrayAttr, BFloat16Type, Float16Type, Float32T
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaFreeOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaViewOp
-from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType, copy_memory_type
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolDivOp, SymbolExprAttr, SymbolFloorDivOp, SymbolGetDimOp, SymbolIterType, SymbolMulOp, SymbolSubOp, SymbolValueType
 from kernel_gen.operation import dma
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
@@ -999,10 +999,10 @@ class DmaCopyAST(ValueAST):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "copy source must lower to SSA value")
         if not isinstance(source.type, NnMemoryType):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "copy source must lower to nn.memory")
-        result_memory = self.result_memory()
-        if not isinstance(result_memory, Memory):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "copy result memory must be known from AST")
-        result_type = MemoryAST.type_from_memory(ctx, result_memory, self.location)
+        space_attr = self.space.emit_mlir(ctx, None)
+        if not isinstance(space_attr, NnMemorySpaceAttr):
+            raise KernelCodeError(ErrorKind.INTERNAL, ErrorModule.MLIR_GEN, "copy space attr emit must return NnMemorySpaceAttr")
+        result_type = copy_memory_type(source.type, space=space_attr)
         dynamic_shape: list[SSAValue] = []
         for axis, dim in enumerate(result_type.shape.data):
             if isinstance(dim, SymbolExprAttr) and _is_dynamic_dim_attr(dim):

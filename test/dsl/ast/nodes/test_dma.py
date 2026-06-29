@@ -20,12 +20,14 @@ import random
 
 import pytest
 from xdsl.context import Context
+from xdsl.dialects.builtin import ArrayAttr, Float32Type
 from xdsl.dialects.test import TestOp
 from xdsl.ir import Block, Operation, SSAValue
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp, DmaReshapeOp, DmaViewOp
-from kernel_gen.dialect.symbol import SymbolConstOp, SymbolIterType, SymbolValueType
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCopyOp, DmaFillOp, DmaReshapeOp, DmaViewOp
+from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolIterType, SymbolValueType
 from kernel_gen.dsl.ast.nodes.attr import BoolTypeAttrAST, FloatTypeAttrAST, IntTypeAttrAST, MemorySpaceAttrAST
 from kernel_gen.dsl.ast.nodes.basic import MemoryAST, ValueAST
 from kernel_gen.dsl.ast.nodes.symbol import ConstValueAST, SymbolListAST
@@ -223,8 +225,10 @@ def test_dma_result_nodes_require_ast_result_memory_for_result_type() -> None:
     with pytest.raises(KernelCodeError, match="slice result memory must be known from AST"):
         DmaSliceAST(source, SymbolListAST([0]), SymbolListAST([4]), SymbolListAST([1])).emit_mlir(Context(), Block())
 
-    with pytest.raises(KernelCodeError, match="copy result memory must be known from AST"):
-        DmaCopyAST(source, MemorySpaceAttrAST(MemorySpace.TSM)).emit_mlir(Context(), Block())
+    copy_block = Block()
+    copy_value = DmaCopyAST(source, MemorySpaceAttrAST(MemorySpace.TSM)).emit_mlir(Context(), copy_block)
+    assert isinstance(copy_value, SSAValue)
+    assert isinstance(tuple(copy_block.ops)[-1], DmaCopyOp)
 
     with pytest.raises(KernelCodeError, match="cast result memory must be known from AST"):
         DmaCastAST(source, FloatTypeAttrAST(NumericType.Float16)).emit_mlir(Context(), Block())
@@ -392,6 +396,32 @@ def test_dma_emit_mlir_handles_dynamic_public_memory_paths() -> None:
     dynamic_size = [TensorAxisAccessAST(source, "shape", 0), 4]
     assert isinstance(DmaLoadAST(source, [0, 0], dynamic_size, None, MemorySpace.SM).emit_mlir(ctx, block), SSAValue)
     assert isinstance(DmaSliceAST(source, [0, 0], dynamic_size, None, MemorySpace.SM).emit_mlir(ctx, block), SSAValue)
+
+
+def test_dma_copy_emit_mlir_preserves_source_ssa_dynamic_type() -> None:
+    """DmaCopyAST derives its target alloc type from the source SSA type."""
+
+    ctx = Context()
+    source_type = NnMemoryType(
+        ArrayAttr([SymbolExprAttr.from_expr("min(tile_m, M - iter<0,M,tile_m>)"), SymbolExprAttr.from_expr("N")]),
+        ArrayAttr([SymbolExprAttr.from_expr("N"), SymbolExprAttr.from_expr("1")]),
+        Float32Type(),
+        NnMemorySpaceAttr.from_name("tsm"),
+    )
+    block = Block(arg_types=[source_type])
+    block.args[0].name_hint = "source"
+
+    result = DmaCopyAST(MemoryAST.from_memory("source", Memory([SymbolDim("?"), SymbolDim("?")], NumericType.Float32)), MemorySpace.TSM).emit_mlir(ctx, block)
+
+    assert isinstance(result, SSAValue)
+    alloc_ops = [op for op in block.ops if isinstance(op, DmaAllocOp)]
+    assert alloc_ops
+    target_type = alloc_ops[-1].result.type
+    assert isinstance(target_type, NnMemoryType)
+    assert [dim.expr.data for dim in target_type.shape.data] == ["min(tile_m, M - iter<0,M,tile_m>)", "N"]
+    assert [dim.expr.data for dim in target_type.stride.data] == ["N", "1"]
+    assert target_type.space.space.data == "tsm"
+    assert isinstance(tuple(block.ops)[-1], DmaCopyOp)
 
 
 def test_dma_write_nodes_validate_iter_offset_public_contract() -> None:

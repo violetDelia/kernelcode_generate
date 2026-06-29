@@ -38,6 +38,7 @@ _TSM_RHS = "!nn.memory<[#symbol.expr<32>, #symbol.expr<16>], [#symbol.expr<16>, 
 _GLOBAL_OUT = "!nn.memory<[#symbol.expr<8>, #symbol.expr<16>], [#symbol.expr<16>, #symbol.expr<1>], f32, #nn.space<global>>"
 _GLOBAL_LHS = "!nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], f32, #nn.space<global>>"
 _GLOBAL_RHS = "!nn.memory<[#symbol.expr<32>, #symbol.expr<16>], [#symbol.expr<16>, #symbol.expr<1>], f32, #nn.space<global>>"
+_TLM1_TLM1_PIPELINE = '--pass "lower-dma-memory-hierarchy={fold=true,apply_op=matmul{[\\"\\", \\"tlm1\\", \\"tlm1\\"]}}" --pass canonicalize'
 
 
 def _parse_module(text: str) -> ModuleOp:
@@ -110,6 +111,27 @@ def test_kernel_pattern_attach_generates_dispatcher_and_two_patterns() -> None:
     assert "tuner.pattern_ref" not in text
 
 
+def test_kernel_pattern_attach_can_generate_single_pattern_dispatcher() -> None:
+    module = _parse_module(f"builtin.module {{{_matmul_func('matmul_entry', entry_point=True)}}}")
+
+    KernelPatternAttachPass(pattern_pipelines=(_TLM1_TLM1_PIPELINE,)).apply(Context(), module)
+    text = _print_ir(module)
+
+    assert "func.func @matmul_entry(" in text
+    assert "attributes {entry_point}" in text
+    assert "tuner.select" not in text
+    assert "scf.if" not in text
+    assert "tuner.launch(@matmul_entry_pattern0" in text
+    assert "tuner.launch(@matmul_entry_pattern1" not in text
+    assert "func.func @matmul_entry_pattern0" in text
+    assert "func.func @matmul_entry_pattern1" not in text
+    assert "kernel.pattern_id = #builtin.int<0>" in text
+    assert "kernel.pattern_id = #builtin.int<1>" not in text
+    assert "kernel.transform_pipeline" in text
+    assert text.count("tlm1") == 2
+    assert "tlm2" not in text
+
+
 def test_kernel_pattern_attach_generates_patterns_for_nested_matmul() -> None:
     """验证 entry 内嵌套 region 的合格 matmul 也会生成 pattern。
 
@@ -162,6 +184,12 @@ def test_kernel_pattern_attach_rejects_missing_entry_and_unknown_options() -> No
 
     with pytest.raises(KernelCodeError, match="kernel-pattern-attach options unknown: extra"):
         KernelPatternAttachPass.from_options({"extra": "1"})
+
+    with pytest.raises(KernelCodeError, match="kernel-pattern-attach pattern_pipelines must be non-empty"):
+        KernelPatternAttachPass(pattern_pipelines=())
+
+    with pytest.raises(KernelCodeError, match="kernel-pattern-attach pattern_pipelines supports at most two patterns"):
+        KernelPatternAttachPass(pattern_pipelines=("a", "b", "c"))
 
 
 def test_kernel_pattern_attach_patterns_multiple_eligible_matmul() -> None:
